@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="moxsession_core_v1" version="1">
+ <object name="moxsession_core_manager" version="1">
+  <description summary="core session manager object">
+   Core manager object for session registration.
+  </description>
+  <c2s name="create_session">
+   <description summary="register a new session">
+    Registers a new session. The daemon responds with a session_created event
+    carrying the assigned session_id. Called by the PAM module at session open time.
+   </description>
+   <arg name="uid" type="uint" summary="user id"/>
+   <arg name="username" type="varchar" summary="username"/>
+   <arg name="tty" type="varchar" summary="TTY device"/>
+  </c2s>
+  <s2c name="session_created">
+   <description summary="session ID assigned to the new session">
+    Sent by the daemon in response to create_session with the unique session
+    identifier the PAM module must pass back in destroy_session.
+   </description>
+   <arg name="session_id" type="uint" summary="unique session identifier"/>
+  </s2c>
+  <c2s name="destroy_session">
+   <description summary="deregister a session">
+    Deregisters the session identified by session_id.
+    Called by the PAM module at session close time.
+   </description>
+   <arg name="session_id" type="uint" summary="session identifier from session_created"/>
+  </c2s>
+  <c2s name="destroy" destructor="true">
+   <description summary="destroy this object"/>
+  </c2s>
+ </object>
+</protocol>

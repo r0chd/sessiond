@@ -13,13 +13,21 @@
    <arg name="username" type="varchar" summary="username"/>
    <arg name="tty" type="varchar" summary="TTY device"/>
   </c2s>
+  <s2c name="sessions">
+   <description summary="all active session IDs">
+    Sent once when the manager is first created with the IDs of all currently
+    active sessions. May be an empty array if no sessions exist.
+   </description>
+   <arg name="session_ids" type="array uint" summary="array of active session IDs"/>
+  </s2c>
   <s2c name="session_created">
-   <description summary="session ID assigned to the new session">
-    Sent by the daemon in response to create_session with the unique session
-    identifier the PAM module must pass back in destroy_session.
+   <description summary="new session created">
+    Sent when a new session is created via create_session.
+    Pass session_id to get_session_info to obtain full details.
    </description>
    <arg name="session_id" type="uint" summary="unique session identifier"/>
   </s2c>
+
   <c2s name="destroy_session">
    <description summary="deregister a session">
     Deregisters the session identified by session_id.
@@ -27,6 +35,46 @@
    </description>
    <arg name="session_id" type="uint" summary="session identifier from session_created"/>
   </c2s>
+  <c2s name="get_session_info">
+   <description summary="create a session info object for the given session">
+    Creates a moxsession_core_info object bound to the session identified by
+    session_id. The daemon immediately sends all fields as s2c events, then
+    re-sends any field that changes.
+   </description>
+   <arg name="session_id" type="uint" summary="session to query"/>
+   <returns iface="moxsession_core_info"/>
+  </c2s>
+  <c2s name="destroy" destructor="true">
+   <description summary="destroy this object"/>
+  </c2s>
+ </object>
+ <object name="moxsession_core_info" version="1">
+  <description summary="live session information">
+   Provides session information, pushed immediately on bind and re-sent
+   whenever a field changes.
+  </description>
+  <s2c name="uid">
+   <description summary="UID of the session owner"/>
+   <arg name="uid" type="uint" summary="user id"/>
+  </s2c>
+  <s2c name="username">
+   <description summary="username of the session owner"/>
+   <arg name="username" type="varchar" summary="username"/>
+  </s2c>
+  <s2c name="tty">
+   <description summary="TTY device of the session"/>
+   <arg name="tty" type="varchar" summary="TTY device"/>
+  </s2c>
+  <s2c name="done">
+   <description summary="initial field dump complete">
+    Sent once after all fields have been pushed on object creation.
+   </description>
+  </s2c>
+  <s2c name="destroyed">
+   <description summary="session has ended">
+    Sent when the session is destroyed. The client should release this object.
+   </description>
+  </s2c>
   <c2s name="destroy" destructor="true">
    <description summary="destroy this object"/>
   </c2s>

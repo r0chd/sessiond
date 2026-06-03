@@ -17,8 +17,9 @@ impl hyprwire::Dispatch<moxsession_core_manager::MoxsessionCoreManager> for Sess
         _: &moxsession_core_manager::MoxsessionCoreManager,
         event: <moxsession_core_manager::MoxsessionCoreManager as hyprwire::Object>::Event<'_>,
     ) {
-        let moxsession_core_manager::Event::SessionCreated { session_id } = event;
-        self.session_id = Some(session_id);
+        if let moxsession_core_manager::Event::SessionCreated { session_id } = event {
+            self.session_id = Some(session_id);
+        }
     }
 }
 

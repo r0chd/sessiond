@@ -1,14 +1,21 @@
 {
   modulesPath,
   moxsession,
+  moxseatd,
   ...
 }:
 {
   imports = [ "${modulesPath}/virtualisation/qemu-vm.nix" ];
 
-  services.moxsession = {
-    enable = true;
-    package = moxsession;
+  services = {
+    moxseatd = {
+      enable = true;
+      package = moxseatd.packages.default;
+    };
+    moxsession = {
+      enable = true;
+      package = moxsession;
+    };
   };
 
   virtualisation = {

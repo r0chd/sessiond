@@ -1,0 +1,19 @@
+{
+  "pins": {
+    "moxseatd": {
+      "type": "Git",
+      "repository": {
+        "type": "Forgejo",
+        "server": "https://git.r0chd.pl/",
+        "owner": "mox-desktop",
+        "repo": "moxseatd"
+      },
+      "branch": "master",
+      "submodules": false,
+      "revision": "0d9604ab7992b71bfd3484a14e7bef7635c0c968",
+      "url": "https://git.r0chd.pl/mox-desktop/moxseatd/archive/0d9604ab7992b71bfd3484a14e7bef7635c0c968.tar.gz",
+      "hash": "sha256-Fm8vEhglZ7Kz4afsJyqpg3nbAvISoT0Q03fUKXdKCC4="
+    }
+  },
+  "version": 8
+}

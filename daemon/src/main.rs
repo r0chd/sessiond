@@ -206,7 +206,6 @@ fn main() -> anyhow::Result<()> {
     };
 
     let mut socket = server::Server::bind(&path)?;
-
     fs::set_permissions(path, fs::Permissions::from_mode(0o777))?;
 
     socket.add_implementation::<moxsession_pam_v1::MoxsessionPamV1Impl, _>(&mut moxsession, 1);

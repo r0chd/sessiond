@@ -6,7 +6,6 @@ mod moxsession_core_v1 {
 use hyprwire::client;
 use moxsession_core_v1::moxsession_core_manager;
 use pamsm::{PamLibExt, PamServiceModule};
-use std::{fs, path};
 
 struct Session {
     session_id: Option<u32>,
@@ -30,11 +29,8 @@ impl pamsm::PamServiceModule for Pam {
         fn inner(pamh: pamsm::Pam) -> Result<(), pamsm::PamError> {
             let mut session = Session { session_id: None };
 
-            let path = path::Path::new("/run/mox/moxsession.sock");
-            fs::create_dir_all(path.parent().unwrap()).map_err(|_| pamsm::PamError::SESSION_ERR)?;
-
-            let mut socket =
-                client::Client::connect(path).map_err(|_| pamsm::PamError::SESSION_ERR)?;
+            let mut socket = client::Client::connect("/run/mox/moxsession.sock")
+                .map_err(|_| pamsm::PamError::SESSION_ERR)?;
             let event_queue = socket.new_event_queue();
 
             socket.add_implementation::<moxsession_core_v1::MoxsessionCoreV1Impl>();
@@ -96,11 +92,8 @@ impl pamsm::PamServiceModule for Pam {
 
             let mut session = Session { session_id: None };
 
-            let path = path::Path::new("/run/mox/moxsession.sock");
-            fs::create_dir_all(path.parent().unwrap()).map_err(|_| pamsm::PamError::SESSION_ERR)?;
-
-            let mut socket =
-                client::Client::connect(path).map_err(|_| pamsm::PamError::SESSION_ERR)?;
+            let mut socket = client::Client::connect("/run/mox/moxsession.sock")
+                .map_err(|_| pamsm::PamError::SESSION_ERR)?;
             let event_queue = socket.new_event_queue();
 
             socket.add_implementation::<moxsession_core_v1::MoxsessionCoreV1Impl>();

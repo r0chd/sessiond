@@ -19,5 +19,20 @@ in
     inherit pkgs rustToolchain;
   };
 
+  nixosModules = rec {
+    default = import ./nix/nixos.nix;
+    moxsession = default;
+  };
+
   formatter = import ./nix/formatter.nix { inherit pkgs rustToolchain; };
+
+  packages = rec {
+    default = pkgs.callPackage ./nix/package.nix {
+      rustPlatform = pkgs.makeRustPlatform {
+        cargo = rustToolchain;
+        rustc = rustToolchain;
+      };
+    };
+    moxsession = default;
+  };
 }

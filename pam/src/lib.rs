@@ -56,7 +56,6 @@ impl PamServiceModule for Pam {
             let uid = users::get_user_by_name(&username)
                 .ok_or(pamsm::PamError::USER_UNKNOWN)?
                 .uid();
-
             manager.send_create_session(uid, username, tty.to_string_lossy());
 
             while session.session_id.is_none() {

@@ -49,6 +49,15 @@
   <s2c name="tty">
    <arg name="tty" type="varchar" summary="TTY device"/>
   </s2c>
+  <s2c name="seat">
+   <arg name="seat" type="varchar" summary="seat name"/>
+  </s2c>
+  <s2c name="leader">
+   <arg name="leader" type="uint" summary="PID of the session-creating process"/>
+  </s2c>
+  <s2c name="timestamp">
+   <arg name="timestamp" type="uint" summary="session start time (seconds since Unix epoch)"/>
+  </s2c>
   <s2c name="done">
    <description summary="initial field dump complete"/>
   </s2c>

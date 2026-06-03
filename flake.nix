@@ -84,7 +84,6 @@
       nixosConfigurations =
         let
           system = "x86_64-linux";
-          pkgs = pkgsFor system;
         in
         {
           nixos-vm = nixpkgs.lib.nixosSystem {

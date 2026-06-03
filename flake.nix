@@ -9,6 +9,7 @@
 
   outputs =
     {
+      self,
       nixpkgs,
       rust-overlay,
       ...
@@ -19,17 +20,14 @@
         "aarch64-linux"
       ];
 
-      forAllSystems =
-        f:
-        nixpkgs.lib.genAttrs systems (
-          system:
-          f (
-            import nixpkgs {
-              inherit system;
-              overlays = [ rust-overlay.overlays.default ];
-            }
-          )
-        );
+      pkgsFor =
+        system:
+        import nixpkgs {
+          inherit system;
+          overlays = [ rust-overlay.overlays.default ];
+        };
+
+      forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f (pkgsFor system));
     in
     {
       devShells = forAllSystems (pkgs: {
@@ -45,6 +43,31 @@
           import ./nix/shell.nix { inherit pkgs rustToolchain; };
       });
 
+      packages = forAllSystems (pkgs: {
+        moxsession = pkgs.callPackage ./nix/package.nix {
+          rustPlatform =
+            let
+              rustToolchain = pkgs.rust-bin.stable.latest.default.override {
+                extensions = [
+                  "rust-analyzer"
+                  "rust-src"
+                  "llvm-tools"
+                ];
+              };
+            in
+            pkgs.makeRustPlatform {
+              cargo = rustToolchain;
+              rustc = rustToolchain;
+            };
+        };
+        default = self.packages.${pkgs.stdenv.hostPlatform.system}.moxsession;
+      });
+
+      nixosModules = {
+        moxsession = import ./nix/nixos.nix;
+        default = self.nixosModules.moxsession;
+      };
+
       formatter = forAllSystems (
         pkgs:
         let
@@ -57,5 +80,23 @@
         in
         import ./nix/formatter.nix { inherit pkgs rustToolchain; }
       );
+
+      nixosConfigurations =
+        let
+          system = "x86_64-linux";
+          pkgs = pkgsFor system;
+        in
+        {
+          nixos-vm = nixpkgs.lib.nixosSystem {
+            inherit system;
+            specialArgs = {
+              inherit (self.packages.${system}) moxsession;
+            };
+            modules = [
+              ./nix/nixos.nix
+              ./nix/nixos-vm.nix
+            ];
+          };
+        };
     };
 }

@@ -9,15 +9,9 @@ pkgs.mkShell {
       rust-analyzer-unwrapped
       nixd
       npins
-      pkg-config
-      libpulseaudio
+      linux-pam
       ;
   };
-
-  buildInputs = [
-    pkgs.libpulseaudio
-    pkgs.pkg-config
-  ];
 
   RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
 }

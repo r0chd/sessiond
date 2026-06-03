@@ -26,8 +26,9 @@ rustPlatform.buildRustPackage {
         relPath = lib.removePrefix (toString ../. + "/") (toString path);
       in
       lib.any (p: lib.hasPrefix p relPath) [
-        "daemon"
+        "ctl"
         "pam"
+        "daemon"
         "protocols"
         "Cargo.toml"
         "Cargo.lock"
@@ -45,6 +46,7 @@ rustPlatform.buildRustPackage {
     mkdir -p $out/lib/security
     mv $out/lib/libpam.so $out/lib/security/pam_moxsession.so
     mv $out/bin/daemon $out/bin/moxsessiond
+    mv $out/bin/ctl $out/bin/moxsessionctl
   '';
 
   meta = {

@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="moxsession_info_v1" version="1">
+ <object name="moxsession_info_manager" version="1">
+  <description summary="session observer">
+   Unprivileged read-only interface for observing active sessions.
+  </description>
+  <s2c name="sessions">
+   <description summary="all active session IDs">
+    Sent once when the manager is first created. May be an empty array.
+   </description>
+   <arg name="session_ids" type="array uint" summary="active session IDs"/>
+  </s2c>
+  <s2c name="session_added">
+   <description summary="a new session was created">
+    Broadcast to all connected clients when any session is created.
+   </description>
+   <arg name="session_id" type="uint" summary="new session identifier"/>
+  </s2c>
+  <s2c name="session_removed">
+   <description summary="a session was destroyed">
+    Broadcast to all connected clients when any session is destroyed.
+   </description>
+   <arg name="session_id" type="uint" summary="destroyed session identifier"/>
+  </s2c>
+  <c2s name="get_session_info">
+   <description summary="create a per-session info object">
+    Creates a moxsession_info_session object for the given session_id.
+    The daemon immediately pushes all fields, followed by done.
+    If the session does not exist, destroyed is sent instead.
+   </description>
+   <arg name="session_id" type="uint" summary="session to query"/>
+   <returns iface="moxsession_info_session"/>
+  </c2s>
+  <c2s name="destroy" destructor="true">
+   <description summary="destroy this object"/>
+  </c2s>
+ </object>
+ <object name="moxsession_info_session" version="1">
+  <description summary="per-session information">
+   Provides information about a single session. All fields are pushed
+   immediately on creation and re-sent if they change.
+  </description>
+  <s2c name="uid">
+   <arg name="uid" type="uint" summary="user id"/>
+  </s2c>
+  <s2c name="username">
+   <arg name="username" type="varchar" summary="username"/>
+  </s2c>
+  <s2c name="tty">
+   <arg name="tty" type="varchar" summary="TTY device"/>
+  </s2c>
+  <s2c name="done">
+   <description summary="initial field dump complete"/>
+  </s2c>
+  <s2c name="destroyed">
+   <description summary="session has ended or did not exist">
+    Sent when the session is destroyed or if the session_id passed to
+    get_session_info was not found. The client should release this object.
+   </description>
+  </s2c>
+  <c2s name="destroy" destructor="true">
+   <description summary="destroy this object"/>
+  </c2s>
+ </object>
+</protocol>

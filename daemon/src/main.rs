@@ -1,10 +1,17 @@
-mod moxsession_core_v1 {
-    hyprwire::include_protocol!("moxsession_core_v1");
+mod moxsession_pam_v1 {
+    hyprwire::include_protocol!("moxsession_pam_v1");
+    pub use server::*;
+}
+
+mod moxsession_info_v1 {
+    hyprwire::include_protocol!("moxsession_info_v1");
     pub use server::*;
 }
 
 use hyprwire::server;
-use moxsession_core_v1::{moxsession_core_info, moxsession_core_manager};
+use moxsession_info_v1::{moxsession_info_manager, moxsession_info_session};
+use moxsession_pam_v1::moxsession_pam_manager;
+use std::os::unix::fs::PermissionsExt;
 use std::{env, fs, path};
 
 struct Session {
@@ -14,40 +21,44 @@ struct Session {
     tty: String,
 }
 
-struct Info {
+struct InfoSession {
     id: u32,
-    object: moxsession_core_info::MoxsessionCoreInfo,
+    object: moxsession_info_session::MoxsessionInfoSession,
 }
 
 struct Moxsession {
     next_session_id: u32,
     sessions: Vec<Session>,
-    infos: Vec<Info>,
+    info_sessions: Vec<InfoSession>,
+    info_managers: Vec<moxsession_info_manager::MoxsessionInfoManager>,
 }
 
-impl moxsession_core_v1::MoxsessionCoreV1Handler for Moxsession {
-    fn bind(&mut self, object: moxsession_core_manager::MoxsessionCoreManager) {
+impl moxsession_pam_v1::MoxsessionPamV1Handler for Moxsession {}
+
+impl moxsession_info_v1::MoxsessionInfoV1Handler for Moxsession {
+    fn bind(&mut self, object: moxsession_info_manager::MoxsessionInfoManager) {
         let session_ids = self
             .sessions
             .iter()
             .map(|session| session.id)
             .collect::<Vec<_>>();
         object.send_sessions(&session_ids);
+        self.info_managers.push(object);
     }
 }
 
-impl hyprwire::Dispatch<moxsession_core_manager::MoxsessionCoreManager> for Moxsession {
+impl hyprwire::Dispatch<moxsession_pam_manager::MoxsessionPamManager> for Moxsession {
     fn event(
         &mut self,
-        object: &moxsession_core_manager::MoxsessionCoreManager,
-        event: <moxsession_core_manager::MoxsessionCoreManager as hyprwire::Object>::Event<'_>,
+        object: &moxsession_pam_manager::MoxsessionPamManager,
+        event: <moxsession_pam_manager::MoxsessionPamManager as hyprwire::Object>::Event<'_>,
     ) {
         let Some(client) = object.client() else {
             return;
         };
 
         match event {
-            moxsession_core_manager::Event::CreateSession { uid, username, tty } => {
+            moxsession_pam_manager::Event::CreateSession { uid, username, tty } => {
                 if !client.creds().uid.is_root() {
                     log::warn!(uid = client.creds().uid.as_raw(); "rejected request from non-root client");
                     return;
@@ -63,9 +74,14 @@ impl hyprwire::Dispatch<moxsession_core_manager::MoxsessionCoreManager> for Moxs
                 };
                 self.sessions.push(session);
                 object.send_session_created(self.next_session_id);
+
+                for manager in &self.info_managers {
+                    manager.send_session_added(self.next_session_id);
+                }
+
                 self.next_session_id = self.next_session_id.wrapping_add(1);
             }
-            moxsession_core_manager::Event::DestroySession { session_id } => {
+            moxsession_pam_manager::Event::DestroySession { session_id } => {
                 if !client.creds().uid.is_root() {
                     log::warn!(uid = client.creds().uid.as_raw(); "rejected request from non-root client");
                     return;
@@ -78,17 +94,33 @@ impl hyprwire::Dispatch<moxsession_core_manager::MoxsessionCoreManager> for Moxs
                 {
                     log::info!(session_id, uid = session.uid, username = session.username.as_str(); "session destroyed");
 
-                    self.infos
+                    self.info_sessions
                         .extract_if(.., |info| info.id == session.id)
                         .for_each(|info| info.object.send_destroyed());
+
+                    for manager in &self.info_managers {
+                        manager.send_session_removed(session_id);
+                    }
 
                     return;
                 }
 
                 log::warn!(session_id; "destroy requested for unknown session");
             }
-            moxsession_core_manager::Event::GetSessionInfo {
-                moxsession_core_info,
+            moxsession_pam_manager::Event::Destroy => {}
+        }
+    }
+}
+
+impl hyprwire::Dispatch<moxsession_info_manager::MoxsessionInfoManager> for Moxsession {
+    fn event(
+        &mut self,
+        object: &moxsession_info_manager::MoxsessionInfoManager,
+        event: <moxsession_info_manager::MoxsessionInfoManager as hyprwire::Object>::Event<'_>,
+    ) {
+        match event {
+            moxsession_info_manager::Event::GetSessionInfo {
+                moxsession_info_session,
                 session_id,
             } => {
                 if let Some(session) = self
@@ -96,36 +128,37 @@ impl hyprwire::Dispatch<moxsession_core_manager::MoxsessionCoreManager> for Moxs
                     .iter()
                     .find(|session| session.id == session_id)
                 {
-                    log::debug!(session_id, uid = client.creds().uid.as_raw(); "session info requested");
-                    moxsession_core_info.send_uid(session.uid);
-                    moxsession_core_info.send_username(&session.username);
-                    moxsession_core_info.send_tty(&session.tty);
-                    moxsession_core_info.send_done();
+                    log::debug!(session_id, uid = object.client().map(|c| c.creds().uid.as_raw()).unwrap_or(0); "session info requested");
+                    moxsession_info_session.send_uid(session.uid);
+                    moxsession_info_session.send_username(&session.username);
+                    moxsession_info_session.send_tty(&session.tty);
+                    moxsession_info_session.send_done();
 
-                    let info = Info {
+                    self.info_sessions.push(InfoSession {
                         id: session_id,
-                        object: moxsession_core_info,
-                    };
-                    self.infos.push(info);
+                        object: moxsession_info_session,
+                    });
                     return;
                 }
 
                 log::warn!(session_id; "get_session_info requested for unknown session");
-                moxsession_core_info.send_destroyed();
+                moxsession_info_session.send_destroyed();
             }
-            moxsession_core_manager::Event::Destroy => {}
+            moxsession_info_manager::Event::Destroy => {
+                self.info_managers.retain(|m| m != object);
+            }
         }
     }
 }
 
-impl hyprwire::Dispatch<moxsession_core_info::MoxsessionCoreInfo> for Moxsession {
+impl hyprwire::Dispatch<moxsession_info_session::MoxsessionInfoSession> for Moxsession {
     fn event(
         &mut self,
-        object: &moxsession_core_info::MoxsessionCoreInfo,
-        event: <moxsession_core_info::MoxsessionCoreInfo as hyprwire::Object>::Event<'_>,
+        object: &moxsession_info_session::MoxsessionInfoSession,
+        event: <moxsession_info_session::MoxsessionInfoSession as hyprwire::Object>::Event<'_>,
     ) {
-        let moxsession_core_info::Event::Destroy = event;
-        self.infos.retain(|info| info.object != *object);
+        let moxsession_info_session::Event::Destroy = event;
+        self.info_sessions.retain(|info| info.object != *object);
     }
 }
 
@@ -151,12 +184,16 @@ fn main() -> anyhow::Result<()> {
     let mut moxsession = Moxsession {
         next_session_id: 0,
         sessions: Vec::new(),
-        infos: Vec::new(),
+        info_sessions: Vec::new(),
+        info_managers: Vec::new(),
     };
 
     let mut socket = server::Server::bind(&path)?;
 
-    socket.add_implementation::<moxsession_core_v1::MoxsessionCoreV1Impl, _>(&mut moxsession, 1);
+    fs::set_permissions(path, fs::Permissions::from_mode(0o777))?;
+
+    socket.add_implementation::<moxsession_pam_v1::MoxsessionPamV1Impl, _>(&mut moxsession, 1);
+    socket.add_implementation::<moxsession_info_v1::MoxsessionInfoV1Impl, _>(&mut moxsession, 1);
 
     loop {
         socket.dispatch_events(&mut moxsession, true)?;

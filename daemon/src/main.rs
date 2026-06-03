@@ -12,13 +12,16 @@ use hyprwire::server;
 use moxsession_info_v1::{moxsession_info_manager, moxsession_info_session};
 use moxsession_pam_v1::moxsession_pam_manager;
 use std::os::unix::fs::PermissionsExt;
-use std::{env, fs, path};
+use std::{env, fs, path, time};
 
 struct Session {
     id: u32,
     uid: u32,
     username: String,
     tty: String,
+    seat: Option<String>,
+    timestamp: time::SystemTime,
+    leader_id: i32,
 }
 
 struct InfoSession {
@@ -71,6 +74,9 @@ impl hyprwire::Dispatch<moxsession_pam_manager::MoxsessionPamManager> for Moxses
                     uid,
                     username,
                     tty,
+                    seat: None,
+                    timestamp: time::SystemTime::now(),
+                    leader_id: client.creds().pid.as_raw_pid(),
                 };
                 self.sessions.push(session);
                 object.send_session_created(self.next_session_id);
@@ -132,6 +138,17 @@ impl hyprwire::Dispatch<moxsession_info_manager::MoxsessionInfoManager> for Moxs
                     moxsession_info_session.send_uid(session.uid);
                     moxsession_info_session.send_username(&session.username);
                     moxsession_info_session.send_tty(&session.tty);
+                    if let Some(seat) = &session.seat {
+                        moxsession_info_session.send_seat(seat);
+                    }
+                    moxsession_info_session.send_leader(session.leader_id as u32);
+                    moxsession_info_session.send_timestamp(
+                        session
+                            .timestamp
+                            .duration_since(time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs() as u32,
+                    );
                     moxsession_info_session.send_done();
 
                     self.info_sessions.push(InfoSession {

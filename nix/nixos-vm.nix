@@ -12,7 +12,8 @@
   };
 
   virtualisation = {
-    graphics = false;
+    qemu.options = [ "-vga virtio" ];
+    # graphics = false;
     memorySize = 2048;
     forwardPorts = [
       {

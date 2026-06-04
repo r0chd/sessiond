@@ -1,23 +1,23 @@
-mod moxsession_pam_v1 {
-    hyprwire::include_protocol!("moxsession_pam_v1");
+mod moxsession_login_v1 {
+    hyprwire::include_protocol!("moxsession_login_v1");
     pub use client::*;
 }
 
 use hyprwire::client;
-use moxsession_pam_v1::moxsession_pam_manager;
+use moxsession_login_v1::moxsession_login_manager;
 use pamsm::{PamLibExt, PamServiceModule};
 
 struct Session {
     session_id: Option<u32>,
 }
 
-impl hyprwire::Dispatch<moxsession_pam_manager::MoxsessionPamManager> for Session {
+impl hyprwire::Dispatch<moxsession_login_manager::MoxsessionLoginManager> for Session {
     fn event(
         &mut self,
-        _: &moxsession_pam_manager::MoxsessionPamManager,
-        event: <moxsession_pam_manager::MoxsessionPamManager as hyprwire::Object>::Event<'_>,
+        _: &moxsession_login_manager::MoxsessionLoginManager,
+        event: <moxsession_login_manager::MoxsessionLoginManager as hyprwire::Object>::Event<'_>,
     ) {
-        let moxsession_pam_manager::Event::SessionCreated { session_id } = event;
+        let moxsession_login_manager::Event::SessionCreated { session_id } = event;
         self.session_id = Some(session_id);
     }
 }
@@ -33,14 +33,14 @@ impl PamServiceModule for Pam {
                 .map_err(|_| pamsm::PamError::SESSION_ERR)?;
             let event_queue = socket.new_event_queue();
 
-            socket.add_implementation::<moxsession_pam_v1::MoxsessionPamV1Impl>();
+            socket.add_implementation::<moxsession_login_v1::MoxsessionLoginV1Impl>();
 
             event_queue
                 .wait_for_handshake(&mut session)
                 .map_err(|_| pamsm::PamError::SESSION_ERR)?;
 
             let manager = socket
-                .bind::<moxsession_pam_manager::MoxsessionPamManager, _>(
+                .bind::<moxsession_login_manager::MoxsessionLoginManager, _>(
                     &event_queue,
                     &mut session,
                     1,
@@ -97,14 +97,14 @@ impl PamServiceModule for Pam {
                 .map_err(|_| pamsm::PamError::SESSION_ERR)?;
             let event_queue = socket.new_event_queue();
 
-            socket.add_implementation::<moxsession_pam_v1::MoxsessionPamV1Impl>();
+            socket.add_implementation::<moxsession_login_v1::MoxsessionLoginV1Impl>();
 
             event_queue
                 .wait_for_handshake(&mut session)
                 .map_err(|_| pamsm::PamError::SESSION_ERR)?;
 
             let manager = socket
-                .bind::<moxsession_pam_manager::MoxsessionPamManager, _>(
+                .bind::<moxsession_login_manager::MoxsessionLoginManager, _>(
                     &event_queue,
                     &mut session,
                     1,

@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<protocol name="moxsession_pam_v1" version="1">
- <object name="moxsession_pam_manager" version="1">
+<protocol name="moxsession_login_v1" version="1">
+ <object name="moxsession_login_manager" version="1">
   <description summary="privileged session manager">
-   PAM-facing interface for registering and deregistering sessions.
+   Privileged interface for registering and deregistering sessions.
    Only accessible to root clients.
   </description>
   <c2s name="create_session">
    <description summary="register a new session">
     Registers a new session. The daemon responds with session_created carrying
-    the assigned session_id. Called by the PAM module at session open time.
+    the assigned session_id. Called at session open time.
    </description>
    <arg name="uid" type="uint" summary="user id"/>
    <arg name="username" type="varchar" summary="username"/>
@@ -23,7 +23,7 @@
   <c2s name="destroy_session">
    <description summary="deregister a session">
     Deregisters the session identified by session_id.
-    Called by the PAM module at session close time.
+    Called at session close time.
    </description>
    <arg name="session_id" type="uint" summary="session identifier from session_created"/>
   </c2s>

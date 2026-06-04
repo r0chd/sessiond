@@ -1,0 +1,107 @@
+use anyhow::Context;
+use calloop::generic;
+use std::io::{Read, Seek};
+use std::os::fd::AsRawFd;
+use std::{fs, io, path};
+
+pub struct CgroupManager {
+    root_path: &'static path::Path,
+    cgroups: Vec<Cgroup>,
+    loop_handle: calloop::LoopHandle<'static, crate::Moxsession>,
+}
+
+impl CgroupManager {
+    pub fn new(
+        loop_handle: calloop::LoopHandle<'static, crate::Moxsession>,
+    ) -> anyhow::Result<Self> {
+        let root_path = path::Path::new("/sys/fs/cgroup/moxsession");
+        fs::create_dir_all(root_path)?;
+        log::info!(root = root_path.to_str(); "cgroup manager init");
+
+        Ok(Self {
+            root_path,
+            cgroups: Vec::new(),
+            loop_handle,
+        })
+    }
+
+    pub fn create_session_cgroup(
+        &mut self,
+        session_id: u32,
+        leader_pid: i32,
+    ) -> anyhow::Result<()> {
+        let session_cgroup_path = self.root_path.join(format!("session-{session_id}"));
+        fs::create_dir(&session_cgroup_path)?;
+        fs::write(
+            session_cgroup_path.join("cgroup.procs"),
+            leader_pid.to_string(),
+        )?;
+
+        log::info!(session_id = session_id, leader_pid = leader_pid, path = session_cgroup_path.to_str(); "cgroup created");
+
+        let cgroup = Cgroup {
+            session_id,
+            path: session_cgroup_path,
+        };
+
+        self.cgroups.push(cgroup);
+
+        Ok(())
+    }
+
+    pub fn poll_destroy(&self, session_id: u32) -> anyhow::Result<()> {
+        let cgroup = self
+            .cgroups
+            .iter()
+            .find(|cgroup| cgroup.session_id == session_id)
+            .context("session not found")?;
+        let mut file = fs::File::open(cgroup.path.join("cgroup.events"))?;
+
+        let fd_wrapper = unsafe { generic::FdWrapper::new(file.as_raw_fd()) };
+        let source = generic::Generic::new(
+            fd_wrapper,
+            calloop::Interest {
+                readable: true,
+                writable: false,
+            },
+            calloop::Mode::Level,
+        );
+        self.loop_handle.insert_source(source, move |_, _, state| {
+            let result = (|| -> anyhow::Result<calloop::PostAction> {
+                file.seek(io::SeekFrom::Start(0))?;
+                let mut contents = String::new();
+                file.read_to_string(&mut contents)?;
+
+                if contents.contains("populated 0") {
+                    let cgroup = state
+                        .cgroup_manager
+                        .cgroups
+                        .extract_if(.., |cgroup| cgroup.session_id == session_id)
+                        .next()
+                        .context("session cgroup not found")?;
+
+                    fs::remove_dir(&cgroup.path)?;
+                    log::info!(session_id = session_id, path = cgroup.path.to_str(); "cgroup destroyed");
+                    return Ok(calloop::PostAction::Remove);
+                }
+
+                Ok(calloop::PostAction::Continue)
+            })();
+
+            match result {
+                Ok(action) => Ok(action),
+                Err(e) => {
+                    log::error!(session_id = session_id, error = e.to_string().as_str(); "cgroup poll error");
+                    Ok(calloop::PostAction::Remove)
+                }
+            }
+        })?;
+
+        Ok(())
+    }
+}
+
+struct Cgroup {
+    session_id: u32,
+    path: path::PathBuf,
+}

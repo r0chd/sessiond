@@ -14,6 +14,7 @@ anyhow = "1.0.102"
 env_logger = { version = "0.11.10", features = ["kv"] }
 log = { version = "0.4.31", features = ["kv"] }
 hyprwire = "0.4.2"
+calloop = "0.14.4"
 
 [build-dependencies]
 hyprwire-scanner = "0.4.2"

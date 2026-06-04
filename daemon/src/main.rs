@@ -1,5 +1,5 @@
-mod moxsession_pam_v1 {
-    hyprwire::include_protocol!("moxsession_pam_v1");
+mod moxsession_login_v1 {
+    hyprwire::include_protocol!("moxsession_login_v1");
     pub use server::*;
 }
 
@@ -10,7 +10,7 @@ mod moxsession_info_v1 {
 
 use hyprwire::server;
 use moxsession_info_v1::{moxsession_info_manager, moxsession_info_session};
-use moxsession_pam_v1::moxsession_pam_manager;
+use moxsession_login_v1::moxsession_login_manager;
 use std::os::unix::fs::PermissionsExt;
 use std::{env, fs, path, time};
 
@@ -36,7 +36,7 @@ struct Moxsession {
     info_managers: Vec<moxsession_info_manager::MoxsessionInfoManager>,
 }
 
-impl moxsession_pam_v1::MoxsessionPamV1Handler for Moxsession {}
+impl moxsession_login_v1::MoxsessionLoginV1Handler for Moxsession {}
 
 impl moxsession_info_v1::MoxsessionInfoV1Handler for Moxsession {
     fn bind(&mut self, object: moxsession_info_manager::MoxsessionInfoManager) {
@@ -50,18 +50,18 @@ impl moxsession_info_v1::MoxsessionInfoV1Handler for Moxsession {
     }
 }
 
-impl hyprwire::Dispatch<moxsession_pam_manager::MoxsessionPamManager> for Moxsession {
+impl hyprwire::Dispatch<moxsession_login_manager::MoxsessionLoginManager> for Moxsession {
     fn event(
         &mut self,
-        object: &moxsession_pam_manager::MoxsessionPamManager,
-        event: <moxsession_pam_manager::MoxsessionPamManager as hyprwire::Object>::Event<'_>,
+        object: &moxsession_login_manager::MoxsessionLoginManager,
+        event: <moxsession_login_manager::MoxsessionLoginManager as hyprwire::Object>::Event<'_>,
     ) {
         let Some(client) = object.client() else {
             return;
         };
 
         match event {
-            moxsession_pam_manager::Event::CreateSession { uid, username, tty } => {
+            moxsession_login_manager::Event::CreateSession { uid, username, tty } => {
                 if !client.creds().uid.is_root() {
                     log::warn!(uid = client.creds().uid.as_raw(); "rejected request from non-root client");
                     return;
@@ -87,7 +87,7 @@ impl hyprwire::Dispatch<moxsession_pam_manager::MoxsessionPamManager> for Moxses
 
                 self.next_session_id = self.next_session_id.wrapping_add(1);
             }
-            moxsession_pam_manager::Event::DestroySession { session_id } => {
+            moxsession_login_manager::Event::DestroySession { session_id } => {
                 if !client.creds().uid.is_root() {
                     log::warn!(uid = client.creds().uid.as_raw(); "rejected request from non-root client");
                     return;
@@ -113,7 +113,7 @@ impl hyprwire::Dispatch<moxsession_pam_manager::MoxsessionPamManager> for Moxses
 
                 log::warn!(session_id; "destroy requested for unknown session");
             }
-            moxsession_pam_manager::Event::Destroy => {}
+            moxsession_login_manager::Event::Destroy => {}
         }
     }
 }
@@ -208,7 +208,7 @@ fn main() -> anyhow::Result<()> {
     let mut socket = server::Server::bind(&path)?;
     fs::set_permissions(path, fs::Permissions::from_mode(0o777))?;
 
-    socket.add_implementation::<moxsession_pam_v1::MoxsessionPamV1Impl, _>(&mut moxsession, 1);
+    socket.add_implementation::<moxsession_login_v1::MoxsessionLoginV1Impl, _>(&mut moxsession, 1);
     socket.add_implementation::<moxsession_info_v1::MoxsessionInfoV1Impl, _>(&mut moxsession, 1);
 
     loop {

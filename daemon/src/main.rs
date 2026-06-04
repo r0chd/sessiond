@@ -199,7 +199,7 @@ fn main() -> anyhow::Result<()> {
     fs::create_dir_all(path.parent().unwrap())?;
 
     let mut moxsession = Moxsession {
-        next_session_id: 0,
+        next_session_id: 1,
         sessions: Vec::new(),
         info_sessions: Vec::new(),
         info_managers: Vec::new(),

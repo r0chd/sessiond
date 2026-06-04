@@ -45,6 +45,18 @@
           import ./nix/shell.nix { inherit pkgs rustToolchain; };
       });
 
+      apps.x86_64-linux.finix-vm =
+        let
+          system = "x86_64-linux";
+          pkgs = pkgsFor system;
+          argv = self.finixConfigurations.finix-vm.config.virtualisation.qemu.argv;
+          script = pkgs.writeShellScript "run-finix-vm" (nixpkgs.lib.escapeShellArgs argv);
+        in
+        {
+          type = "app";
+          program = "${script}";
+        };
+
       packages = forAllSystems (pkgs: {
         moxsession = pkgs.callPackage ./nix/package.nix {
           rustPlatform =
@@ -103,6 +115,39 @@
               moxseatd.nixosModules.default
               ./nix/nixos-vm.nix
             ];
+          };
+        };
+
+      finixConfigurations =
+        let
+          system = "x86_64-linux";
+          pkgs = pkgsFor system;
+          moxseatd = (import sources.moxseatd.outPath { inherit pkgs; }) // {
+            inherit (sources.moxseatd) outPath;
+          };
+          finix = (import sources.finix.outPath) // {
+            inherit (sources.finix) outPath;
+          };
+        in
+        {
+          finix-vm = finix.lib.finixSystem {
+            inherit (pkgs) lib;
+            specialArgs = {
+              inherit (self.packages.${system}) moxsession;
+              inherit moxseatd;
+            };
+            modules = [
+              { nixpkgs.pkgs = pkgs; }
+              ./nix/finix-vm.nix
+              ./nix/finix.nix
+              "${finix.outPath}/modules/virtualisation/qemu.nix"
+            ]
+            ++ builtins.attrValues {
+              inherit (finix.nixosModules)
+                getty
+                sysklogd
+                ;
+            };
           };
         };
     };

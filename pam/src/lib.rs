@@ -68,6 +68,8 @@ impl PamServiceModule for Pam {
             pamh.send_bytes("moxsession", session_id.to_le_bytes().to_vec(), None)
                 .map_err(|_| pamsm::PamError::SESSION_ERR)?;
 
+            pamh.putenv(&format!("XDG_SESSION_ID={session_id}"))?;
+
             Ok(())
         }
 

@@ -8,9 +8,13 @@ mod moxsession_info_v1 {
     pub use server::*;
 }
 
+mod cgroup;
+
+use calloop::generic;
 use hyprwire::server;
 use moxsession_info_v1::{moxsession_info_manager, moxsession_info_session};
 use moxsession_login_v1::moxsession_login_manager;
+use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::{env, fs, path, time};
 
@@ -34,6 +38,7 @@ struct Moxsession {
     sessions: Vec<Session>,
     info_sessions: Vec<InfoSession>,
     info_managers: Vec<moxsession_info_manager::MoxsessionInfoManager>,
+    cgroup_manager: cgroup::CgroupManager,
 }
 
 impl moxsession_login_v1::MoxsessionLoginV1Handler for Moxsession {}
@@ -69,6 +74,12 @@ impl hyprwire::Dispatch<moxsession_login_manager::MoxsessionLoginManager> for Mo
 
                 log::info!(session_id = self.next_session_id, uid, username = username.as_str(), tty = tty.as_str(); "session created");
 
+                let leader_id = client.creds().pid.as_raw_pid();
+
+                if let Err(e) = self.cgroup_manager.create_session_cgroup(self.next_session_id, leader_id) {
+                    log::error!(session_id = self.next_session_id, error = e.to_string().as_str(); "failed to create session cgroup");
+                }
+
                 let session = Session {
                     id: self.next_session_id,
                     uid,
@@ -76,7 +87,7 @@ impl hyprwire::Dispatch<moxsession_login_manager::MoxsessionLoginManager> for Mo
                     tty,
                     seat: None,
                     timestamp: time::SystemTime::now(),
-                    leader_id: client.creds().pid.as_raw_pid(),
+                    leader_id,
                 };
                 self.sessions.push(session);
                 object.send_session_created(self.next_session_id);
@@ -106,6 +117,10 @@ impl hyprwire::Dispatch<moxsession_login_manager::MoxsessionLoginManager> for Mo
 
                     for manager in &self.info_managers {
                         manager.send_session_removed(session_id);
+                    }
+
+                    if let Err(e) = self.cgroup_manager.poll_destroy(session_id) {
+                        log::error!(session_id, error = e.to_string().as_str(); "failed to poll destroy session cgroup");
                     }
 
                     return;
@@ -198,11 +213,16 @@ fn main() -> anyhow::Result<()> {
     let path = path::Path::new("/run/mox/moxsession.sock");
     fs::create_dir_all(path.parent().unwrap())?;
 
+    let mut event_loop = calloop::EventLoop::try_new()?;
+
+    let cgroup_manager = cgroup::CgroupManager::new(event_loop.handle())?;
+
     let mut moxsession = Moxsession {
         next_session_id: 1,
         sessions: Vec::new(),
         info_sessions: Vec::new(),
         info_managers: Vec::new(),
+        cgroup_manager,
     };
 
     let mut socket = server::Server::bind(&path)?;
@@ -211,7 +231,24 @@ fn main() -> anyhow::Result<()> {
     socket.add_implementation::<moxsession_login_v1::MoxsessionLoginV1Impl, _>(&mut moxsession, 1);
     socket.add_implementation::<moxsession_info_v1::MoxsessionInfoV1Impl, _>(&mut moxsession, 1);
 
-    loop {
-        socket.dispatch_events(&mut moxsession, true)?;
-    }
+    let fd_wrapper = unsafe { generic::FdWrapper::new(socket.extract_loop_fd().as_raw_fd()) };
+    let source = generic::Generic::new(
+        fd_wrapper,
+        calloop::Interest {
+            readable: true,
+            writable: false,
+        },
+        calloop::Mode::Level,
+    );
+    event_loop
+        .handle()
+        .insert_source(source, move |_, _, state| {
+            _ = socket.dispatch_events(state, false);
+            Ok(calloop::PostAction::Continue)
+        })
+        .unwrap();
+
+    event_loop.run(None, &mut moxsession, |_| {})?;
+
+    Ok(())
 }

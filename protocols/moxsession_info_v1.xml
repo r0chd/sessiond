@@ -31,6 +31,15 @@
    <arg name="session_id" type="uint" summary="session to query"/>
    <returns iface="moxsession_info_session"/>
   </c2s>
+  <c2s name="get_session_info_by_pid">
+   <description summary="create a per-session info object by leader PID">
+    Creates a moxsession_info_session object for the session whose leader
+    PID matches the given pid. The daemon immediately pushes all fields,
+    followed by done. If no matching session exists, destroyed is sent instead.
+   </description>
+   <arg name="pid" type="uint" summary="leader PID of the session to query"/>
+   <returns iface="moxsession_info_session"/>
+  </c2s>
   <c2s name="destroy" destructor="true">
    <description summary="destroy this object"/>
   </c2s>
@@ -40,6 +49,9 @@
    Provides information about a single session. All fields are pushed
    immediately on creation and re-sent if they change.
   </description>
+  <s2c name="session_id">
+   <arg name="session_id" type="uint" summary="session identifier"/>
+  </s2c>
   <s2c name="uid">
    <arg name="uid" type="uint" summary="user id"/>
   </s2c>

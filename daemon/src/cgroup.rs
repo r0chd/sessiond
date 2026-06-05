@@ -99,6 +99,22 @@ impl CgroupManager {
 
         Ok(())
     }
+
+    pub fn find_session_by_pid(&self, pid: u32) -> anyhow::Result<Option<u32>> {
+        for cgroup in self.cgroups.iter() {
+            let procs = fs::read_to_string(cgroup.path.join("cgroup.procs"))?;
+
+            if procs
+                .lines()
+                .find(|line| *line.trim() == pid.to_string())
+                .is_some()
+            {
+                return Ok(Some(cgroup.session_id));
+            }
+        }
+
+        Ok(None)
+    }
 }
 
 struct Cgroup {

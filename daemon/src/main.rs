@@ -76,7 +76,10 @@ impl hyprwire::Dispatch<moxsession_login_manager::MoxsessionLoginManager> for Mo
 
                 let leader_id = client.creds().pid.as_raw_pid();
 
-                if let Err(e) = self.cgroup_manager.create_session_cgroup(self.next_session_id, leader_id) {
+                if let Err(e) = self
+                    .cgroup_manager
+                    .create_session_cgroup(self.next_session_id, leader_id)
+                {
                     log::error!(session_id = self.next_session_id, error = e.to_string().as_str(); "failed to create session cgroup");
                 }
 
@@ -150,6 +153,48 @@ impl hyprwire::Dispatch<moxsession_info_manager::MoxsessionInfoManager> for Moxs
                     .find(|session| session.id == session_id)
                 {
                     log::debug!(session_id, uid = object.client().map(|c| c.creds().uid.as_raw()).unwrap_or(0); "session info requested");
+                    moxsession_info_session.send_session_id(session_id);
+                    moxsession_info_session.send_uid(session.uid);
+                    moxsession_info_session.send_username(&session.username);
+                    moxsession_info_session.send_tty(&session.tty);
+                    if let Some(seat) = &session.seat {
+                        moxsession_info_session.send_seat(seat);
+                    }
+                    moxsession_info_session.send_leader(session.leader_id as u32);
+                    moxsession_info_session.send_timestamp(
+                        session
+                            .timestamp
+                            .duration_since(time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs() as u32,
+                    );
+                    moxsession_info_session.send_done();
+
+                    self.info_sessions.push(InfoSession {
+                        id: session_id,
+                        object: moxsession_info_session,
+                    });
+                    return;
+                }
+
+                log::warn!(session_id; "get_session_info requested for unknown session");
+                moxsession_info_session.send_destroyed();
+            }
+            moxsession_info_manager::Event::GetSessionInfoByPid {
+                moxsession_info_session,
+                pid,
+            } => {
+                let Ok(Some(session_id)) = self.cgroup_manager.find_session_by_pid(pid) else {
+                    return;
+                };
+
+                if let Some(session) = self
+                    .sessions
+                    .iter()
+                    .find(|session| session.id == session_id)
+                {
+                    log::debug!(session_id, uid = object.client().map(|c| c.creds().uid.as_raw()).unwrap_or(0); "session info requested");
+                    moxsession_info_session.send_session_id(session_id);
                     moxsession_info_session.send_uid(session.uid);
                     moxsession_info_session.send_username(&session.username);
                     moxsession_info_session.send_tty(&session.tty);

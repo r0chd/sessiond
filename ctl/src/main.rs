@@ -90,6 +90,7 @@ impl hyprwire::Dispatch<moxsession_info_session::MoxsessionInfoSession> for Stat
             }
             moxsession_info_session::Event::Done => session.done = true,
             moxsession_info_session::Event::Destroyed => {}
+            moxsession_info_session::Event::SessionId { session_id: _ } => {}
         }
     }
 }
@@ -209,7 +210,20 @@ fn main() -> anyhow::Result<()> {
             );
             println!(
                 "  {}",
-                "─".repeat(id_w + 2 + uid_w + 2 + user_w + 2 + tty_w + 2 + seat_w + 2 + leader_w + 2 + since_w)
+                "─".repeat(
+                    id_w + 2
+                        + uid_w
+                        + 2
+                        + user_w
+                        + 2
+                        + tty_w
+                        + 2
+                        + seat_w
+                        + 2
+                        + leader_w
+                        + 2
+                        + since_w
+                )
             );
             for session in sessions {
                 println!(

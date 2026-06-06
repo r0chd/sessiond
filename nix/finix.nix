@@ -5,23 +5,23 @@
   ...
 }:
 let
-  cfg = config.services.moxsession;
+  cfg = config.services.sessiond;
 in
 {
-  options.services.moxsession = {
-    enable = lib.mkEnableOption "moxsession";
-    package = lib.mkPackageOption pkgs "moxsession" { };
+  options.services.sessiond = {
+    enable = lib.mkEnableOption "sessiond";
+    package = lib.mkPackageOption pkgs "sessiond" { };
   };
 
   config = lib.mkIf cfg.enable {
-    finit.services.moxsession = {
+    finit.services.sessiond = {
       description = "session management daemon";
       conditions = [ ];
-      command = "${cfg.package}/bin/moxsessiond";
+      command = "${cfg.package}/bin/sessiond";
     };
 
     security.pam.services.login.text = lib.mkAfter ''
-      session   optional   ${cfg.package}/lib/security/pam_moxsession.so
+      session   optional   ${cfg.package}/lib/security/pam_sessiond.so
     '';
 
     environment.systemPackages = [ cfg.package ];

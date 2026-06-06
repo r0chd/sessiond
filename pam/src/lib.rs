@@ -1,23 +1,23 @@
-mod moxsession_login_v1 {
-    hyprwire::include_protocol!("moxsession_login_v1");
+mod session_management_v1 {
+    hyprwire::include_protocol!("session_management_v1");
     pub use client::*;
 }
 
 use hyprwire::client;
-use moxsession_login_v1::moxsession_login_manager;
 use pamsm::{PamLibExt, PamServiceModule};
+use session_management_v1::session_manager;
 
 struct Session {
     session_id: Option<u32>,
 }
 
-impl hyprwire::Dispatch<moxsession_login_manager::MoxsessionLoginManager> for Session {
+impl hyprwire::Dispatch<session_manager::SessionManager> for Session {
     fn event(
         &mut self,
-        _: &moxsession_login_manager::MoxsessionLoginManager,
-        event: <moxsession_login_manager::MoxsessionLoginManager as hyprwire::Object>::Event<'_>,
+        _: &session_manager::SessionManager,
+        event: <session_manager::SessionManager as hyprwire::Object>::Event<'_>,
     ) {
-        let moxsession_login_manager::Event::SessionCreated { session_id } = event;
+        let session_manager::Event::SessionCreated { session_id } = event;
         self.session_id = Some(session_id);
     }
 }
@@ -29,22 +29,18 @@ impl PamServiceModule for Pam {
         fn inner(pamh: pamsm::Pam) -> Result<(), pamsm::PamError> {
             let mut session = Session { session_id: None };
 
-            let mut socket = client::Client::connect("/run/mox/moxsession.sock")
+            let mut socket = client::Client::connect("/run/sessiond.sock")
                 .map_err(|_| pamsm::PamError::SESSION_ERR)?;
             let event_queue = socket.new_event_queue();
 
-            socket.add_implementation::<moxsession_login_v1::MoxsessionLoginV1Impl>();
+            socket.add_implementation::<session_management_v1::SessionManagementV1Impl>();
 
             event_queue
                 .wait_for_handshake(&mut session)
                 .map_err(|_| pamsm::PamError::SESSION_ERR)?;
 
             let manager = socket
-                .bind::<moxsession_login_manager::MoxsessionLoginManager, _>(
-                    &event_queue,
-                    &mut session,
-                    1,
-                )
+                .bind::<session_manager::SessionManager, _>(&event_queue, &mut session, 1)
                 .map_err(|_| pamsm::PamError::SESSION_ERR)?;
 
             let username = pamh
@@ -65,7 +61,7 @@ impl PamServiceModule for Pam {
             }
 
             let session_id = session.session_id.unwrap();
-            pamh.send_bytes("moxsession", session_id.to_le_bytes().to_vec(), None)
+            pamh.send_bytes("sessiond", session_id.to_le_bytes().to_vec(), None)
                 .map_err(|_| pamsm::PamError::SESSION_ERR)?;
 
             pamh.putenv(&format!("XDG_SESSION_ID={session_id}"))?;
@@ -82,7 +78,7 @@ impl PamServiceModule for Pam {
     fn close_session(pamh: pamsm::Pam, _: pamsm::PamFlags, _: Vec<String>) -> pamsm::PamError {
         fn inner(pamh: pamsm::Pam) -> Result<(), pamsm::PamError> {
             let session_id = pamh
-                .retrieve_bytes("moxsession")
+                .retrieve_bytes("sessiond")
                 .map_err(|_| pamsm::PamError::SESSION_ERR)
                 .and_then(|bytes| {
                     bytes
@@ -93,22 +89,18 @@ impl PamServiceModule for Pam {
 
             let mut session = Session { session_id: None };
 
-            let mut socket = client::Client::connect("/run/mox/moxsession.sock")
+            let mut socket = client::Client::connect("/run/sessiond.sock")
                 .map_err(|_| pamsm::PamError::SESSION_ERR)?;
             let event_queue = socket.new_event_queue();
 
-            socket.add_implementation::<moxsession_login_v1::MoxsessionLoginV1Impl>();
+            socket.add_implementation::<session_management_v1::SessionManagementV1Impl>();
 
             event_queue
                 .wait_for_handshake(&mut session)
                 .map_err(|_| pamsm::PamError::SESSION_ERR)?;
 
             let manager = socket
-                .bind::<moxsession_login_manager::MoxsessionLoginManager, _>(
-                    &event_queue,
-                    &mut session,
-                    1,
-                )
+                .bind::<session_manager::SessionManager, _>(&event_queue, &mut session, 1)
                 .map_err(|_| pamsm::PamError::SESSION_ERR)?;
 
             manager.send_destroy_session(session_id);

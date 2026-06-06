@@ -1,10 +1,10 @@
-mod moxsession_login_v1 {
-    hyprwire::include_protocol!("moxsession_login_v1");
+mod session_management_v1 {
+    hyprwire::include_protocol!("session_management_v1");
     pub use server::*;
 }
 
-mod moxsession_info_v1 {
-    hyprwire::include_protocol!("moxsession_info_v1");
+mod session_core_v1 {
+    hyprwire::include_protocol!("session_core_v1");
     pub use server::*;
 }
 
@@ -12,8 +12,8 @@ mod cgroup;
 
 use calloop::generic;
 use hyprwire::server;
-use moxsession_info_v1::{moxsession_info_manager, moxsession_info_session};
-use moxsession_login_v1::moxsession_login_manager;
+use session_core_v1::{session_core_manager, session_core_session};
+use session_management_v1::session_manager;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::{env, fs, path, time};
@@ -30,21 +30,21 @@ struct Session {
 
 struct InfoSession {
     id: u32,
-    object: moxsession_info_session::MoxsessionInfoSession,
+    object: session_core_session::SessionCoreSession,
 }
 
-struct Moxsession {
+struct Sessiond {
     next_session_id: u32,
     sessions: Vec<Session>,
     info_sessions: Vec<InfoSession>,
-    info_managers: Vec<moxsession_info_manager::MoxsessionInfoManager>,
+    info_managers: Vec<session_core_manager::SessionCoreManager>,
     cgroup_manager: cgroup::CgroupManager,
 }
 
-impl moxsession_login_v1::MoxsessionLoginV1Handler for Moxsession {}
+impl session_management_v1::SessionManagementV1Handler for Sessiond {}
 
-impl moxsession_info_v1::MoxsessionInfoV1Handler for Moxsession {
-    fn bind(&mut self, object: moxsession_info_manager::MoxsessionInfoManager) {
+impl session_core_v1::SessionCoreV1Handler for Sessiond {
+    fn bind(&mut self, object: session_core_manager::SessionCoreManager) {
         let session_ids = self
             .sessions
             .iter()
@@ -55,18 +55,18 @@ impl moxsession_info_v1::MoxsessionInfoV1Handler for Moxsession {
     }
 }
 
-impl hyprwire::Dispatch<moxsession_login_manager::MoxsessionLoginManager> for Moxsession {
+impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
     fn event(
         &mut self,
-        object: &moxsession_login_manager::MoxsessionLoginManager,
-        event: <moxsession_login_manager::MoxsessionLoginManager as hyprwire::Object>::Event<'_>,
+        object: &session_manager::SessionManager,
+        event: <session_manager::SessionManager as hyprwire::Object>::Event<'_>,
     ) {
         let Some(client) = object.client() else {
             return;
         };
 
         match event {
-            moxsession_login_manager::Event::CreateSession { uid, username, tty } => {
+            session_manager::Event::CreateSession { uid, username, tty } => {
                 if !client.creds().uid.is_root() {
                     log::warn!(uid = client.creds().uid.as_raw(); "rejected request from non-root client");
                     return;
@@ -101,7 +101,7 @@ impl hyprwire::Dispatch<moxsession_login_manager::MoxsessionLoginManager> for Mo
 
                 self.next_session_id = self.next_session_id.wrapping_add(1);
             }
-            moxsession_login_manager::Event::DestroySession { session_id } => {
+            session_manager::Event::DestroySession { session_id } => {
                 if !client.creds().uid.is_root() {
                     log::warn!(uid = client.creds().uid.as_raw(); "rejected request from non-root client");
                     return;
@@ -131,20 +131,20 @@ impl hyprwire::Dispatch<moxsession_login_manager::MoxsessionLoginManager> for Mo
 
                 log::warn!(session_id; "destroy requested for unknown session");
             }
-            moxsession_login_manager::Event::Destroy => {}
+            session_manager::Event::Destroy => {}
         }
     }
 }
 
-impl hyprwire::Dispatch<moxsession_info_manager::MoxsessionInfoManager> for Moxsession {
+impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
     fn event(
         &mut self,
-        object: &moxsession_info_manager::MoxsessionInfoManager,
-        event: <moxsession_info_manager::MoxsessionInfoManager as hyprwire::Object>::Event<'_>,
+        object: &session_core_manager::SessionCoreManager,
+        event: <session_core_manager::SessionCoreManager as hyprwire::Object>::Event<'_>,
     ) {
         match event {
-            moxsession_info_manager::Event::GetSessionInfo {
-                moxsession_info_session,
+            session_core_manager::Event::GetSession {
+                session_core_session,
                 session_id,
             } => {
                 if let Some(session) = self
@@ -153,35 +153,35 @@ impl hyprwire::Dispatch<moxsession_info_manager::MoxsessionInfoManager> for Moxs
                     .find(|session| session.id == session_id)
                 {
                     log::debug!(session_id, uid = object.client().map(|c| c.creds().uid.as_raw()).unwrap_or(0); "session info requested");
-                    moxsession_info_session.send_session_id(session_id);
-                    moxsession_info_session.send_uid(session.uid);
-                    moxsession_info_session.send_username(&session.username);
-                    moxsession_info_session.send_tty(&session.tty);
+                    session_core_session.send_session_id(session_id);
+                    session_core_session.send_uid(session.uid);
+                    session_core_session.send_username(&session.username);
+                    session_core_session.send_tty(&session.tty);
                     if let Some(seat) = &session.seat {
-                        moxsession_info_session.send_seat(seat);
+                        session_core_session.send_seat(seat);
                     }
-                    moxsession_info_session.send_leader(session.leader_id as u32);
-                    moxsession_info_session.send_timestamp(
+                    session_core_session.send_leader(session.leader_id as u32);
+                    session_core_session.send_timestamp(
                         session
                             .timestamp
                             .duration_since(time::UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_secs() as u32,
                     );
-                    moxsession_info_session.send_done();
+                    session_core_session.send_done();
 
                     self.info_sessions.push(InfoSession {
                         id: session_id,
-                        object: moxsession_info_session,
+                        object: session_core_session,
                     });
                     return;
                 }
 
-                log::warn!(session_id; "get_session_info requested for unknown session");
-                moxsession_info_session.send_destroyed();
+                log::warn!(session_id; "get_session requested for unknown session");
+                session_core_session.send_destroyed();
             }
-            moxsession_info_manager::Event::GetSessionInfoByPid {
-                moxsession_info_session,
+            session_core_manager::Event::GetSessionByPid {
+                session_core_session,
                 pid,
             } => {
                 let Ok(Some(session_id)) = self.cgroup_manager.find_session_by_pid(pid) else {
@@ -194,47 +194,47 @@ impl hyprwire::Dispatch<moxsession_info_manager::MoxsessionInfoManager> for Moxs
                     .find(|session| session.id == session_id)
                 {
                     log::debug!(session_id, uid = object.client().map(|c| c.creds().uid.as_raw()).unwrap_or(0); "session info requested");
-                    moxsession_info_session.send_session_id(session_id);
-                    moxsession_info_session.send_uid(session.uid);
-                    moxsession_info_session.send_username(&session.username);
-                    moxsession_info_session.send_tty(&session.tty);
+                    session_core_session.send_session_id(session_id);
+                    session_core_session.send_uid(session.uid);
+                    session_core_session.send_username(&session.username);
+                    session_core_session.send_tty(&session.tty);
                     if let Some(seat) = &session.seat {
-                        moxsession_info_session.send_seat(seat);
+                        session_core_session.send_seat(seat);
                     }
-                    moxsession_info_session.send_leader(session.leader_id as u32);
-                    moxsession_info_session.send_timestamp(
+                    session_core_session.send_leader(session.leader_id as u32);
+                    session_core_session.send_timestamp(
                         session
                             .timestamp
                             .duration_since(time::UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_secs() as u32,
                     );
-                    moxsession_info_session.send_done();
+                    session_core_session.send_done();
 
                     self.info_sessions.push(InfoSession {
                         id: session_id,
-                        object: moxsession_info_session,
+                        object: session_core_session,
                     });
                     return;
                 }
 
-                log::warn!(session_id; "get_session_info requested for unknown session");
-                moxsession_info_session.send_destroyed();
+                log::warn!(session_id; "get_session requested for unknown session");
+                session_core_session.send_destroyed();
             }
-            moxsession_info_manager::Event::Destroy => {
+            session_core_manager::Event::Destroy => {
                 self.info_managers.retain(|m| m != object);
             }
         }
     }
 }
 
-impl hyprwire::Dispatch<moxsession_info_session::MoxsessionInfoSession> for Moxsession {
+impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for Sessiond {
     fn event(
         &mut self,
-        object: &moxsession_info_session::MoxsessionInfoSession,
-        event: <moxsession_info_session::MoxsessionInfoSession as hyprwire::Object>::Event<'_>,
+        object: &session_core_session::SessionCoreSession,
+        event: <session_core_session::SessionCoreSession as hyprwire::Object>::Event<'_>,
     ) {
-        let moxsession_info_session::Event::Destroy = event;
+        let session_core_session::Event::Destroy = event;
         self.info_sessions.retain(|info| info.object != *object);
     }
 }
@@ -253,16 +253,13 @@ fn main() -> anyhow::Result<()> {
         .filter(Some("daemon"), log_level)
         .init();
 
-    log::info!("moxsession daemon starting");
-
-    let path = path::Path::new("/run/mox/moxsession.sock");
-    fs::create_dir_all(path.parent().unwrap())?;
+    log::info!("sessiond daemon starting");
 
     let mut event_loop = calloop::EventLoop::try_new()?;
 
     let cgroup_manager = cgroup::CgroupManager::new(event_loop.handle())?;
 
-    let mut moxsession = Moxsession {
+    let mut sessiond = Sessiond {
         next_session_id: 1,
         sessions: Vec::new(),
         info_sessions: Vec::new(),
@@ -270,11 +267,13 @@ fn main() -> anyhow::Result<()> {
         cgroup_manager,
     };
 
+    let path = path::Path::new("/run/sessiond.sock");
     let mut socket = server::Server::bind(&path)?;
     fs::set_permissions(path, fs::Permissions::from_mode(0o777))?;
 
-    socket.add_implementation::<moxsession_login_v1::MoxsessionLoginV1Impl, _>(&mut moxsession, 1);
-    socket.add_implementation::<moxsession_info_v1::MoxsessionInfoV1Impl, _>(&mut moxsession, 1);
+    socket
+        .add_implementation::<session_management_v1::SessionManagementV1Impl, _>(&mut sessiond, 1);
+    socket.add_implementation::<session_core_v1::SessionCoreV1Impl, _>(&mut sessiond, 1);
 
     let fd_wrapper = unsafe { generic::FdWrapper::new(socket.extract_loop_fd().as_raw_fd()) };
     let source = generic::Generic::new(
@@ -293,7 +292,7 @@ fn main() -> anyhow::Result<()> {
         })
         .unwrap();
 
-    event_loop.run(None, &mut moxsession, |_| {})?;
+    event_loop.run(None, &mut sessiond, |_| {})?;
 
     Ok(())
 }

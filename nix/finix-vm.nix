@@ -1,13 +1,13 @@
 {
   pkgs,
-  moxsession,
+  sessiond,
   ...
 }:
 {
   services = {
-    moxsession = {
+    sessiond = {
       enable = true;
-      package = moxsession;
+      package = sessiond;
     };
     mdevd.enable = true;
   };

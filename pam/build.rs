@@ -1,6 +1,6 @@
 fn main() {
     hyprwire_scanner::configure()
         .with_targets(hyprwire_scanner::Targets::CLIENT)
-        .compile(&["../protocols/moxsession_login_v1.xml"])
+        .compile(&["../protocols/session_management_v1.xml"])
         .unwrap();
 }

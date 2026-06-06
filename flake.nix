@@ -58,7 +58,7 @@
         };
 
       packages = forAllSystems (pkgs: {
-        moxsession = pkgs.callPackage ./nix/package.nix {
+        sessiond = pkgs.callPackage ./nix/package.nix {
           rustPlatform =
             let
               rustToolchain = pkgs.rust-bin.stable.latest.default.override {
@@ -74,12 +74,12 @@
               rustc = rustToolchain;
             };
         };
-        default = self.packages.${pkgs.stdenv.hostPlatform.system}.moxsession;
+        default = self.packages.${pkgs.stdenv.hostPlatform.system}.sessiond;
       });
 
       nixosModules = {
-        moxsession = import ./nix/nixos.nix;
-        default = self.nixosModules.moxsession;
+        sessiond = import ./nix/nixos.nix;
+        default = self.nixosModules.sessiond;
       };
 
       formatter = forAllSystems (
@@ -107,7 +107,7 @@
           nixos-vm = nixpkgs.lib.nixosSystem {
             inherit system;
             specialArgs = {
-              inherit (self.packages.${system}) moxsession;
+              inherit (self.packages.${system}) sessiond;
               inherit moxseatd;
             };
             modules = [
@@ -133,7 +133,7 @@
           finix-vm = finix.lib.finixSystem {
             inherit (pkgs) lib;
             specialArgs = {
-              inherit (self.packages.${system}) moxsession;
+              inherit (self.packages.${system}) sessiond;
               inherit moxseatd;
             };
             modules = [

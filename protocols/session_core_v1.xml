@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<protocol name="moxsession_info_v1" version="1">
- <object name="moxsession_info_manager" version="1">
+<protocol name="session_core_v1" version="1">
+ <object name="session_core_manager" version="1">
   <description summary="session observer">
    Unprivileged read-only interface for observing active sessions.
   </description>
@@ -22,29 +22,29 @@
    </description>
    <arg name="session_id" type="uint" summary="destroyed session identifier"/>
   </s2c>
-  <c2s name="get_session_info">
+  <c2s name="get_session">
    <description summary="create a per-session info object">
-    Creates a moxsession_info_session object for the given session_id.
+    Creates a session_core_session object for the given session_id.
     The daemon immediately pushes all fields, followed by done.
     If the session does not exist, destroyed is sent instead.
    </description>
    <arg name="session_id" type="uint" summary="session to query"/>
-   <returns iface="moxsession_info_session"/>
+   <returns iface="session_core_session"/>
   </c2s>
-  <c2s name="get_session_info_by_pid">
+  <c2s name="get_session_by_pid">
    <description summary="create a per-session info object by leader PID">
-    Creates a moxsession_info_session object for the session whose leader
+    Creates a session_core_session object for the session whose leader
     PID matches the given pid. The daemon immediately pushes all fields,
     followed by done. If no matching session exists, destroyed is sent instead.
    </description>
    <arg name="pid" type="uint" summary="leader PID of the session to query"/>
-   <returns iface="moxsession_info_session"/>
+   <returns iface="session_core_session"/>
   </c2s>
   <c2s name="destroy" destructor="true">
    <description summary="destroy this object"/>
   </c2s>
  </object>
- <object name="moxsession_info_session" version="1">
+ <object name="session_core_session" version="1">
   <description summary="per-session information">
    Provides information about a single session. All fields are pushed
    immediately on creation and re-sent if they change.
@@ -76,7 +76,7 @@
   <s2c name="destroyed">
    <description summary="session has ended or did not exist">
     Sent when the session is destroyed or if the session_id passed to
-    get_session_info was not found. The client should release this object.
+    get_session was not found. The client should release this object.
    </description>
   </s2c>
   <c2s name="destroy" destructor="true">

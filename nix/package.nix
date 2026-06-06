@@ -8,7 +8,7 @@ let
   cargoToml = fromTOML (builtins.readFile ../Cargo.toml);
 in
 rustPlatform.buildRustPackage {
-  pname = "moxsession";
+  pname = "sessiond";
   inherit (cargoToml.workspace.package) version;
 
   cargoLock = {
@@ -44,17 +44,17 @@ rustPlatform.buildRustPackage {
 
   postInstall = ''
     mkdir -p $out/lib/security
-    mv $out/lib/libpam.so $out/lib/security/pam_moxsession.so
-    mv $out/bin/daemon $out/bin/moxsessiond
-    mv $out/bin/ctl $out/bin/moxsessionctl
+    mv $out/lib/libpam.so $out/lib/security/pam_sessiond.so
+    mv $out/bin/daemon $out/bin/sessiond
+    mv $out/bin/ctl $out/bin/sessionctl
   '';
 
   meta = {
     description = "";
-    homepage = "https://git.r0chd.pl/mox-desktop/moxsession";
+    homepage = "https://tangled.org/r0chd.pl/sessiond";
     license = lib.licenses.gpl3;
     maintainers = builtins.attrValues { inherit (lib.maintainers) r0chd; };
     platforms = lib.platforms.linux;
-    mainProgram = "moxsessiond";
+    mainProgram = "sessiond";
   };
 }

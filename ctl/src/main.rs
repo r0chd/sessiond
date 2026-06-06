@@ -1,15 +1,15 @@
-mod moxsession_info_v1 {
-    hyprwire::include_protocol!("moxsession_info_v1");
+mod session_core_v1 {
+    hyprwire::include_protocol!("session_core_v1");
     pub use client::*;
 }
 
 use clap::{Parser, Subcommand};
 use hyprwire::client;
-use moxsession_info_v1::{moxsession_info_manager, moxsession_info_session};
+use session_core_v1::{session_core_manager, session_core_session};
 
 struct Session {
     id: u32,
-    info_object: moxsession_info_session::MoxsessionInfoSession,
+    info_object: session_core_session::SessionCoreSession,
     uid: u32,
     username: String,
     tty: String,
@@ -21,18 +21,18 @@ struct Session {
 
 struct State(Vec<Session>);
 
-impl hyprwire::Dispatch<moxsession_info_manager::MoxsessionInfoManager> for State {
+impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for State {
     fn event(
         &mut self,
-        object: &moxsession_info_manager::MoxsessionInfoManager,
-        event: <moxsession_info_manager::MoxsessionInfoManager as hyprwire::Object>::Event<'_>,
+        object: &session_core_manager::SessionCoreManager,
+        event: <session_core_manager::SessionCoreManager as hyprwire::Object>::Event<'_>,
     ) {
         match event {
-            moxsession_info_manager::Event::Sessions { session_ids } => {
+            session_core_manager::Event::Sessions { session_ids } => {
                 for session_id in session_ids {
                     let session = Session {
                         id: session_id,
-                        info_object: object.send_get_session_info::<State>(session_id).unwrap(),
+                        info_object: object.send_get_session::<State>(session_id).unwrap(),
                         uid: 0,
                         username: String::new(),
                         tty: String::new(),
@@ -44,10 +44,10 @@ impl hyprwire::Dispatch<moxsession_info_manager::MoxsessionInfoManager> for Stat
                     self.0.push(session);
                 }
             }
-            moxsession_info_manager::Event::SessionAdded { session_id } => {
+            session_core_manager::Event::SessionAdded { session_id } => {
                 let session = Session {
                     id: session_id,
-                    info_object: object.send_get_session_info::<State>(session_id).unwrap(),
+                    info_object: object.send_get_session::<State>(session_id).unwrap(),
                     uid: 0,
                     username: String::new(),
                     tty: String::new(),
@@ -58,18 +58,18 @@ impl hyprwire::Dispatch<moxsession_info_manager::MoxsessionInfoManager> for Stat
                 };
                 self.0.push(session);
             }
-            moxsession_info_manager::Event::SessionRemoved { session_id } => {
+            session_core_manager::Event::SessionRemoved { session_id } => {
                 self.0.retain(|session| session.id != session_id);
             }
         }
     }
 }
 
-impl hyprwire::Dispatch<moxsession_info_session::MoxsessionInfoSession> for State {
+impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for State {
     fn event(
         &mut self,
-        object: &moxsession_info_session::MoxsessionInfoSession,
-        event: <moxsession_info_session::MoxsessionInfoSession as hyprwire::Object>::Event<'_>,
+        object: &session_core_session::SessionCoreSession,
+        event: <session_core_session::SessionCoreSession as hyprwire::Object>::Event<'_>,
     ) {
         let Some(session) = self
             .0
@@ -80,17 +80,15 @@ impl hyprwire::Dispatch<moxsession_info_session::MoxsessionInfoSession> for Stat
         };
 
         match event {
-            moxsession_info_session::Event::Uid { uid } => session.uid = uid,
-            moxsession_info_session::Event::Username { username } => session.username = username,
-            moxsession_info_session::Event::Tty { tty } => session.tty = tty,
-            moxsession_info_session::Event::Seat { seat } => session.seat = Some(seat),
-            moxsession_info_session::Event::Leader { leader } => session.leader = leader,
-            moxsession_info_session::Event::Timestamp { timestamp } => {
-                session.timestamp = timestamp
-            }
-            moxsession_info_session::Event::Done => session.done = true,
-            moxsession_info_session::Event::Destroyed => {}
-            moxsession_info_session::Event::SessionId { session_id: _ } => {}
+            session_core_session::Event::Uid { uid } => session.uid = uid,
+            session_core_session::Event::Username { username } => session.username = username,
+            session_core_session::Event::Tty { tty } => session.tty = tty,
+            session_core_session::Event::Seat { seat } => session.seat = Some(seat),
+            session_core_session::Event::Leader { leader } => session.leader = leader,
+            session_core_session::Event::Timestamp { timestamp } => session.timestamp = timestamp,
+            session_core_session::Event::Done => session.done = true,
+            session_core_session::Event::Destroyed => {}
+            session_core_session::Event::SessionId { session_id: _ } => {}
         }
     }
 }
@@ -113,18 +111,15 @@ fn main() -> anyhow::Result<()> {
 
     let mut state = State(Vec::new());
 
-    let mut socket = client::Client::connect("/run/mox/moxsession.sock")?;
+    let mut socket = client::Client::connect("/run/sessiond.sock")?;
     let event_queue = socket.new_event_queue();
 
-    socket.add_implementation::<moxsession_info_v1::MoxsessionInfoV1Impl>();
+    socket.add_implementation::<session_core_v1::SessionCoreV1Impl>();
 
     event_queue.wait_for_handshake(&mut state)?;
 
-    let _manager = socket.bind::<moxsession_info_manager::MoxsessionInfoManager, _>(
-        &event_queue,
-        &mut state,
-        1,
-    )?;
+    let _manager =
+        socket.bind::<session_core_manager::SessionCoreManager, _>(&event_queue, &mut state, 1)?;
 
     event_queue.roundtrip(&mut state)?;
 

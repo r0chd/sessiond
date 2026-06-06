@@ -21,7 +21,7 @@ in
 
   nixosModules = rec {
     default = import ./nix/nixos.nix;
-    moxsession = default;
+    sessiond = default;
   };
 
   formatter = import ./nix/formatter.nix { inherit pkgs rustToolchain; };
@@ -33,6 +33,6 @@ in
         rustc = rustToolchain;
       };
     };
-    moxsession = default;
+    sessiond = default;
   };
 }

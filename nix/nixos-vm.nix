@@ -1,7 +1,7 @@
 {
   pkgs,
   modulesPath,
-  moxsession,
+  sessiond,
   moxseatd,
   ...
 }:
@@ -15,9 +15,9 @@
       enable = true;
       package = moxseatd.packages.default;
     };
-    moxsession = {
+    sessiond = {
       enable = true;
-      package = moxsession;
+      package = sessiond;
     };
   };
 

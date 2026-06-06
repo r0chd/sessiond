@@ -7,14 +7,12 @@ use std::{fs, io, path};
 pub struct CgroupManager {
     root_path: &'static path::Path,
     cgroups: Vec<Cgroup>,
-    loop_handle: calloop::LoopHandle<'static, crate::Moxsession>,
+    loop_handle: calloop::LoopHandle<'static, crate::Sessiond>,
 }
 
 impl CgroupManager {
-    pub fn new(
-        loop_handle: calloop::LoopHandle<'static, crate::Moxsession>,
-    ) -> anyhow::Result<Self> {
-        let root_path = path::Path::new("/sys/fs/cgroup/moxsession");
+    pub fn new(loop_handle: calloop::LoopHandle<'static, crate::Sessiond>) -> anyhow::Result<Self> {
+        let root_path = path::Path::new("/sys/fs/cgroup/sessiond");
         fs::create_dir_all(root_path)?;
         log::info!(root = root_path.to_str(); "cgroup manager init");
 

@@ -5,28 +5,28 @@
   ...
 }:
 let
-  cfg = config.services.moxsession;
+  cfg = config.services.sessiond;
 in
 {
-  options.services.moxsession = {
-    enable = lib.mkEnableOption "moxsession";
-    package = lib.mkPackageOption pkgs "moxsession" { };
+  options.services.sessiond = {
+    enable = lib.mkEnableOption "sessiond";
+    package = lib.mkPackageOption pkgs "sessiond" { };
   };
 
   config = lib.mkIf cfg.enable {
-    systemd.services.moxsession = {
+    systemd.services.sessiond = {
       description = "session management daemon";
       wantedBy = [ "default.target" ];
 
       serviceConfig = {
-        ExecStart = "${cfg.package}/bin/moxsessiond";
+        ExecStart = "${cfg.package}/bin/sessiond";
         Environment = "LOG_LEVEL=info";
       };
     };
 
-    security.pam.services.login.rules.session.moxsession = {
+    security.pam.services.login.rules.session.sessiond = {
       control = "optional";
-      modulePath = "${cfg.package}/lib/security/pam_moxsession.so";
+      modulePath = "${cfg.package}/lib/security/pam_sessiond.so";
       order = 900;
     };
 

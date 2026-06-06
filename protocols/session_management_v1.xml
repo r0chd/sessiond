@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<protocol name="moxsession_login_v1" version="1">
- <object name="moxsession_login_manager" version="1">
+<protocol name="session_management_v1" version="1">
+ <object name="session_manager" version="1">
   <description summary="privileged session manager">
    Privileged interface for registering and deregistering sessions.
    Only accessible to root clients.

@@ -1,5 +1,6 @@
 use anyhow::Context;
 use calloop::generic;
+use rustix::process;
 use std::io::{Read, Seek};
 use std::os::fd::AsRawFd;
 use std::{fs, io, path};
@@ -94,6 +95,37 @@ impl CgroupManager {
                 }
             }
         })?;
+
+        Ok(())
+    }
+
+    pub fn kill_session(&self, session_id: u32) -> anyhow::Result<()> {
+        let cgroup = self
+            .cgroups
+            .iter()
+            .find(|cgroup| cgroup.session_id == session_id)
+            .context("session not found")?;
+        fs::write(cgroup.path.join("cgroup.kill"), b"1")?;
+
+        self.poll_destroy(session_id)?;
+
+        Ok(())
+    }
+
+    pub fn terminate_session(&self, session_id: u32) -> anyhow::Result<()> {
+        let cgroup = self
+            .cgroups
+            .iter()
+            .find(|cgroup| cgroup.session_id == session_id)
+            .context("session not found")?;
+        let procs = fs::read_to_string(cgroup.path.join("cgroup.procs"))?;
+        for line in procs.lines() {
+            let pid = line.trim().parse::<i32>()?;
+
+            process::kill_process(process::Pid::from_raw(pid).unwrap(), process::Signal::TERM)?;
+        }
+
+        self.poll_destroy(session_id)?;
 
         Ok(())
     }

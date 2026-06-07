@@ -1,5 +1,5 @@
 {
-  pkgs,
+  # pkgs,
   modulesPath,
   sessiond,
   moxseatd,
@@ -8,7 +8,7 @@
 {
   imports = [ "${modulesPath}/virtualisation/qemu-vm.nix" ];
 
-  systemd.package = pkgs.systemd.override { withLogind = false; };
+  # systemd.package = pkgs.systemd.override { withLogind = false; };
 
   services = {
     moxseatd = {

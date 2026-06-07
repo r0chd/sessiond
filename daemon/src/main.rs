@@ -26,17 +26,12 @@ struct Session {
     seat: Option<String>,
     timestamp: time::SystemTime,
     leader_id: i32,
-}
-
-struct InfoSession {
-    id: u32,
-    object: session_core_session::SessionCoreSession,
+    objects: Vec<session_core_session::SessionCoreSession>,
 }
 
 struct Sessiond {
     next_session_id: u32,
     sessions: Vec<Session>,
-    info_sessions: Vec<InfoSession>,
     info_managers: Vec<session_core_manager::SessionCoreManager>,
     cgroup_manager: cgroup::CgroupManager,
 }
@@ -91,6 +86,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
                     seat: None,
                     timestamp: time::SystemTime::now(),
                     leader_id,
+                    objects: Vec::new(),
                 };
                 self.sessions.push(session);
                 object.send_session_created(self.next_session_id);
@@ -114,9 +110,9 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
                 {
                     log::info!(session_id, uid = session.uid, username = session.username.as_str(); "session destroyed");
 
-                    self.info_sessions
-                        .extract_if(.., |info| info.id == session.id)
-                        .for_each(|info| info.object.send_destroyed());
+                    for object in session.objects.iter() {
+                        object.send_destroyed();
+                    }
 
                     for manager in &self.info_managers {
                         manager.send_session_removed(session_id);
@@ -149,7 +145,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
             } => {
                 if let Some(session) = self
                     .sessions
-                    .iter()
+                    .iter_mut()
                     .find(|session| session.id == session_id)
                 {
                     log::debug!(session_id, uid = object.client().map(|c| c.creds().uid.as_raw()).unwrap_or(0); "session info requested");
@@ -170,10 +166,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
                     );
                     session_core_session.send_done();
 
-                    self.info_sessions.push(InfoSession {
-                        id: session_id,
-                        object: session_core_session,
-                    });
+                    session.objects.push(session_core_session);
                     return;
                 }
 
@@ -190,7 +183,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
 
                 if let Some(session) = self
                     .sessions
-                    .iter()
+                    .iter_mut()
                     .find(|session| session.id == session_id)
                 {
                     log::debug!(session_id, uid = object.client().map(|c| c.creds().uid.as_raw()).unwrap_or(0); "session info requested");
@@ -211,10 +204,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
                     );
                     session_core_session.send_done();
 
-                    self.info_sessions.push(InfoSession {
-                        id: session_id,
-                        object: session_core_session,
-                    });
+                    session.objects.push(session_core_session);
                     return;
                 }
 
@@ -234,8 +224,54 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for Sessiond {
         object: &session_core_session::SessionCoreSession,
         event: <session_core_session::SessionCoreSession as hyprwire::Object>::Event<'_>,
     ) {
-        let session_core_session::Event::Destroy = event;
-        self.info_sessions.retain(|info| info.object != *object);
+        let Some(idx) = self.sessions.iter_mut().position(|session| {
+            session
+                .objects
+                .iter()
+                .any(|session_object| session_object == object)
+        }) else {
+            return;
+        };
+
+        match event {
+            session_core_session::Event::Terminate => {
+                let session = self.sessions.swap_remove(idx);
+
+                let Some(client) = object.client() else {
+                    return;
+                };
+                if !client.creds().uid.is_root() && client.creds().uid.as_raw() != session.uid {
+                    return;
+                }
+
+                log::info!(session_id = session.id; "terminate requested");
+                if let Err(err) = self.cgroup_manager.terminate_session(session.id) {
+                    log::error!(session_id = session.id, err = err.to_string().as_str(); "terminate failed");
+                }
+                self.sessions.swap_remove(idx);
+            }
+            session_core_session::Event::Kill => {
+                let Some(client) = object.client() else {
+                    return;
+                };
+                if !client.creds().uid.is_root()
+                    && client.creds().uid.as_raw() != self.sessions[idx].uid
+                {
+                    return;
+                }
+
+                log::info!(session_id = self.sessions[idx].id; "kill requested");
+                if let Err(err) = self.cgroup_manager.kill_session(self.sessions[idx].id) {
+                    log::error!(session_id = self.sessions[idx].id, err = err.to_string().as_str(); "kill failed");
+                }
+                self.sessions.swap_remove(idx);
+            }
+            session_core_session::Event::Destroy => {
+                self.sessions[idx]
+                    .objects
+                    .retain(|session_object| session_object != object);
+            }
+        }
     }
 }
 
@@ -262,7 +298,6 @@ fn main() -> anyhow::Result<()> {
     let mut sessiond = Sessiond {
         next_session_id: 1,
         sessions: Vec::new(),
-        info_sessions: Vec::new(),
         info_managers: Vec::new(),
         cgroup_manager,
     };

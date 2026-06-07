@@ -79,8 +79,28 @@
     get_session was not found. The client should release this object.
    </description>
   </s2c>
+  <s2c name="ok">
+   <description summary="last operation completed successfully"/>
+  </s2c>
+  <s2c name="error">
+   <description summary="last operation failed"/>
+   <arg name="code" type="uint" enum="error_code" summary="error kind"/>
+   <arg name="message" type="varchar" summary="human-readable error detail"/>
+  </s2c>
+  <c2s name="terminate">
+   <description summary="send SIGTERM to all processes in the session"/>
+  </c2s>
+  <c2s name="kill">
+   <description summary="forcibly kill all processes in the session via cgroup.kill"/>
+  </c2s>
   <c2s name="destroy" destructor="true">
    <description summary="destroy this object"/>
   </c2s>
  </object>
+
+ <enum name="error_code">
+  <value idx="0" name="not_found" summary="session or cgroup not found"/>
+  <value idx="1" name="permission_denied" summary="insufficient permissions to signal processes"/>
+  <value idx="2" name="io" summary="generic I/O error"/>
+ </enum>
 </protocol>

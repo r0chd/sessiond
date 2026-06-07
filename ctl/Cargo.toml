@@ -13,6 +13,7 @@ readme.workspace = true
 anyhow = "1.0.102"
 clap = { version = "4.6.1", features = ["derive"] }
 hyprwire = "0.4.2"
+owo-colors = "4.3.0"
 
 [build-dependencies]
 hyprwire-scanner = "0.4.2"

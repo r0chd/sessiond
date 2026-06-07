@@ -57,6 +57,7 @@
       nics.default.args = [
         "user"
         "model=virtio-net-pci"
+        "hostfwd=tcp::2222-:22"
       ];
     };
   };

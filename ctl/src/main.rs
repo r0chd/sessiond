@@ -5,11 +5,12 @@ mod session_core_v1 {
 
 use clap::{Parser, Subcommand};
 use hyprwire::client;
+use owo_colors::OwoColorize;
 use session_core_v1::{session_core_manager, session_core_session};
 
 struct Session {
     id: u32,
-    info_object: session_core_session::SessionCoreSession,
+    object: session_core_session::SessionCoreSession,
     uid: u32,
     username: String,
     tty: String,
@@ -19,7 +20,11 @@ struct Session {
     done: bool,
 }
 
-struct State(Vec<Session>);
+struct State {
+    sessions: Vec<Session>,
+    done: bool,
+    error: Option<String>,
+}
 
 impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for State {
     fn event(
@@ -32,7 +37,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for State {
                 for session_id in session_ids {
                     let session = Session {
                         id: session_id,
-                        info_object: object.send_get_session::<State>(session_id).unwrap(),
+                        object: object.send_get_session::<State>(session_id).unwrap(),
                         uid: 0,
                         username: String::new(),
                         tty: String::new(),
@@ -41,13 +46,13 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for State {
                         timestamp: 0,
                         done: false,
                     };
-                    self.0.push(session);
+                    self.sessions.push(session);
                 }
             }
             session_core_manager::Event::SessionAdded { session_id } => {
                 let session = Session {
                     id: session_id,
-                    info_object: object.send_get_session::<State>(session_id).unwrap(),
+                    object: object.send_get_session::<State>(session_id).unwrap(),
                     uid: 0,
                     username: String::new(),
                     tty: String::new(),
@@ -56,10 +61,10 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for State {
                     timestamp: 0,
                     done: false,
                 };
-                self.0.push(session);
+                self.sessions.push(session);
             }
             session_core_manager::Event::SessionRemoved { session_id } => {
-                self.0.retain(|session| session.id != session_id);
+                self.sessions.retain(|session| session.id != session_id);
             }
         }
     }
@@ -72,9 +77,9 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for State {
         event: <session_core_session::SessionCoreSession as hyprwire::Object>::Event<'_>,
     ) {
         let Some(session) = self
-            .0
+            .sessions
             .iter_mut()
-            .find(|session| session.info_object == *object)
+            .find(|session| session.object == *object)
         else {
             return;
         };
@@ -89,6 +94,13 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for State {
             session_core_session::Event::Done => session.done = true,
             session_core_session::Event::Destroyed => {}
             session_core_session::Event::SessionId { session_id: _ } => {}
+            session_core_session::Event::Ok => {
+                self.done = true;
+            }
+            session_core_session::Event::Error { code, message } => {
+                self.error = Some(format!("{message} (code={code})"));
+                self.done = true;
+            }
         }
     }
 }
@@ -97,6 +109,16 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for State {
 enum Command {
     #[command(about = "list all active sessions")]
     ListSessions,
+    #[command(about = "terminate one or more sessions")]
+    TerminateSession {
+        #[arg(required = true)]
+        ids: Vec<u32>,
+    },
+    #[command(about = "kill one or more sessions")]
+    KillSession {
+        #[arg(required = true)]
+        ids: Vec<u32>,
+    },
 }
 
 #[derive(Parser)]
@@ -109,7 +131,11 @@ pub(crate) struct Cli {
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    let mut state = State(Vec::new());
+    let mut state = State {
+        sessions: Vec::new(),
+        done: false,
+        error: None,
+    };
 
     let mut socket = client::Client::connect("/run/sessiond.sock")?;
     let event_queue = socket.new_event_queue();
@@ -123,14 +149,13 @@ fn main() -> anyhow::Result<()> {
 
     event_queue.roundtrip(&mut state)?;
 
-    while state.0.iter().any(|session| !session.done) {
+    while state.sessions.iter().any(|session| !session.done) {
         event_queue.dispatch_events(&mut state, true)?;
     }
 
     match cli.command {
         Command::ListSessions => {
-            let sessions = &state.0;
-            if sessions.is_empty() {
+            if state.sessions.is_empty() {
                 println!("No active sessions.");
                 return Ok(());
             }
@@ -156,43 +181,50 @@ fn main() -> anyhow::Result<()> {
                 }
             };
 
-            let id_w = sessions
+            let id_w = state
+                .sessions
                 .iter()
                 .map(|s| s.id.to_string().len())
                 .max()
                 .unwrap_or(0)
                 .max(2);
-            let uid_w = sessions
+            let uid_w = state
+                .sessions
                 .iter()
                 .map(|s| s.uid.to_string().len())
                 .max()
                 .unwrap_or(0)
                 .max(3);
-            let user_w = sessions
+            let user_w = state
+                .sessions
                 .iter()
                 .map(|s| s.username.len())
                 .max()
                 .unwrap_or(0)
                 .max(4);
-            let tty_w = sessions
+            let tty_w = state
+                .sessions
                 .iter()
                 .map(|s| s.tty.len())
                 .max()
                 .unwrap_or(0)
                 .max(3);
-            let seat_w = sessions
+            let seat_w = state
+                .sessions
                 .iter()
                 .map(|s| s.seat.as_deref().unwrap_or("-").len())
                 .max()
                 .unwrap_or(0)
                 .max(4);
-            let leader_w = sessions
+            let leader_w = state
+                .sessions
                 .iter()
                 .map(|s| s.leader.to_string().len())
                 .max()
                 .unwrap_or(0)
                 .max(6);
-            let since_w = sessions
+            let since_w = state
+                .sessions
                 .iter()
                 .map(|s| fmt_ts(s.timestamp).len())
                 .max()
@@ -220,7 +252,7 @@ fn main() -> anyhow::Result<()> {
                         + since_w
                 )
             );
-            for session in sessions {
+            for session in state.sessions {
                 println!(
                     "  {:<id_w$}  {:<uid_w$}  {:<user_w$}  {:<tty_w$}  {:<seat_w$}  {:<leader_w$}  {:<since_w$}",
                     session.id,
@@ -231,6 +263,74 @@ fn main() -> anyhow::Result<()> {
                     session.leader,
                     fmt_ts(session.timestamp),
                 );
+            }
+        }
+        Command::TerminateSession { ids } => {
+            let mut unmatched = Vec::new();
+            let mut matched = Vec::new();
+
+            for id in ids.iter() {
+                if let Some(session) = state.sessions.iter().find(|session| session.id == *id) {
+                    matched.push(session.object.clone());
+                } else {
+                    unmatched.push(id);
+                }
+            }
+
+            if !unmatched.is_empty() {
+                let ids = unmatched
+                    .iter()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                eprintln!("{} unknown session ids: {ids}", "error:".red());
+                return Ok(());
+            }
+
+            for matched in matched {
+                matched.send_terminate();
+            }
+
+            while !state.done {
+                event_queue.dispatch_events(&mut state, true)?;
+            }
+
+            if let Some(err) = state.error {
+                eprintln!("{} {err}", "error:".red());
+            }
+        }
+        Command::KillSession { ids } => {
+            let mut unmatched = Vec::new();
+            let mut matched = Vec::new();
+
+            for id in ids.iter() {
+                if let Some(session) = state.sessions.iter().find(|session| session.id == *id) {
+                    matched.push(session.object.clone());
+                } else {
+                    unmatched.push(id);
+                }
+            }
+
+            if !unmatched.is_empty() {
+                let ids = unmatched
+                    .iter()
+                    .map(|id| id.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                eprintln!("{} unknown session ids: {ids}", "error:".red());
+                return Ok(());
+            }
+
+            for matched in matched {
+                matched.send_kill();
+            }
+
+            while !state.done {
+                event_queue.dispatch_events(&mut state, true)?;
+            }
+
+            if let Some(err) = state.error {
+                eprintln!("{} {err}", "error:".red());
             }
         }
     }

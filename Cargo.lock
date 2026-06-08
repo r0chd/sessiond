@@ -162,6 +162,7 @@ dependencies = [
  "hyprwire",
  "hyprwire-scanner",
  "owo-colors",
+ "rustix",
 ]
 
 [[package]]

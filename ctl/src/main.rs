@@ -3,9 +3,11 @@ mod session_core_v1 {
     pub use client::*;
 }
 
+use anyhow::Context;
 use clap::{Parser, Subcommand};
 use hyprwire::client;
 use owo_colors::OwoColorize;
+use rustix::process;
 use session_core_v1::{session_core_manager, session_core_session};
 
 struct Session {
@@ -93,7 +95,6 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for State {
             session_core_session::Event::Timestamp { timestamp } => session.timestamp = timestamp,
             session_core_session::Event::Done => session.done = true,
             session_core_session::Event::Destroyed => {}
-            session_core_session::Event::SessionId { session_id: _ } => {}
             session_core_session::Event::Ok => {
                 self.done = true;
             }
@@ -101,6 +102,7 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for State {
                 self.error = Some(format!("{message} (code={code})"));
                 self.done = true;
             }
+            _ => {}
         }
     }
 }
@@ -110,15 +112,13 @@ enum Command {
     #[command(about = "list all active sessions")]
     ListSessions,
     #[command(about = "terminate one or more sessions")]
-    TerminateSession {
-        #[arg(required = true)]
-        ids: Vec<u32>,
-    },
+    TerminateSession { ids: Vec<u32> },
     #[command(about = "kill one or more sessions")]
-    KillSession {
-        #[arg(required = true)]
-        ids: Vec<u32>,
-    },
+    KillSession { ids: Vec<u32> },
+    #[command(about = "lock one or more sessions")]
+    LockSession { ids: Vec<u32> },
+    #[command(about = "unlock one or more sessions")]
+    UnlockSession { ids: Vec<u32> },
 }
 
 #[derive(Parser)]
@@ -265,7 +265,35 @@ fn main() -> anyhow::Result<()> {
                 );
             }
         }
-        Command::TerminateSession { ids } => {
+        Command::TerminateSession { ref ids }
+        | Command::KillSession { ref ids }
+        | Command::LockSession { ref ids }
+        | Command::UnlockSession { ref ids } => {
+            let send: fn(&session_core_session::SessionCoreSession) = match &cli.command {
+                Command::TerminateSession { .. } => |obj| obj.send_terminate(),
+                Command::KillSession { .. } => |obj| obj.send_kill(),
+                Command::LockSession { .. } => |obj| obj.send_lock(),
+                Command::UnlockSession { .. } => |obj| obj.send_unlock(),
+                _ => unreachable!(),
+            };
+
+            if ids.is_empty() {
+                let uid = process::getuid();
+
+                let session = state
+                    .sessions
+                    .iter()
+                    .find(|session| session.uid == uid.as_raw())
+                    .context(format!(
+                        "{} Session for uid {} not found, check if pam module is installed",
+                        "error:".red(),
+                        uid.as_raw()
+                    ))?;
+                send(&session.object);
+
+                return Ok(());
+            }
+
             let mut unmatched = Vec::new();
             let mut matched = Vec::new();
 
@@ -287,42 +315,8 @@ fn main() -> anyhow::Result<()> {
                 return Ok(());
             }
 
-            for matched in matched {
-                matched.send_terminate();
-            }
-
-            while !state.done {
-                event_queue.dispatch_events(&mut state, true)?;
-            }
-
-            if let Some(err) = state.error {
-                eprintln!("{} {err}", "error:".red());
-            }
-        }
-        Command::KillSession { ids } => {
-            let mut unmatched = Vec::new();
-            let mut matched = Vec::new();
-
-            for id in ids.iter() {
-                if let Some(session) = state.sessions.iter().find(|session| session.id == *id) {
-                    matched.push(session.object.clone());
-                } else {
-                    unmatched.push(id);
-                }
-            }
-
-            if !unmatched.is_empty() {
-                let ids = unmatched
-                    .iter()
-                    .map(|id| id.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                eprintln!("{} unknown session ids: {ids}", "error:".red());
-                return Ok(());
-            }
-
-            for matched in matched {
-                matched.send_kill();
+            for obj in matched {
+                send(&obj);
             }
 
             while !state.done {

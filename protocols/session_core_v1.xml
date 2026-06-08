@@ -70,6 +70,12 @@
   <s2c name="timestamp">
    <arg name="timestamp" type="uint" summary="session start time (seconds since Unix epoch)"/>
   </s2c>
+  <s2c name="locked">
+   <description summary="session is locked"/>
+  </s2c>
+  <s2c name="unlocked">
+   <description summary="session is unlocked"/>
+  </s2c>
   <s2c name="done">
    <description summary="initial field dump complete"/>
   </s2c>
@@ -87,6 +93,12 @@
    <arg name="code" type="uint" enum="error_code" summary="error kind"/>
    <arg name="message" type="varchar" summary="human-readable error detail"/>
   </s2c>
+  <c2s name="lock">
+   <description summary="lock the session"/>
+  </c2s>
+  <c2s name="unlock">
+   <description summary="unlock the session"/>
+  </c2s>
   <c2s name="terminate">
    <description summary="send SIGTERM to all processes in the session"/>
   </c2s>

@@ -6,6 +6,7 @@ mod session_management_v1 {
 mod session_core_v1 {
     hyprwire::include_protocol!("session_core_v1");
     pub use server::*;
+    pub use spec::*;
 }
 
 mod cgroup;
@@ -241,6 +242,10 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for Sessiond {
                     return;
                 };
                 if !client.creds().uid.is_root() && client.creds().uid.as_raw() != session.uid {
+                    object.send_error(
+                        session_core_v1::ErrorCode::PermissionDenied as u32,
+                        "permission denied",
+                    );
                     return;
                 }
 
@@ -257,6 +262,10 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for Sessiond {
                 if !client.creds().uid.is_root()
                     && client.creds().uid.as_raw() != self.sessions[idx].uid
                 {
+                    object.send_error(
+                        session_core_v1::ErrorCode::PermissionDenied as u32,
+                        "permission denied",
+                    );
                     return;
                 }
 
@@ -265,6 +274,44 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for Sessiond {
                     log::error!(session_id = self.sessions[idx].id, err = err.to_string().as_str(); "kill failed");
                 }
                 self.sessions.swap_remove(idx);
+            }
+            session_core_session::Event::Lock => {
+                let Some(client) = object.client() else {
+                    return;
+                };
+                if !client.creds().uid.is_root()
+                    && client.creds().uid.as_raw() != self.sessions[idx].uid
+                {
+                    object.send_error(
+                        session_core_v1::ErrorCode::PermissionDenied as u32,
+                        "permission denied",
+                    );
+                    return;
+                }
+
+                log::info!(session_id = self.sessions[idx].id; "lock requested");
+                for object in self.sessions[idx].objects.iter() {
+                    object.send_locked();
+                }
+            }
+            session_core_session::Event::Unlock => {
+                let Some(client) = object.client() else {
+                    return;
+                };
+                if !client.creds().uid.is_root()
+                    && client.creds().uid.as_raw() != self.sessions[idx].uid
+                {
+                    object.send_error(
+                        session_core_v1::ErrorCode::PermissionDenied as u32,
+                        "permission denied",
+                    );
+                    return;
+                }
+
+                log::info!(session_id = self.sessions[idx].id; "unlock requested");
+                for object in self.sessions[idx].objects.iter() {
+                    object.send_unlocked();
+                }
             }
             session_core_session::Event::Destroy => {
                 self.sessions[idx]

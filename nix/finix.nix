@@ -18,6 +18,7 @@ in
       description = "session management daemon";
       conditions = [ ];
       command = "${cfg.package}/bin/sessiond";
+      log = true;
     };
 
     security.pam.services.login.text = lib.mkAfter ''

@@ -5,11 +5,16 @@
 }:
 {
   services = {
+    sysklogd.enable = true;
     sessiond = {
       enable = true;
       package = sessiond;
     };
     mdevd.enable = true;
+    getty = {
+      enable = true;
+      ttys = [ "tty1" "tty2" "ttyS0" ];
+    };
   };
 
   boot = {
@@ -52,6 +57,10 @@
         "-usb"
         "-device"
         "usb-tablet,bus=usb-bus.0"
+        "-monitor"
+        "unix:/tmp/sessiond-vm-monitor.sock,server,nowait"
+        "-serial"
+        "unix:/tmp/sessiond-vm-serial.sock,server,nowait"
       ];
       package = pkgs.qemu_full;
       nics.default.args = [
@@ -61,6 +70,10 @@
       ];
     };
   };
+
+  finit.tmpfiles.rules = [
+    "d /var/log 0755 root root -"
+  ];
 
   users.users = {
     user_1 = {

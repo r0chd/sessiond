@@ -1,6 +1,7 @@
 mod session_core_v1 {
     hyprwire::include_protocol!("session_core_v1");
     pub use client::*;
+    pub use spec::*;
 }
 
 use anyhow::Context;
@@ -19,6 +20,7 @@ struct Session {
     seat: Option<String>,
     leader: u32,
     timestamp: u32,
+    active: session_core_v1::ActiveState,
     done: bool,
 }
 
@@ -47,6 +49,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for State {
                         leader: 0,
                         timestamp: 0,
                         done: false,
+                        active: session_core_v1::ActiveState::Online,
                     };
                     self.sessions.push(session);
                 }
@@ -62,6 +65,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for State {
                     leader: 0,
                     timestamp: 0,
                     done: false,
+                    active: session_core_v1::ActiveState::Online,
                 };
                 self.sessions.push(session);
             }
@@ -101,6 +105,14 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for State {
             session_core_session::Event::Error { code, message } => {
                 self.error = Some(format!("{message} (code={code})"));
                 self.done = true;
+            }
+            session_core_session::Event::Active { state } => {
+                session.active = match state {
+                    0 => session_core_v1::ActiveState::Online,
+                    1 => session_core_v1::ActiveState::Active,
+                    2 => session_core_v1::ActiveState::Closing,
+                    _ => unimplemented!("unknown active state: {state}"),
+                };
             }
             _ => {}
         }
@@ -159,6 +171,14 @@ fn main() -> anyhow::Result<()> {
                 println!("No active sessions.");
                 return Ok(());
             }
+
+            let fmt_state = |s: &session_core_v1::ActiveState| -> &'static str {
+                match s {
+                    session_core_v1::ActiveState::Online => "online",
+                    session_core_v1::ActiveState::Active => "active",
+                    session_core_v1::ActiveState::Closing => "closing",
+                }
+            };
 
             let fmt_ts = |ts: u32| -> String {
                 use std::time::{Duration, UNIX_EPOCH};
@@ -230,10 +250,17 @@ fn main() -> anyhow::Result<()> {
                 .max()
                 .unwrap_or(0)
                 .max(5);
+            let state_w = state
+                .sessions
+                .iter()
+                .map(|s| fmt_state(&s.active).len())
+                .max()
+                .unwrap_or(0)
+                .max(5);
 
             println!(
-                "  {:<id_w$}  {:<uid_w$}  {:<user_w$}  {:<tty_w$}  {:<seat_w$}  {:<leader_w$}  {:<since_w$}",
-                "ID", "UID", "USER", "TTY", "SEAT", "LEADER", "SINCE",
+                "  {:<id_w$}  {:<uid_w$}  {:<user_w$}  {:<tty_w$}  {:<seat_w$}  {:<leader_w$}  {:<since_w$}  {:<state_w$}",
+                "ID", "UID", "USER", "TTY", "SEAT", "LEADER", "SINCE", "STATE",
             );
             println!(
                 "  {}",
@@ -250,11 +277,13 @@ fn main() -> anyhow::Result<()> {
                         + leader_w
                         + 2
                         + since_w
+                        + 2
+                        + state_w
                 )
             );
             for session in state.sessions {
                 println!(
-                    "  {:<id_w$}  {:<uid_w$}  {:<user_w$}  {:<tty_w$}  {:<seat_w$}  {:<leader_w$}  {:<since_w$}",
+                    "  {:<id_w$}  {:<uid_w$}  {:<user_w$}  {:<tty_w$}  {:<seat_w$}  {:<leader_w$}  {:<since_w$}  {:<state_w$}",
                     session.id,
                     session.uid,
                     session.username,
@@ -262,6 +291,7 @@ fn main() -> anyhow::Result<()> {
                     session.seat.as_deref().unwrap_or("-"),
                     session.leader,
                     fmt_ts(session.timestamp),
+                    fmt_state(&session.active),
                 );
             }
         }

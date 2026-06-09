@@ -145,6 +145,7 @@
             ++ builtins.attrValues {
               inherit (finix.nixosModules)
                 getty
+                sysklogd
                 ;
             };
           };

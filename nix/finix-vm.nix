@@ -4,6 +4,8 @@
   ...
 }:
 {
+  environment.systemPackages = [ pkgs.busybox ];
+
   services = {
     sysklogd.enable = true;
     sessiond = {
@@ -13,7 +15,11 @@
     mdevd.enable = true;
     getty = {
       enable = true;
-      ttys = [ "tty1" "tty2" "ttyS0" ];
+      ttys = [
+        "tty1"
+        "tty2"
+        "ttyS0"
+      ];
     };
   };
 

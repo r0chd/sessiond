@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="seat_v1" version="1">
+ <object name="seat_manager" version="1">
+  <description summary="seat manager">
+   Interface for creating client seat connections.
+  </description>
+  <c2s name="open_seat">
+   <description summary="open the caller's seat">
+    Creates a seat object for the client's current session.
+    The daemon sends either enabled or disabled to indicate the initial seat
+    state.
+   </description>
+   <returns iface="seat"/>
+  </c2s>
+  <c2s name="destroy" destructor="true">
+   <description summary="destroy this object"/>
+  </c2s>
+ </object>
+
+ <object name="seat" version="1">
+  <description summary="client seat">
+   Seat control interface based on libseat. A client opens a seat, reacts to
+   enabled and disabled events, opens device objects while enabled, and may
+   request session switches when supported by the daemon.
+  </description>
+  <s2c name="enabled">
+   <description summary="seat is active for this client">
+    Sent when the client may open and use seat devices.
+   </description>
+  </s2c>
+  <s2c name="disabled">
+   <description summary="seat is inactive for this client">
+    Sent when the client must stop using devices opened through this seat and
+    acknowledge the state change with ack_disabled.
+   </description>
+  </s2c>
+  <s2c name="session_switched">
+   <description summary="session switch became active">
+    Emitted when a session switch has taken effect.
+   </description>
+   <arg name="session" type="uint" summary="active session or VT number"/>
+  </s2c>
+  <s2c name="seat_error">
+   <description summary="fatal seat protocol error">
+    Sent before the seat object is terminated after a fatal seat-scoped
+    protocol error.
+   </description>
+   <arg name="seat_error" type="enum" interface="seat_error" summary="error kind"/>
+   <arg name="message" type="varchar" summary="human-readable error detail"/>
+  </s2c>
+  <c2s name="ack_disabled">
+   <description summary="acknowledge disabled state">
+    Acknowledges the most recent disabled event.
+   </description>
+  </c2s>
+  <c2s name="open_device">
+   <description summary="open a device on this seat">
+    Opens path and returns a device object. The returned object resolves
+    exactly once with either opened or failed.
+   </description>
+   <returns iface="device"/>
+   <arg name="path" type="varchar" summary="device path"/>
+  </c2s>
+  <c2s name="switch_session">
+   <description summary="switch to another session or VT">
+    Requests switching to the given target session. The daemon reports a seat
+    error if switching is not supported.
+   </description>
+   <arg name="session" type="uint" summary="target session or VT number"/>
+  </c2s>
+  <c2s name="destroy" destructor="true">
+   <description summary="close the seat">
+    Closes the seat and any devices still associated with it.
+   </description>
+  </c2s>
+ </object>
+
+ <object name="device" version="1">
+  <description summary="seat device">
+   Device object created by seat.open_device. It resolves exactly once with
+   either opened or failed. If revoked is emitted, the device is permanently
+   unusable and the client should destroy the object.
+  </description>
+  <s2c name="opened">
+   <description summary="device opened successfully"/>
+   <arg name="device_id" type="uint" summary="device id"/>
+   <arg name="fd" type="fd" summary="opened device file descriptor"/>
+   <arg name="path" type="varchar" summary="device path"/>
+  </s2c>
+  <s2c name="failed">
+   <description summary="device open failed"/>
+   <arg name="device_error" type="enum" interface="device_error" summary="error kind"/>
+   <arg name="errno" type="uint" summary="system errno value"/>
+   <arg name="message" type="varchar" summary="human-readable error detail"/>
+  </s2c>
+  <s2c name="revoked">
+   <description summary="device revoked">
+    The fd and object must not be used again after this event.
+   </description>
+  </s2c>
+  <c2s name="destroy" destructor="true">
+   <description summary="close the device handle"/>
+  </c2s>
+ </object>
+
+ <enum name="device_error">
+  <value idx="0" name="seat_disabled" summary="seat was disabled when opening the device"/>
+  <value idx="1" name="open_failed" summary="device open failed"/>
+ </enum>
+
+ <enum name="seat_error">
+  <value idx="0" name="invalid_ack_disabled" summary="ack_disabled was sent while enabled"/>
+  <value idx="1" name="already_disabled" summary="disabled state was already acknowledged"/>
+  <value idx="2" name="invalid_switch_session" summary="session switching is not supported"/>
+ </enum>
+</protocol>

@@ -58,8 +58,8 @@
   <s2c name="username">
    <arg name="username" type="varchar" summary="username"/>
   </s2c>
-  <s2c name="tty">
-   <arg name="tty" type="varchar" summary="TTY device"/>
+  <s2c name="vt">
+   <arg name="vt" type="uint" summary="virtual terminal number"/>
   </s2c>
   <s2c name="seat">
    <arg name="seat" type="varchar" summary="seat name"/>
@@ -72,7 +72,7 @@
   </s2c>
   <s2c name="active">
    <description summary="session active state"/>
-   <arg name="state" type="uint" enum="active_state" summary="session active state"/>
+   <arg name="state" type="enum" interface="active_state" summary="session active state"/>
   </s2c>
   <s2c name="locked">
    <description summary="session is locked"/>
@@ -118,6 +118,7 @@
   <value idx="0" name="online" summary="session is logged in but not in the foreground"/>
   <value idx="1" name="active" summary="session is in the foreground"/>
   <value idx="2" name="closing" summary="session is being destroyed"/>
+  <value idx="3" name="opening" summary="session is being created"/>
  </enum>
 
  <enum name="error_code">

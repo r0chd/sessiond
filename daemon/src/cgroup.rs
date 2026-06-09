@@ -1,3 +1,4 @@
+use crate::session::SessionId;
 use anyhow::Context;
 use calloop::generic;
 use rustix::process;
@@ -26,17 +27,19 @@ impl CgroupManager {
 
     pub fn create_session_cgroup(
         &mut self,
-        session_id: u32,
+        session_id: SessionId,
         leader_pid: i32,
     ) -> anyhow::Result<()> {
-        let session_cgroup_path = self.root_path.join(format!("session-{session_id}"));
+        let session_cgroup_path = self
+            .root_path
+            .join(format!("session-{}", session_id.as_raw()));
         fs::create_dir(&session_cgroup_path)?;
         fs::write(
             session_cgroup_path.join("cgroup.procs"),
             leader_pid.to_string(),
         )?;
 
-        log::info!(session_id = session_id, leader_pid = leader_pid, path = session_cgroup_path.to_str(); "cgroup created");
+        log::info!(session_id = session_id.as_raw(), leader_pid = leader_pid, path = session_cgroup_path.to_str(); "cgroup created");
 
         let cgroup = Cgroup {
             session_id,
@@ -48,7 +51,7 @@ impl CgroupManager {
         Ok(())
     }
 
-    pub fn poll_destroy(&self, session_id: u32) -> anyhow::Result<()> {
+    pub fn poll_destroy(&self, session_id: SessionId) -> anyhow::Result<()> {
         let cgroup = self
             .cgroups
             .iter()
@@ -80,7 +83,7 @@ impl CgroupManager {
                         .context("session cgroup not found")?;
 
                     fs::remove_dir(&cgroup.path)?;
-                    log::info!(session_id = session_id, path = cgroup.path.to_str(); "cgroup destroyed");
+                    log::info!(session_id = session_id.as_raw(), path = cgroup.path.to_str(); "cgroup destroyed");
                     return Ok(calloop::PostAction::Remove);
                 }
 
@@ -90,7 +93,7 @@ impl CgroupManager {
             match result {
                 Ok(action) => Ok(action),
                 Err(e) => {
-                    log::error!(session_id = session_id, error = e.to_string().as_str(); "cgroup poll error");
+                    log::error!(session_id = session_id.as_raw(), error = e.to_string().as_str(); "cgroup poll error");
                     Ok(calloop::PostAction::Remove)
                 }
             }
@@ -99,7 +102,7 @@ impl CgroupManager {
         Ok(())
     }
 
-    pub fn kill_session(&self, session_id: u32) -> anyhow::Result<()> {
+    pub fn kill_session(&self, session_id: SessionId) -> anyhow::Result<()> {
         let cgroup = self
             .cgroups
             .iter()
@@ -112,7 +115,7 @@ impl CgroupManager {
         Ok(())
     }
 
-    pub fn terminate_session(&self, session_id: u32) -> anyhow::Result<()> {
+    pub fn terminate_session(&self, session_id: SessionId) -> anyhow::Result<()> {
         let cgroup = self
             .cgroups
             .iter()
@@ -130,7 +133,7 @@ impl CgroupManager {
         Ok(())
     }
 
-    pub fn find_session_by_pid(&self, pid: u32) -> anyhow::Result<Option<u32>> {
+    pub fn find_session_by_pid(&self, pid: u32) -> anyhow::Result<Option<SessionId>> {
         for cgroup in self.cgroups.iter() {
             let procs = fs::read_to_string(cgroup.path.join("cgroup.procs"))?;
 
@@ -148,6 +151,6 @@ impl CgroupManager {
 }
 
 struct Cgroup {
-    session_id: u32,
+    session_id: SessionId,
     path: path::PathBuf,
 }

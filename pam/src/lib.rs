@@ -6,10 +6,10 @@ mod session_management_v1 {
 use hyprwire::client;
 use pamsm::{PamLibExt, PamServiceModule};
 use session_management_v1::session_manager;
-use std::path;
 
 struct Session {
     session_id: Option<u32>,
+    seat: Option<String>,
 }
 
 impl hyprwire::Dispatch<session_manager::SessionManager> for Session {
@@ -18,8 +18,9 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Session {
         _: &session_manager::SessionManager,
         event: <session_manager::SessionManager as hyprwire::Object>::Event<'_>,
     ) {
-        let session_manager::Event::SessionCreated { session_id } = event;
+        let session_manager::Event::SessionCreated { session_id, seat } = event;
         self.session_id = Some(session_id);
+        self.seat = Some(seat.to_string());
     }
 }
 
@@ -28,7 +29,10 @@ struct Pam;
 impl PamServiceModule for Pam {
     fn open_session(pamh: pamsm::Pam, _: pamsm::PamFlags, _: Vec<String>) -> pamsm::PamError {
         fn inner(pamh: pamsm::Pam) -> Result<(), pamsm::PamError> {
-            let mut session = Session { session_id: None };
+            let mut session = Session {
+                session_id: None,
+                seat: None,
+            };
 
             let mut socket = client::Client::connect("/run/sessiond.sock")
                 .map_err(|_| pamsm::PamError::SESSION_ERR)?;
@@ -49,21 +53,22 @@ impl PamServiceModule for Pam {
                 .ok_or(pamsm::PamError::USER_UNKNOWN)?
                 .to_string_lossy()
                 .to_string();
-            let tty: path::PathBuf = pamh
+            let pam_tty = pamh
                 .get_tty()?
                 .ok_or(pamsm::PamError::SESSION_ERR)?
                 .to_string_lossy()
-                .to_string()
-                .into();
+                .to_string();
 
             let uid = users::get_user_by_name(&username)
                 .ok_or(pamsm::PamError::USER_UNKNOWN)?
                 .uid();
-            let tty_name = tty
-                .file_name()
-                .ok_or(pamsm::PamError::SESSION_ERR)?
-                .to_string_lossy();
-            manager.send_create_session(uid, username, tty_name);
+            let vt = pam_tty
+                .rsplit('/')
+                .next()
+                .and_then(|name| name.strip_prefix("tty"))
+                .and_then(|vt| vt.parse().ok())
+                .unwrap_or(0);
+            manager.send_create_session(uid, username, vt);
 
             while session.session_id.is_none() {
                 event_queue
@@ -76,6 +81,9 @@ impl PamServiceModule for Pam {
                 .map_err(|_| pamsm::PamError::SESSION_ERR)?;
 
             pamh.putenv(&format!("XDG_SESSION_ID={session_id}"))?;
+            if let Some(seat) = session.seat {
+                pamh.putenv(&format!("XDG_SEAT={seat}"))?;
+            }
             pamh.putenv(&format!("XDG_RUNTIME_DIR=/run/user/{uid}"))?;
 
             Ok(())
@@ -99,7 +107,10 @@ impl PamServiceModule for Pam {
                         .map_err(|_| pamsm::PamError::SESSION_ERR)
                 })?;
 
-            let mut session = Session { session_id: None };
+            let mut session = Session {
+                session_id: None,
+                seat: None,
+            };
 
             let mut socket = client::Client::connect("/run/sessiond.sock")
                 .map_err(|_| pamsm::PamError::SESSION_ERR)?;

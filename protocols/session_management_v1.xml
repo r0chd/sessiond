@@ -12,13 +12,14 @@
    </description>
    <arg name="uid" type="uint" summary="user id"/>
    <arg name="username" type="varchar" summary="username"/>
-   <arg name="tty" type="varchar" summary="TTY device"/>
+   <arg name="vt" type="uint" summary="virtual terminal number"/>
   </c2s>
   <s2c name="session_created">
    <description summary="session ID assigned to the new session">
     Sent only to the manager that called create_session.
    </description>
    <arg name="session_id" type="uint" summary="unique session identifier"/>
+   <arg name="seat" type="varchar" summary="seat name assigned to the session"/>
   </s2c>
   <c2s name="destroy_session">
    <description summary="deregister a session">

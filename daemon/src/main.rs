@@ -2,83 +2,148 @@ mod session_management_v1 {
     hyprwire::include_protocol!("session_management_v1");
     pub use server::*;
 }
-
 mod session_core_v1 {
     hyprwire::include_protocol!("session_core_v1");
     pub use server::*;
     pub use spec::*;
 }
+mod seat_v1 {
+    hyprwire::include_protocol!("seat_v1");
+    pub use server::*;
+    pub use spec::*;
+}
 
 mod cgroup;
+mod client;
+mod device;
+mod seat;
+mod session;
+mod terminal;
 
-use calloop::generic;
+use calloop::{generic, signals};
+use clap::Parser;
 use hyprwire::server;
+use rustix::{net, process};
 use session_core_v1::{session_core_manager, session_core_session};
 use session_management_v1::session_manager;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
-use std::{env, fs, path, time};
+use std::{cell, env, fs, path, rc};
 
-struct Session {
-    id: u32,
-    uid: u32,
-    username: String,
-    tty: String,
-    seat: Option<String>,
-    timestamp: time::SystemTime,
-    leader_id: i32,
-    objects: Vec<session_core_session::SessionCoreSession>,
-    state: session_core_v1::ActiveState,
+#[derive(Parser)]
+struct Args {
+    #[arg(long, value_name = "USER", help = "Allow USER to bind seat_v1")]
+    seat_user: Vec<String>,
+    #[arg(
+        long,
+        value_name = "GROUP",
+        help = "Allow members of GROUP to bind seat_v1"
+    )]
+    seat_group: Vec<String>,
 }
 
-impl Session {
-    fn set_state(&mut self, state: session_core_v1::ActiveState) {
-        log::info!(session_id = self.id, tty = self.tty.as_str(); "session state changed");
-        self.state = state;
-        for object in self.objects.iter() {
-            object.send_active(self.state as u32);
+struct SeatAccess {
+    users: Vec<process::Uid>,
+    groups: Vec<process::Gid>,
+}
+
+impl SeatAccess {
+    fn new(users: Vec<process::Uid>, groups: Vec<process::Gid>) -> Self {
+        if users.is_empty() && groups.is_empty() {
+            return Self {
+                users: vec![process::Uid::ROOT],
+                groups: vec![process::Gid::ROOT],
+            };
         }
+
+        Self { users, groups }
     }
 
-    fn add_object(&mut self, object: session_core_session::SessionCoreSession) {
-        log::debug!(session_id = self.id, uid = object.client().map(|c| c.creds().uid.as_raw()).unwrap_or(0); "session info requested");
-        object.send_session_id(self.id);
-        object.send_uid(self.uid);
-        object.send_username(&self.username);
-        object.send_tty(&self.tty);
-        object.send_active(self.state as u32);
-        if let Some(seat) = &self.seat {
-            object.send_seat(seat);
+    fn allows(&self, creds: &net::UCred) -> bool {
+        if self.users.contains(&creds.uid) || self.groups.contains(&creds.gid) {
+            return true;
         }
-        object.send_leader(self.leader_id as u32);
-        object.send_timestamp(
-            self.timestamp
-                .duration_since(time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as u32,
-        );
-        object.send_done();
 
-        self.objects.push(object);
+        self.process_groups(creds.pid.as_raw_pid() as u32)
+            .is_ok_and(|groups| groups.iter().any(|gid| self.groups.contains(gid)))
+    }
+
+    fn process_groups(&self, pid: u32) -> anyhow::Result<Vec<process::Gid>> {
+        let status = fs::read_to_string(format!("/proc/{pid}/status"))?;
+        let Some(groups) = status.lines().find_map(|line| line.strip_prefix("Groups:")) else {
+            return Ok(Vec::new());
+        };
+
+        groups
+            .split_whitespace()
+            .map(|group| {
+                group
+                    .parse::<process::RawGid>()
+                    .map(process::Gid::from_raw)
+                    .map_err(Into::into)
+            })
+            .collect()
     }
 }
 
 struct Sessiond {
-    active_tty: Option<String>,
-    next_session_id: u32,
-    sessions: Vec<Session>,
+    next_session_id: session::SessionId,
+    sessions: Vec<session::Session>,
     info_managers: Vec<session_core_manager::SessionCoreManager>,
     cgroup_manager: cgroup::CgroupManager,
+    seat: Vec<seat::Seat>,
+    clients: Vec<rc::Rc<cell::RefCell<client::Client>>>,
+    seat_access: SeatAccess,
+}
+
+impl Sessiond {
+    fn sync_vt_session_states(&mut self) {
+        let active_vts = self
+            .seat
+            .iter_mut()
+            .filter_map(|seat| {
+                seat.active_vt()
+                    .inspect_err(|err| log::error!("Could not query active VT: {err}"))
+                    .ok()
+                    .flatten()
+            })
+            .collect::<Vec<_>>();
+
+        if active_vts.is_empty() {
+            return;
+        }
+
+        for session in &mut self.sessions {
+            if matches!(
+                session.state(),
+                session_core_v1::ActiveState::Opening | session_core_v1::ActiveState::Closing
+            ) {
+                continue;
+            }
+
+            let state = if active_vts.contains(&session.vt()) {
+                session_core_v1::ActiveState::Active
+            } else {
+                session_core_v1::ActiveState::Online
+            };
+
+            if session.state() != state {
+                session.set_state(state);
+            }
+        }
+    }
 }
 
 impl session_management_v1::SessionManagementV1Handler for Sessiond {}
 
 impl session_core_v1::SessionCoreV1Handler for Sessiond {
     fn bind(&mut self, object: session_core_manager::SessionCoreManager) {
+        self.sync_vt_session_states();
+
         let session_ids = self
             .sessions
             .iter()
-            .map(|session| session.id)
+            .map(|session| session.id().as_raw())
             .collect::<Vec<_>>();
         object.send_sessions(&session_ids);
         self.info_managers.push(object);
@@ -101,35 +166,27 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
         }
 
         match event {
-            session_manager::Event::CreateSession { uid, username, tty } => {
-                log::info!(session_id = self.next_session_id, uid, username = username.as_str(), tty = tty.as_str(); "session created");
+            session_manager::Event::CreateSession { uid, username, vt } => {
+                let session_id = self.next_session_id;
+                log::info!(session_id = session_id.as_raw(), uid, username = username.as_str(), vt; "session created");
 
                 let leader_id = client.creds().pid.as_raw_pid();
 
                 if let Err(e) = self
                     .cgroup_manager
-                    .create_session_cgroup(self.next_session_id, leader_id)
+                    .create_session_cgroup(session_id, leader_id)
                 {
-                    log::error!(session_id = self.next_session_id, error = e.to_string().as_str(); "failed to create session cgroup");
+                    log::error!(session_id = session_id.as_raw(), error = e.to_string().as_str(); "failed to create session cgroup");
                 }
 
-                let mut session = Session {
-                    id: self.next_session_id,
-                    uid,
-                    username,
-                    tty,
-                    seat: None,
-                    timestamp: time::SystemTime::now(),
-                    leader_id,
-                    objects: Vec::new(),
-                    state: session_core_v1::ActiveState::Online,
-                };
-                if self
-                    .active_tty
-                    .as_ref()
-                    .is_some_and(|active_tty| *active_tty == session.tty)
-                {
-                    session.set_state(session_core_v1::ActiveState::Active);
+                let mut session = session::Session::new(session_id, uid, username, vt, leader_id);
+                let session_seat = self
+                    .seat
+                    .first()
+                    .map(|seat| seat.name().to_string())
+                    .unwrap_or_default();
+                if !session_seat.is_empty() {
+                    session.set_seat(session_seat.clone());
                 }
 
                 let runtime_dir = format!("/run/user/{uid}");
@@ -147,43 +204,68 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
                     log::error!(uid, error = e.to_string().as_str(); "failed to chmod runtime dir");
                 }
 
-                object.send_session_created(self.next_session_id);
+                if let Some(seat) = self
+                    .seat
+                    .iter_mut()
+                    .filter(|seat| seat.is_vt_bound())
+                    .find_map(|seat| match seat.is_vt_active(session.vt()) {
+                        Ok(true) => Some(seat.name().to_string()),
+                        Ok(false) => None,
+                        Err(err) => {
+                            log::error!(
+                                session_id = session.id().as_raw(),
+                                vt = session.vt(),
+                                error = err.to_string().as_str();
+                                "failed to check active VT"
+                            );
+                            None
+                        }
+                    })
+                {
+                    session.set_seat(seat);
+                    session.set_state(session_core_v1::ActiveState::Active);
+                } else {
+                    session.set_state(session_core_v1::ActiveState::Online);
+                }
+
+                object.send_session_created(session_id.as_raw(), &session_seat);
                 self.sessions.push(session);
 
                 for manager in &self.info_managers {
-                    manager.send_session_added(self.next_session_id);
+                    manager.send_session_added(session_id.as_raw());
                 }
 
-                self.next_session_id = self.next_session_id.wrapping_add(1);
+                self.next_session_id = self.next_session_id.next();
             }
             session_manager::Event::DestroySession { session_id } => {
+                let session_id = session::SessionId::from_raw(session_id);
                 let Some(mut session) = self
                     .sessions
-                    .extract_if(.., |session| session.id == session_id)
+                    .extract_if(.., |session| session.id() == session_id)
                     .next()
                 else {
-                    log::warn!(session_id; "destroy requested for unknown session");
+                    log::warn!(session_id = session_id.as_raw(); "destroy requested for unknown session");
                     return;
                 };
-                log::info!(session_id, uid = session.uid, username = session.username.as_str(); "session destroyed");
+                log::info!(session_id = session_id.as_raw(), uid = session.uid(), username = session.username(); "session destroyed");
 
                 session.set_state(session_core_v1::ActiveState::Closing);
-                for object in session.objects.iter() {
+                for object in session.objects().iter() {
                     object.send_destroyed();
                 }
 
                 for manager in &self.info_managers {
-                    manager.send_session_removed(session_id);
+                    manager.send_session_removed(session_id.as_raw());
                 }
 
                 if let Err(e) = self.cgroup_manager.poll_destroy(session_id) {
-                    log::error!(session_id, error = e.to_string().as_str(); "failed to poll destroy session cgroup");
+                    log::error!(session_id = session_id.as_raw(), error = e.to_string().as_str(); "failed to poll destroy session cgroup");
                 }
 
-                if !self.sessions.iter().any(|s| s.uid == session.uid)
-                    && let Err(e) = fs::remove_dir(format!("/run/user/{}", session.uid))
+                if !self.sessions.iter().any(|s| s.uid() == session.uid())
+                    && let Err(e) = fs::remove_dir(format!("/run/user/{}", session.uid()))
                 {
-                    log::error!(session_id, uid = session.uid, error = e.to_string().as_str(); "failed to remove runtime dir");
+                    log::error!(session_id = session_id.as_raw(), uid = session.uid(), error = e.to_string().as_str(); "failed to remove runtime dir");
                 }
             }
             session_manager::Event::Destroy => {}
@@ -202,22 +284,27 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
                 session_core_session,
                 session_id,
             } => {
+                self.sync_vt_session_states();
+
+                let session_id = session::SessionId::from_raw(session_id);
                 if let Some(session) = self
                     .sessions
                     .iter_mut()
-                    .find(|session| session.id == session_id)
+                    .find(|session| session.id() == session_id)
                 {
                     session.add_object(session_core_session);
                     return;
                 }
 
-                log::warn!(session_id; "get_session requested for unknown session");
+                log::warn!(session_id = session_id.as_raw(); "get_session requested for unknown session");
                 session_core_session.send_destroyed();
             }
             session_core_manager::Event::GetSessionByPid {
                 session_core_session,
                 pid,
             } => {
+                self.sync_vt_session_states();
+
                 let Ok(Some(session_id)) = self.cgroup_manager.find_session_by_pid(pid) else {
                     log::warn!(pid; "get_session_by_pid: no session found for pid");
                     session_core_session.send_destroyed();
@@ -227,13 +314,13 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
                 if let Some(session) = self
                     .sessions
                     .iter_mut()
-                    .find(|session| session.id == session_id)
+                    .find(|session| session.id() == session_id)
                 {
                     session.add_object(session_core_session);
                     return;
                 }
 
-                log::warn!(session_id; "get_session_by_pid requested for unknown session");
+                log::warn!(session_id = session_id.as_raw(); "get_session_by_pid requested for unknown session");
                 session_core_session.send_destroyed();
             }
             session_core_manager::Event::Destroy => {
@@ -243,81 +330,9 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
     }
 }
 
-impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for Sessiond {
-    fn event(
-        &mut self,
-        object: &session_core_session::SessionCoreSession,
-        event: <session_core_session::SessionCoreSession as hyprwire::Object>::Event<'_>,
-    ) {
-        let Some(idx) = self.sessions.iter_mut().position(|session| {
-            session
-                .objects
-                .iter()
-                .any(|session_object| session_object == object)
-        }) else {
-            return;
-        };
-
-        if let session_core_session::Event::Destroy = event {
-            self.sessions[idx]
-                .objects
-                .retain(|session_object| session_object != object);
-            return;
-        }
-
-        let Some(client) = object.client() else {
-            return;
-        };
-        if !client.creds().uid.is_root() && client.creds().uid.as_raw() != self.sessions[idx].uid {
-            object.send_error(
-                session_core_v1::ErrorCode::PermissionDenied as u32,
-                "permission denied",
-            );
-            return;
-        }
-
-        match event {
-            session_core_session::Event::Terminate => {
-                let session = self.sessions.swap_remove(idx);
-
-                log::info!(session_id = session.id; "terminate requested");
-                for obj in session.objects.iter() {
-                    obj.send_active(session_core_v1::ActiveState::Closing as u32);
-                }
-                if let Err(err) = self.cgroup_manager.terminate_session(session.id) {
-                    log::error!(session_id = session.id, err = err.to_string().as_str(); "terminate failed");
-                }
-            }
-            session_core_session::Event::Kill => {
-                log::info!(session_id = self.sessions[idx].id; "kill requested");
-                for obj in self.sessions[idx].objects.iter() {
-                    obj.send_active(session_core_v1::ActiveState::Closing as u32);
-                }
-                if let Err(err) = self.cgroup_manager.kill_session(self.sessions[idx].id) {
-                    log::error!(session_id = self.sessions[idx].id, err = err.to_string().as_str(); "kill failed");
-                }
-                self.sessions.swap_remove(idx);
-            }
-            session_core_session::Event::Lock => {
-                log::info!(session_id = self.sessions[idx].id; "lock requested");
-                for object in self.sessions[idx].objects.iter() {
-                    object.send_locked();
-                    object.send_ok();
-                }
-            }
-            session_core_session::Event::Unlock => {
-                log::info!(session_id = self.sessions[idx].id; "unlock requested");
-                for object in self.sessions[idx].objects.iter() {
-                    object.send_unlocked();
-                    object.send_ok();
-                }
-            }
-            _ => unreachable!(),
-        }
-    }
-}
-
 fn main() -> anyhow::Result<()> {
+    let args = Args::parse();
+
     let log_level = match env::var("LOG_LEVEL") {
         Ok(log) if log == "trace" => log::LevelFilter::Trace,
         Ok(log) if log == "debug" => log::LevelFilter::Debug,
@@ -333,16 +348,39 @@ fn main() -> anyhow::Result<()> {
 
     log::info!("sessiond daemon starting");
 
+    let seat_access = SeatAccess::new(
+        args.seat_user
+            .iter()
+            .map(|user| resolve_user(user))
+            .collect::<anyhow::Result<Vec<_>>>()?,
+        args.seat_group
+            .iter()
+            .map(|group| resolve_group(group))
+            .collect::<anyhow::Result<Vec<_>>>()?,
+    );
+
     let mut event_loop = calloop::EventLoop::try_new()?;
 
     let cgroup_manager = cgroup::CgroupManager::new(event_loop.handle())?;
 
+    let vtbound = env::var("SESSIOND_VTBOUND")
+        .ok()
+        .is_none_or(|vtbound| vtbound == "1");
+
+    let seat = if vtbound {
+        seat::Seat::vt_bound("seat0".to_string())
+    } else {
+        seat::Seat::non_vt_bound("seat0".to_string())
+    };
+
     let mut sessiond = Sessiond {
-        active_tty: None,
-        next_session_id: 1,
+        next_session_id: session::SessionId::from_raw(1),
         sessions: Vec::new(),
         info_managers: Vec::new(),
         cgroup_manager,
+        seat: vec![seat],
+        clients: Vec::new(),
+        seat_access,
     };
 
     let path = path::Path::new("/run/sessiond.sock");
@@ -352,6 +390,7 @@ fn main() -> anyhow::Result<()> {
     socket
         .add_implementation::<session_management_v1::SessionManagementV1Impl, _>(&mut sessiond, 1);
     socket.add_implementation::<session_core_v1::SessionCoreV1Impl, _>(&mut sessiond, 1);
+    socket.add_implementation::<seat_v1::SeatV1Impl, _>(&mut sessiond, 1);
 
     let fd_wrapper = unsafe { generic::FdWrapper::new(socket.extract_loop_fd().as_raw_fd()) };
     let source = generic::Generic::new(
@@ -370,55 +409,75 @@ fn main() -> anyhow::Result<()> {
         })
         .unwrap();
 
-    let tty0_path = path::Path::new("/sys/class/tty/tty0/active");
-    let source = generic::Generic::new(
-        fs::File::open(tty0_path)?,
-        calloop::Interest {
-            readable: true,
-            writable: false,
-        },
-        calloop::Mode::Level,
-    );
+    let signals = signals::Signals::new(&[signals::Signal::SIGUSR1, signals::Signal::SIGUSR2])?;
     event_loop
         .handle()
-        .insert_source(source, move |_, _, state| {
-            let active = match fs::read_to_string(tty0_path) {
-                Ok(active) => active,
-                Err(e) => {
-                    log::error!(error = e.to_string().as_str(); "failed to read active tty");
-                    return Ok(calloop::PostAction::Continue);
-                }
-            };
-            let active = active.trim();
+        .insert_source(signals, move |event, _, state| {
+            let mut session_updates = Vec::new();
 
-            if let Some(session) = state.sessions.iter_mut().find(|session| {
-                state
-                    .active_tty
-                    .as_ref()
-                    .is_some_and(|tty| *tty == session.tty)
-            }) {
-                if session.tty == active {
-                    return Ok(calloop::PostAction::Continue);
+            for seat in state.seat.iter_mut().filter(|seat| seat.is_vt_bound()) {
+                match event.signal() {
+                    signals::Signal::SIGUSR1 => match seat.vt_release() {
+                        Ok(vt) => {
+                            session_updates.push((vt, session_core_v1::ActiveState::Online));
+                        }
+                        Err(e) => {
+                            log::error!("Could not release VT: {e}");
+                        }
+                    },
+                    signals::Signal::SIGUSR2 => match seat.vt_activate() {
+                        Ok(vt) => {
+                            session_updates.push((vt, session_core_v1::ActiveState::Active));
+                        }
+                        Err(e) => {
+                            log::error!("Could not activate VT: {e}");
+                        }
+                    },
+                    _ => unreachable!(),
                 }
-
-                session.set_state(session_core_v1::ActiveState::Online);
             }
 
-            state.active_tty = Some(active.to_string());
+            for (vt, active_state) in session_updates {
+                if active_state == session_core_v1::ActiveState::Active {
+                    for session in state.sessions.iter_mut().filter(|session| {
+                        session.vt() != vt
+                            && session.state() == session_core_v1::ActiveState::Active
+                    }) {
+                        session.set_state(session_core_v1::ActiveState::Online);
+                    }
+                }
 
-            if let Some(session) = state
-                .sessions
-                .iter_mut()
-                .find(|session| session.tty == active)
-            {
-                session.set_state(session_core_v1::ActiveState::Active);
+                for session in state
+                    .sessions
+                    .iter_mut()
+                    .filter(|session| session.vt() == vt)
+                {
+                    session.set_state(active_state);
+                }
             }
-
-            Ok(calloop::PostAction::Continue)
-        })
-        .unwrap();
+        })?;
 
     event_loop.run(None, &mut sessiond, |_| {})?;
 
     Ok(())
+}
+
+fn resolve_user(user: &str) -> anyhow::Result<process::Uid> {
+    if let Ok(uid) = user.parse::<process::RawUid>() {
+        return Ok(process::Uid::from_raw(uid));
+    }
+
+    users::get_user_by_name(user)
+        .map(|user: users::User| process::Uid::from_raw(user.uid()))
+        .ok_or_else(|| anyhow::anyhow!("unknown seat user {user:?}"))
+}
+
+fn resolve_group(group: &str) -> anyhow::Result<process::Gid> {
+    if let Ok(gid) = group.parse::<process::RawGid>() {
+        return Ok(process::Gid::from_raw(gid));
+    }
+
+    users::get_group_by_name(group)
+        .map(|group: users::Group| process::Gid::from_raw(group.gid()))
+        .ok_or_else(|| anyhow::anyhow!("unknown seat group {group:?}"))
 }

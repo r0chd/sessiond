@@ -28,9 +28,43 @@ struct Session {
     timestamp: time::SystemTime,
     leader_id: i32,
     objects: Vec<session_core_session::SessionCoreSession>,
+    state: session_core_v1::ActiveState,
+}
+
+impl Session {
+    fn set_state(&mut self, state: session_core_v1::ActiveState) {
+        log::info!(session_id = self.id, tty = self.tty.as_str(); "session state changed");
+        self.state = state;
+        for object in self.objects.iter() {
+            object.send_active(self.state as u32);
+        }
+    }
+
+    fn add_object(&mut self, object: session_core_session::SessionCoreSession) {
+        log::debug!(session_id = self.id, uid = object.client().map(|c| c.creds().uid.as_raw()).unwrap_or(0); "session info requested");
+        object.send_session_id(self.id);
+        object.send_uid(self.uid);
+        object.send_username(&self.username);
+        object.send_tty(&self.tty);
+        object.send_active(self.state as u32);
+        if let Some(seat) = &self.seat {
+            object.send_seat(seat);
+        }
+        object.send_leader(self.leader_id as u32);
+        object.send_timestamp(
+            self.timestamp
+                .duration_since(time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as u32,
+        );
+        object.send_done();
+
+        self.objects.push(object);
+    }
 }
 
 struct Sessiond {
+    active_tty: Option<String>,
     next_session_id: u32,
     sessions: Vec<Session>,
     info_managers: Vec<session_core_manager::SessionCoreManager>,
@@ -79,7 +113,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
                     log::error!(session_id = self.next_session_id, error = e.to_string().as_str(); "failed to create session cgroup");
                 }
 
-                let session = Session {
+                let mut session = Session {
                     id: self.next_session_id,
                     uid,
                     username,
@@ -88,9 +122,18 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
                     timestamp: time::SystemTime::now(),
                     leader_id,
                     objects: Vec::new(),
+                    state: session_core_v1::ActiveState::Online,
                 };
-                self.sessions.push(session);
+                if self
+                    .active_tty
+                    .as_ref()
+                    .is_some_and(|active_tty| *active_tty == session.tty)
+                {
+                    session.set_state(session_core_v1::ActiveState::Active);
+                }
+
                 object.send_session_created(self.next_session_id);
+                self.sessions.push(session);
 
                 for manager in &self.info_managers {
                     manager.send_session_added(self.next_session_id);
@@ -104,13 +147,14 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
                     return;
                 }
 
-                if let Some(session) = self
+                if let Some(mut session) = self
                     .sessions
                     .extract_if(.., |session| session.id == session_id)
                     .next()
                 {
                     log::info!(session_id, uid = session.uid, username = session.username.as_str(); "session destroyed");
 
+                    session.set_state(session_core_v1::ActiveState::Closing);
                     for object in session.objects.iter() {
                         object.send_destroyed();
                     }
@@ -149,25 +193,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
                     .iter_mut()
                     .find(|session| session.id == session_id)
                 {
-                    log::debug!(session_id, uid = object.client().map(|c| c.creds().uid.as_raw()).unwrap_or(0); "session info requested");
-                    session_core_session.send_session_id(session_id);
-                    session_core_session.send_uid(session.uid);
-                    session_core_session.send_username(&session.username);
-                    session_core_session.send_tty(&session.tty);
-                    if let Some(seat) = &session.seat {
-                        session_core_session.send_seat(seat);
-                    }
-                    session_core_session.send_leader(session.leader_id as u32);
-                    session_core_session.send_timestamp(
-                        session
-                            .timestamp
-                            .duration_since(time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs() as u32,
-                    );
-                    session_core_session.send_done();
-
-                    session.objects.push(session_core_session);
+                    session.add_object(session_core_session);
                     return;
                 }
 
@@ -187,25 +213,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
                     .iter_mut()
                     .find(|session| session.id == session_id)
                 {
-                    log::debug!(session_id, uid = object.client().map(|c| c.creds().uid.as_raw()).unwrap_or(0); "session info requested");
-                    session_core_session.send_session_id(session_id);
-                    session_core_session.send_uid(session.uid);
-                    session_core_session.send_username(&session.username);
-                    session_core_session.send_tty(&session.tty);
-                    if let Some(seat) = &session.seat {
-                        session_core_session.send_seat(seat);
-                    }
-                    session_core_session.send_leader(session.leader_id as u32);
-                    session_core_session.send_timestamp(
-                        session
-                            .timestamp
-                            .duration_since(time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs() as u32,
-                    );
-                    session_core_session.send_done();
-
-                    session.objects.push(session_core_session);
+                    session.add_object(session_core_session);
                     return;
                 }
 
@@ -234,90 +242,59 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for Sessiond {
             return;
         };
 
+        if let session_core_session::Event::Destroy = event {
+            self.sessions[idx]
+                .objects
+                .retain(|session_object| session_object != object);
+            return;
+        }
+
+        let Some(client) = object.client() else {
+            return;
+        };
+        if !client.creds().uid.is_root() && client.creds().uid.as_raw() != self.sessions[idx].uid {
+            object.send_error(
+                session_core_v1::ErrorCode::PermissionDenied as u32,
+                "permission denied",
+            );
+            return;
+        }
+
         match event {
             session_core_session::Event::Terminate => {
                 let session = self.sessions.swap_remove(idx);
 
-                let Some(client) = object.client() else {
-                    return;
-                };
-                if !client.creds().uid.is_root() && client.creds().uid.as_raw() != session.uid {
-                    object.send_error(
-                        session_core_v1::ErrorCode::PermissionDenied as u32,
-                        "permission denied",
-                    );
-                    return;
-                }
-
                 log::info!(session_id = session.id; "terminate requested");
+                for obj in session.objects.iter() {
+                    obj.send_active(session_core_v1::ActiveState::Closing as u32);
+                }
                 if let Err(err) = self.cgroup_manager.terminate_session(session.id) {
                     log::error!(session_id = session.id, err = err.to_string().as_str(); "terminate failed");
                 }
-                self.sessions.swap_remove(idx);
             }
             session_core_session::Event::Kill => {
-                let Some(client) = object.client() else {
-                    return;
-                };
-                if !client.creds().uid.is_root()
-                    && client.creds().uid.as_raw() != self.sessions[idx].uid
-                {
-                    object.send_error(
-                        session_core_v1::ErrorCode::PermissionDenied as u32,
-                        "permission denied",
-                    );
-                    return;
-                }
-
                 log::info!(session_id = self.sessions[idx].id; "kill requested");
+                for obj in self.sessions[idx].objects.iter() {
+                    obj.send_active(session_core_v1::ActiveState::Closing as u32);
+                }
                 if let Err(err) = self.cgroup_manager.kill_session(self.sessions[idx].id) {
                     log::error!(session_id = self.sessions[idx].id, err = err.to_string().as_str(); "kill failed");
                 }
                 self.sessions.swap_remove(idx);
             }
             session_core_session::Event::Lock => {
-                let Some(client) = object.client() else {
-                    return;
-                };
-                if !client.creds().uid.is_root()
-                    && client.creds().uid.as_raw() != self.sessions[idx].uid
-                {
-                    object.send_error(
-                        session_core_v1::ErrorCode::PermissionDenied as u32,
-                        "permission denied",
-                    );
-                    return;
-                }
-
                 log::info!(session_id = self.sessions[idx].id; "lock requested");
                 for object in self.sessions[idx].objects.iter() {
                     object.send_locked();
                 }
             }
             session_core_session::Event::Unlock => {
-                let Some(client) = object.client() else {
-                    return;
-                };
-                if !client.creds().uid.is_root()
-                    && client.creds().uid.as_raw() != self.sessions[idx].uid
-                {
-                    object.send_error(
-                        session_core_v1::ErrorCode::PermissionDenied as u32,
-                        "permission denied",
-                    );
-                    return;
-                }
-
                 log::info!(session_id = self.sessions[idx].id; "unlock requested");
                 for object in self.sessions[idx].objects.iter() {
                     object.send_unlocked();
                 }
             }
-            session_core_session::Event::Destroy => {
-                self.sessions[idx]
-                    .objects
-                    .retain(|session_object| session_object != object);
-            }
+            _ => unreachable!(),
         }
     }
 }
@@ -343,6 +320,7 @@ fn main() -> anyhow::Result<()> {
     let cgroup_manager = cgroup::CgroupManager::new(event_loop.handle())?;
 
     let mut sessiond = Sessiond {
+        active_tty: None,
         next_session_id: 1,
         sessions: Vec::new(),
         info_managers: Vec::new(),
@@ -370,6 +348,54 @@ fn main() -> anyhow::Result<()> {
         .handle()
         .insert_source(source, move |_, _, state| {
             _ = socket.dispatch_events(state, false);
+            Ok(calloop::PostAction::Continue)
+        })
+        .unwrap();
+
+    let tty0_path = path::Path::new("/sys/class/tty/tty0/active");
+    let source = generic::Generic::new(
+        fs::File::open(tty0_path)?,
+        calloop::Interest {
+            readable: true,
+            writable: false,
+        },
+        calloop::Mode::Level,
+    );
+    event_loop
+        .handle()
+        .insert_source(source, move |_, _, state| {
+            let active = match fs::read_to_string(tty0_path) {
+                Ok(active) => active,
+                Err(e) => {
+                    log::error!(error = e.to_string().as_str(); "failed to read active tty");
+                    return Ok(calloop::PostAction::Continue);
+                }
+            };
+            let active = active.trim();
+
+            if let Some(session) = state.sessions.iter_mut().find(|session| {
+                state
+                    .active_tty
+                    .as_ref()
+                    .is_some_and(|tty| *tty == session.tty)
+            }) {
+                if session.tty == active {
+                    return Ok(calloop::PostAction::Continue);
+                }
+
+                session.set_state(session_core_v1::ActiveState::Online);
+            }
+
+            state.active_tty = Some(active.to_string());
+
+            if let Some(session) = state
+                .sessions
+                .iter_mut()
+                .find(|session| session.tty == active)
+            {
+                session.set_state(session_core_v1::ActiveState::Active);
+            }
+
             Ok(calloop::PostAction::Continue)
         })
         .unwrap();

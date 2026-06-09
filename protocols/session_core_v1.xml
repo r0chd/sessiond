@@ -70,6 +70,10 @@
   <s2c name="timestamp">
    <arg name="timestamp" type="uint" summary="session start time (seconds since Unix epoch)"/>
   </s2c>
+  <s2c name="active">
+   <description summary="session active state"/>
+   <arg name="state" type="uint" enum="active_state" summary="session active state"/>
+  </s2c>
   <s2c name="locked">
    <description summary="session is locked"/>
   </s2c>
@@ -109,6 +113,12 @@
    <description summary="destroy this object"/>
   </c2s>
  </object>
+
+ <enum name="active_state">
+  <value idx="0" name="online" summary="session is logged in but not in the foreground"/>
+  <value idx="1" name="active" summary="session is in the foreground"/>
+  <value idx="2" name="closing" summary="session is being destroyed"/>
+ </enum>
 
  <enum name="error_code">
   <value idx="0" name="not_found" summary="session or cgroup not found"/>

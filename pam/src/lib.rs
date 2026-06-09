@@ -6,6 +6,7 @@ mod session_management_v1 {
 use hyprwire::client;
 use pamsm::{PamLibExt, PamServiceModule};
 use session_management_v1::session_manager;
+use std::path;
 
 struct Session {
     session_id: Option<u32>,
@@ -48,11 +49,21 @@ impl PamServiceModule for Pam {
                 .ok_or(pamsm::PamError::USER_UNKNOWN)?
                 .to_string_lossy()
                 .to_string();
-            let tty = pamh.get_tty()?.ok_or(pamsm::PamError::SESSION_ERR)?;
+            let tty: path::PathBuf = pamh
+                .get_tty()?
+                .ok_or(pamsm::PamError::SESSION_ERR)?
+                .to_string_lossy()
+                .to_string()
+                .into();
+
             let uid = users::get_user_by_name(&username)
                 .ok_or(pamsm::PamError::USER_UNKNOWN)?
                 .uid();
-            manager.send_create_session(uid, username, tty.to_string_lossy());
+            let tty_name = tty
+                .file_name()
+                .ok_or(pamsm::PamError::SESSION_ERR)?
+                .to_string_lossy();
+            manager.send_create_session(uid, username, tty_name);
 
             while session.session_id.is_none() {
                 event_queue

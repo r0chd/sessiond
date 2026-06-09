@@ -95,13 +95,13 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
             return;
         };
 
+        if !client.creds().uid.is_root() {
+            log::warn!(uid = client.creds().uid.as_raw(); "rejected request from non-root client");
+            return;
+        }
+
         match event {
             session_manager::Event::CreateSession { uid, username, tty } => {
-                if !client.creds().uid.is_root() {
-                    log::warn!(uid = client.creds().uid.as_raw(); "rejected request from non-root client");
-                    return;
-                }
-
                 log::info!(session_id = self.next_session_id, uid, username = username.as_str(), tty = tty.as_str(); "session created");
 
                 let leader_id = client.creds().pid.as_raw_pid();
@@ -132,6 +132,21 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
                     session.set_state(session_core_v1::ActiveState::Active);
                 }
 
+                let runtime_dir = format!("/run/user/{uid}");
+                if let Err(e) = fs::create_dir_all(&runtime_dir) {
+                    log::error!(uid, error = e.to_string().as_str(); "failed to create runtime dir");
+                }
+                if let Err(e) =
+                    rustix::fs::chown(&runtime_dir, Some(rustix::fs::Uid::from_raw(uid)), None)
+                {
+                    log::error!(uid, error = e.to_string().as_str(); "failed to chown runtime dir");
+                }
+                if let Err(e) =
+                    rustix::fs::chmod(&runtime_dir, rustix::fs::Mode::from_bits_truncate(0o700))
+                {
+                    log::error!(uid, error = e.to_string().as_str(); "failed to chmod runtime dir");
+                }
+
                 object.send_session_created(self.next_session_id);
                 self.sessions.push(session);
 
@@ -142,35 +157,34 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
                 self.next_session_id = self.next_session_id.wrapping_add(1);
             }
             session_manager::Event::DestroySession { session_id } => {
-                if !client.creds().uid.is_root() {
-                    log::warn!(uid = client.creds().uid.as_raw(); "rejected request from non-root client");
-                    return;
-                }
-
-                if let Some(mut session) = self
+                let Some(mut session) = self
                     .sessions
                     .extract_if(.., |session| session.id == session_id)
                     .next()
-                {
-                    log::info!(session_id, uid = session.uid, username = session.username.as_str(); "session destroyed");
-
-                    session.set_state(session_core_v1::ActiveState::Closing);
-                    for object in session.objects.iter() {
-                        object.send_destroyed();
-                    }
-
-                    for manager in &self.info_managers {
-                        manager.send_session_removed(session_id);
-                    }
-
-                    if let Err(e) = self.cgroup_manager.poll_destroy(session_id) {
-                        log::error!(session_id, error = e.to_string().as_str(); "failed to poll destroy session cgroup");
-                    }
-
+                else {
+                    log::warn!(session_id; "destroy requested for unknown session");
                     return;
+                };
+                log::info!(session_id, uid = session.uid, username = session.username.as_str(); "session destroyed");
+
+                session.set_state(session_core_v1::ActiveState::Closing);
+                for object in session.objects.iter() {
+                    object.send_destroyed();
                 }
 
-                log::warn!(session_id; "destroy requested for unknown session");
+                for manager in &self.info_managers {
+                    manager.send_session_removed(session_id);
+                }
+
+                if let Err(e) = self.cgroup_manager.poll_destroy(session_id) {
+                    log::error!(session_id, error = e.to_string().as_str(); "failed to poll destroy session cgroup");
+                }
+
+                if !self.sessions.iter().any(|s| s.uid == session.uid)
+                    && let Err(e) = fs::remove_dir(format!("/run/user/{}", session.uid))
+                {
+                    log::error!(session_id, uid = session.uid, error = e.to_string().as_str(); "failed to remove runtime dir");
+                }
             }
             session_manager::Event::Destroy => {}
         }
@@ -205,6 +219,8 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
                 pid,
             } => {
                 let Ok(Some(session_id)) = self.cgroup_manager.find_session_by_pid(pid) else {
+                    log::warn!(pid; "get_session_by_pid: no session found for pid");
+                    session_core_session.send_destroyed();
                     return;
                 };
 
@@ -217,7 +233,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
                     return;
                 }
 
-                log::warn!(session_id; "get_session requested for unknown session");
+                log::warn!(session_id; "get_session_by_pid requested for unknown session");
                 session_core_session.send_destroyed();
             }
             session_core_manager::Event::Destroy => {
@@ -286,12 +302,14 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for Sessiond {
                 log::info!(session_id = self.sessions[idx].id; "lock requested");
                 for object in self.sessions[idx].objects.iter() {
                     object.send_locked();
+                    object.send_ok();
                 }
             }
             session_core_session::Event::Unlock => {
                 log::info!(session_id = self.sessions[idx].id; "unlock requested");
                 for object in self.sessions[idx].objects.iter() {
                     object.send_unlocked();
+                    object.send_ok();
                 }
             }
             _ => unreachable!(),

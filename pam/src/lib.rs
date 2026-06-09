@@ -76,6 +76,7 @@ impl PamServiceModule for Pam {
                 .map_err(|_| pamsm::PamError::SESSION_ERR)?;
 
             pamh.putenv(&format!("XDG_SESSION_ID={session_id}"))?;
+            pamh.putenv(&format!("XDG_RUNTIME_DIR=/run/user/{uid}"))?;
 
             Ok(())
         }

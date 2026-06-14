@@ -82,6 +82,11 @@
         default = self.nixosModules.sessiond;
       };
 
+      finixModules = {
+        sessiond = import ./nix/finix.nix;
+        default = self.finixModules.sessiond;
+      };
+
       formatter = forAllSystems (
         pkgs:
         let

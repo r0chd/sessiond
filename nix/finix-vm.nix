@@ -3,9 +3,10 @@
   sessiond,
   ...
 }:
+let
+  virtualTerminals = builtins.genList (index: "tty${toString (index + 1)}") 9;
+in
 {
-  environment.systemPackages = [ pkgs.busybox ];
-
   services = {
     sysklogd.enable = true;
     sessiond = {
@@ -15,9 +16,7 @@
     mdevd.enable = true;
     getty = {
       enable = true;
-      ttys = [
-        "tty1"
-        "tty2"
+      ttys = virtualTerminals ++ [
         "ttyS0"
       ];
     };

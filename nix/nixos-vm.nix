@@ -1,14 +1,18 @@
 {
-  # pkgs,
+  lib,
+  pkgs,
   modulesPath,
   sessiond,
   moxseatd,
   ...
 }:
+let
+  virtualTerminals = builtins.genList (index: "tty${toString (index + 1)}") 9;
+in
 {
   imports = [ "${modulesPath}/virtualisation/qemu-vm.nix" ];
 
-  # systemd.package = pkgs.systemd.override { withLogind = false; };
+  systemd.package = pkgs.systemd.override { withLogind = false; };
 
   services = {
     moxseatd = {
@@ -21,9 +25,10 @@
     };
   };
 
+  systemd.targets.getty.wants = lib.mkForce (map (tty: "autovt@${tty}.service") virtualTerminals);
+
   virtualisation = {
     qemu.options = [ "-vga virtio" ];
-    # graphics = false;
     memorySize = 2048;
     forwardPorts = [
       {

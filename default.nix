@@ -24,6 +24,11 @@ in
     sessiond = default;
   };
 
+  finixModules = rec {
+    default = import ./nix/finix.nix;
+    sessiond = default;
+  };
+
   formatter = import ./nix/formatter.nix { inherit pkgs rustToolchain; };
 
   packages = rec {

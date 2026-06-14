@@ -1,6 +1,5 @@
 {
   lib,
-  pkgs,
   config,
   ...
 }:
@@ -8,10 +7,7 @@ let
   cfg = config.services.sessiond;
 in
 {
-  options.services.sessiond = {
-    enable = lib.mkEnableOption "sessiond";
-    package = lib.mkPackageOption pkgs "sessiond" { };
-  };
+  imports = [ ./common.nix ];
 
   config = lib.mkIf cfg.enable {
     systemd.services.sessiond = {
@@ -19,7 +15,7 @@ in
       wantedBy = [ "default.target" ];
 
       serviceConfig = {
-        ExecStart = "${cfg.package}/bin/sessiond";
+        ExecStart = "${cfg.package}/bin/sessiond --seat-user ${cfg.seat.user} --seat-group ${cfg.seat.group}";
         Environment = "LOG_LEVEL=info";
       };
     };

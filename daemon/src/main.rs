@@ -32,40 +32,39 @@ use std::{cell, env, fs, path, rc};
 
 #[derive(Parser)]
 struct Args {
-    #[arg(long, value_name = "USER", help = "Allow USER to bind seat_v1")]
-    seat_user: Vec<String>,
+    #[arg(
+        long,
+        value_name = "USER",
+        default_value = "root",
+        help = "Allow USER to bind seat_v1"
+    )]
+    seat_user: String,
     #[arg(
         long,
         value_name = "GROUP",
+        default_value = "root",
         help = "Allow members of GROUP to bind seat_v1"
     )]
-    seat_group: Vec<String>,
+    seat_group: String,
 }
 
 struct SeatAccess {
-    users: Vec<process::Uid>,
-    groups: Vec<process::Gid>,
+    user: process::Uid,
+    group: process::Gid,
 }
 
 impl SeatAccess {
-    fn new(users: Vec<process::Uid>, groups: Vec<process::Gid>) -> Self {
-        if users.is_empty() && groups.is_empty() {
-            return Self {
-                users: vec![process::Uid::ROOT],
-                groups: vec![process::Gid::ROOT],
-            };
-        }
-
-        Self { users, groups }
+    fn new(user: process::Uid, group: process::Gid) -> Self {
+        Self { user, group }
     }
 
     fn allows(&self, creds: &net::UCred) -> bool {
-        if self.users.contains(&creds.uid) || self.groups.contains(&creds.gid) {
+        if self.user == creds.uid || self.group == creds.gid {
             return true;
         }
 
         self.process_groups(creds.pid.as_raw_pid() as u32)
-            .is_ok_and(|groups| groups.iter().any(|gid| self.groups.contains(gid)))
+            .is_ok_and(|groups| groups.contains(&self.group))
     }
 
     fn process_groups(&self, pid: u32) -> anyhow::Result<Vec<process::Gid>> {
@@ -349,14 +348,8 @@ fn main() -> anyhow::Result<()> {
     log::info!("sessiond daemon starting");
 
     let seat_access = SeatAccess::new(
-        args.seat_user
-            .iter()
-            .map(|user| resolve_user(user))
-            .collect::<anyhow::Result<Vec<_>>>()?,
-        args.seat_group
-            .iter()
-            .map(|group| resolve_group(group))
-            .collect::<anyhow::Result<Vec<_>>>()?,
+        resolve_user(&args.seat_user)?,
+        resolve_group(&args.seat_group)?,
     );
 
     let mut event_loop = calloop::EventLoop::try_new()?;

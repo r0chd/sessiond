@@ -22,5 +22,15 @@ in
         description = "Group to own the seatd socket";
       };
     };
+    pamServices = lib.mkOption {
+      type = types.listOf types.str;
+      default = [ "login" ];
+      example = [
+        "login"
+        "greetd"
+        "gdm-password"
+      ];
+      description = "PAM services that should open sessiond sessions.";
+    };
   };
 }

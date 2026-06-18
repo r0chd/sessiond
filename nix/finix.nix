@@ -17,9 +17,11 @@ in
       log = true;
     };
 
-    security.pam.services.login.text = lib.mkAfter ''
-      session   optional   ${cfg.package}/lib/security/pam_sessiond.so
-    '';
+    security.pam.services = lib.genAttrs cfg.pamServices (_: {
+      text = lib.mkAfter ''
+        session   optional   ${cfg.package}/lib/security/pam_sessiond.so
+      '';
+    });
 
     environment.systemPackages = [ cfg.package ];
 

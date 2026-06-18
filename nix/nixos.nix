@@ -21,12 +21,16 @@ in
       };
     };
 
-    security.pam.services.login.rules.session.sessiond = {
-      control = "optional";
-      modulePath = "${cfg.package}/lib/security/pam_sessiond.so";
-      order = 900;
-    };
+    security.pam.services = lib.genAttrs cfg.pamServices (_: {
+      rules.session.sessiond = {
+        control = "optional";
+        modulePath = "${cfg.package}/lib/security/pam_sessiond.so";
+        order = 900;
+      };
+    });
 
     environment.systemPackages = [ cfg.package ];
+
+    users.groups.${cfg.seat.group} = { };
   };
 }

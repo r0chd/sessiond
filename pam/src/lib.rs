@@ -53,20 +53,18 @@ impl PamServiceModule for Pam {
                 .ok_or(pamsm::PamError::USER_UNKNOWN)?
                 .to_string_lossy()
                 .to_string();
-            let pam_tty = pamh
-                .get_tty()?
-                .ok_or(pamsm::PamError::SESSION_ERR)?
-                .to_string_lossy()
-                .to_string();
-
             let uid = users::get_user_by_name(&username)
                 .ok_or(pamsm::PamError::USER_UNKNOWN)?
                 .uid();
-            let vt = pam_tty
-                .rsplit('/')
-                .next()
-                .and_then(|name| name.strip_prefix("tty"))
-                .and_then(|vt| vt.parse().ok())
+            let vt = pamh
+                .get_tty()?
+                .and_then(|tty| {
+                    tty.to_string_lossy()
+                        .rsplit('/')
+                        .next()
+                        .and_then(|name| name.strip_prefix("tty"))
+                        .and_then(|vt| vt.parse().ok())
+                })
                 .unwrap_or(0);
             manager.send_create_session(uid, username, vt);
 

@@ -5,7 +5,9 @@ mod session_core_v1 {
 }
 
 use anyhow::Context;
-use clap::{ArgGroup, Parser, Subcommand};
+use clap::{ArgGroup, CommandFactory, Parser, Subcommand, ValueEnum};
+use clap_complete::{Shell, generate};
+use clap_complete_nushell::Nushell;
 use hyprwire::client;
 use owo_colors::OwoColorize;
 use rustix::process;
@@ -122,6 +124,34 @@ enum Command {
         arg_required_else_help = true
     )]
     Session(SessionCommand),
+    #[command(about = "generate shell completions")]
+    Completions {
+        #[arg(value_name = "SHELL")]
+        shell: CompletionShell,
+    },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum CompletionShell {
+    Bash,
+    Elvish,
+    Fish,
+    Nushell,
+    Zsh,
+}
+
+impl CompletionShell {
+    fn generate(self, command: &mut clap::Command) {
+        let mut stdout = std::io::stdout();
+
+        match self {
+            Self::Bash => generate(Shell::Bash, command, "sessionctl", &mut stdout),
+            Self::Elvish => generate(Shell::Elvish, command, "sessionctl", &mut stdout),
+            Self::Fish => generate(Shell::Fish, command, "sessionctl", &mut stdout),
+            Self::Nushell => generate(Nushell, command, "sessionctl", &mut stdout),
+            Self::Zsh => generate(Shell::Zsh, command, "sessionctl", &mut stdout),
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -227,6 +257,12 @@ impl SessionAction {
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
+    if let Command::Completions { shell } = cli.command {
+        let mut command = Cli::command();
+        shell.generate(&mut command);
+        return Ok(());
+    }
+
     let mut state = State {
         sessions: Vec::new(),
         done: false,
@@ -249,7 +285,9 @@ fn main() -> anyhow::Result<()> {
         event_queue.dispatch_events(&mut state, true)?;
     }
 
-    let Command::Session(command) = &cli.command;
+    let Command::Session(command) = &cli.command else {
+        unreachable!();
+    };
 
     match command {
         SessionCommand::List => {

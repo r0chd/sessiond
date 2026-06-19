@@ -3,6 +3,7 @@
   lib,
   pkg-config,
   linux-pam,
+  installShellFiles,
 }:
 let
   cargoToml = fromTOML (builtins.readFile ../Cargo.toml);
@@ -38,6 +39,7 @@ rustPlatform.buildRustPackage {
   nativeBuildInputs = [
     pkg-config
     linux-pam
+    installShellFiles
   ];
 
   cargoBuildFlags = [ "--workspace" ];
@@ -47,6 +49,12 @@ rustPlatform.buildRustPackage {
     mv $out/lib/libpam.so $out/lib/security/pam_sessiond.so
     mv $out/bin/daemon $out/bin/sessiond
     mv $out/bin/ctl $out/bin/sessionctl
+
+    installShellCompletion --cmd sessionctl \
+      --bash <($out/bin/sessionctl completions bash) \
+      --zsh <($out/bin/sessionctl completions zsh) \
+      --fish <($out/bin/sessionctl completions fish) \
+      --nushell <($out/bin/sessionctl completions nushell)
   '';
 
   meta = {

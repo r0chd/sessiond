@@ -5,7 +5,7 @@ mod session_core_v1 {
 }
 
 use anyhow::Context;
-use clap::{Parser, Subcommand};
+use clap::{ArgGroup, Parser, Subcommand};
 use hyprwire::client;
 use owo_colors::OwoColorize;
 use rustix::process;
@@ -116,23 +116,112 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for State {
 
 #[derive(Subcommand)]
 enum Command {
-    #[command(about = "list all active sessions")]
-    ListSessions,
-    #[command(about = "terminate one or more sessions")]
-    TerminateSession { ids: Vec<u32> },
-    #[command(about = "kill one or more sessions")]
-    KillSession { ids: Vec<u32> },
-    #[command(about = "lock one or more sessions")]
-    LockSession { ids: Vec<u32> },
-    #[command(about = "unlock one or more sessions")]
-    UnlockSession { ids: Vec<u32> },
+    #[command(
+        subcommand,
+        about = "inspect and control sessions",
+        arg_required_else_help = true
+    )]
+    Session(SessionCommand),
+}
+
+#[derive(Subcommand)]
+enum SessionCommand {
+    #[command(about = "show live sessions")]
+    List,
+    #[command(
+        about = "ask sessions to exit",
+        group(ArgGroup::new("target").required(true).args(["ids", "current"]))
+    )]
+    Close {
+        #[arg(long, help = "target your current session")]
+        current: bool,
+        #[arg(value_name = "SESSION", help = "session id; omit with --current")]
+        ids: Vec<u32>,
+    },
+    #[command(
+        about = "force-stop sessions",
+        group(ArgGroup::new("target").required(true).args(["ids", "current"]))
+    )]
+    Kill {
+        #[arg(long, help = "target your current session")]
+        current: bool,
+        #[arg(value_name = "SESSION", help = "session id; omit with --current")]
+        ids: Vec<u32>,
+    },
+    #[command(about = "lock sessions")]
+    Lock {
+        #[arg(value_name = "SESSION", help = "session id; defaults to your session")]
+        ids: Vec<u32>,
+    },
+    #[command(about = "unlock sessions")]
+    Unlock {
+        #[arg(value_name = "SESSION", help = "session id; defaults to your session")]
+        ids: Vec<u32>,
+    },
 }
 
 #[derive(Parser)]
-#[command(author, version, about, long_about = None)]
+#[command(
+    name = "sessionctl",
+    bin_name = "sessionctl",
+    author,
+    version,
+    about = "sessiond control tool",
+    long_about = None,
+    arg_required_else_help = true
+)]
 pub(crate) struct Cli {
     #[command(subcommand)]
     command: Command,
+}
+
+#[derive(Clone, Copy)]
+enum SessionAction {
+    Close,
+    Kill,
+    Lock,
+    Unlock,
+}
+
+impl SessionAction {
+    fn from_command(command: &SessionCommand) -> Option<Self> {
+        match command {
+            SessionCommand::List => None,
+            SessionCommand::Close { .. } => Some(Self::Close),
+            SessionCommand::Kill { .. } => Some(Self::Kill),
+            SessionCommand::Lock { .. } => Some(Self::Lock),
+            SessionCommand::Unlock { .. } => Some(Self::Unlock),
+        }
+    }
+
+    fn ids<'a>(command: &'a SessionCommand) -> Option<&'a [u32]> {
+        match command {
+            SessionCommand::List => None,
+            SessionCommand::Close { ids, .. }
+            | SessionCommand::Kill { ids, .. }
+            | SessionCommand::Lock { ids }
+            | SessionCommand::Unlock { ids } => Some(ids),
+        }
+    }
+
+    fn targets_current(command: &SessionCommand) -> bool {
+        match command {
+            SessionCommand::List => false,
+            SessionCommand::Close { current, .. } | SessionCommand::Kill { current, .. } => {
+                *current
+            }
+            SessionCommand::Lock { ids } | SessionCommand::Unlock { ids } => ids.is_empty(),
+        }
+    }
+
+    fn send(self, object: &session_core_session::SessionCoreSession) {
+        match self {
+            Self::Close => object.send_terminate(),
+            Self::Kill => object.send_kill(),
+            Self::Lock => object.send_lock(),
+            Self::Unlock => object.send_unlock(),
+        }
+    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -160,8 +249,10 @@ fn main() -> anyhow::Result<()> {
         event_queue.dispatch_events(&mut state, true)?;
     }
 
-    match cli.command {
-        Command::ListSessions => {
+    let Command::Session(command) = &cli.command;
+
+    match command {
+        SessionCommand::List => {
             if state.sessions.is_empty() {
                 println!("No active sessions.");
                 return Ok(());
@@ -291,19 +382,11 @@ fn main() -> anyhow::Result<()> {
                 );
             }
         }
-        Command::TerminateSession { ref ids }
-        | Command::KillSession { ref ids }
-        | Command::LockSession { ref ids }
-        | Command::UnlockSession { ref ids } => {
-            let send: fn(&session_core_session::SessionCoreSession) = match &cli.command {
-                Command::TerminateSession { .. } => |obj| obj.send_terminate(),
-                Command::KillSession { .. } => |obj| obj.send_kill(),
-                Command::LockSession { .. } => |obj| obj.send_lock(),
-                Command::UnlockSession { .. } => |obj| obj.send_unlock(),
-                _ => unreachable!(),
-            };
+        command => {
+            let action = SessionAction::from_command(command).unwrap();
+            let ids = SessionAction::ids(command).unwrap();
 
-            if ids.is_empty() {
+            if SessionAction::targets_current(command) {
                 let uid = process::getuid();
 
                 let session = state
@@ -315,7 +398,7 @@ fn main() -> anyhow::Result<()> {
                         "error:".red(),
                         uid.as_raw()
                     ))?;
-                send(&session.object);
+                action.send(&session.object);
 
                 return Ok(());
             }
@@ -342,7 +425,7 @@ fn main() -> anyhow::Result<()> {
             }
 
             for obj in matched {
-                send(&obj);
+                action.send(&obj);
             }
 
             while !state.done {

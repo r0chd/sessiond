@@ -9,6 +9,23 @@ in
 {
   imports = [ ./common.nix ];
 
+  options.security.pam.services = lib.mkOption {
+    type = lib.types.attrsOf (
+      lib.types.submodule (
+        { config, ... }:
+        {
+          options.sessiond = lib.mkEnableOption "opening sessiond sessions";
+
+          config.text = lib.mkIf config.sessiond (
+            lib.mkAfter ''
+              session   optional   ${cfg.package}/lib/security/pam_sessiond.so
+            ''
+          );
+        }
+      )
+    );
+  };
+
   config = lib.mkIf cfg.enable {
     finit.services.sessiond = {
       description = "session management daemon";
@@ -17,11 +34,7 @@ in
       log = true;
     };
 
-    security.pam.services = lib.genAttrs cfg.pamServices (_: {
-      text = lib.mkAfter ''
-        session   optional   ${cfg.package}/lib/security/pam_sessiond.so
-      '';
-    });
+    security.pam.services.login.sessiond = lib.mkDefault true;
 
     environment.systemPackages = [ cfg.package ];
 

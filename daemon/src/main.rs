@@ -322,6 +322,24 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
                 log::warn!(session_id = session_id.as_raw(); "get_session_by_pid requested for unknown session");
                 session_core_session.send_destroyed();
             }
+            session_core_manager::Event::GetSessionByUid {
+                session_core_session,
+                uid,
+            } => {
+                self.sync_vt_session_states();
+
+                if let Some(session) = self
+                    .sessions
+                    .iter_mut()
+                    .find(|session| session.uid() == uid)
+                {
+                    session.add_object(session_core_session);
+                    return;
+                }
+
+                log::warn!(uid; "get_session_by_uid requested for unknown session");
+                session_core_session.send_destroyed();
+            }
             session_core_manager::Event::Destroy => {
                 self.info_managers.retain(|m| m != object);
             }

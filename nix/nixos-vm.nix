@@ -3,7 +3,6 @@
   pkgs,
   modulesPath,
   sessiond,
-  moxseatd,
   ...
 }:
 let
@@ -14,15 +13,9 @@ in
 
   systemd.package = pkgs.systemd.override { withLogind = false; };
 
-  services = {
-    moxseatd = {
-      enable = true;
-      package = moxseatd.packages.default;
-    };
-    sessiond = {
-      enable = true;
-      package = sessiond;
-    };
+  services.sessiond = {
+    enable = true;
+    package = sessiond;
   };
 
   systemd.targets.getty.wants = lib.mkForce (map (tty: "autovt@${tty}.service") virtualTerminals);

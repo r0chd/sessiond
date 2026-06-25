@@ -103,21 +103,15 @@
       nixosConfigurations =
         let
           system = "x86_64-linux";
-          pkgs = pkgsFor system;
-          moxseatd = (import sources.moxseatd.outPath { inherit pkgs; }) // {
-            inherit (sources.moxseatd) outPath;
-          };
         in
         {
           nixos-vm = nixpkgs.lib.nixosSystem {
             inherit system;
             specialArgs = {
               inherit (self.packages.${system}) sessiond;
-              inherit moxseatd;
             };
             modules = [
               ./nix/nixos.nix
-              moxseatd.nixosModules.default
               ./nix/nixos-vm.nix
             ];
           };

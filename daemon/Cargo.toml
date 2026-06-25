@@ -17,10 +17,10 @@ anyhow = "1.0.102"
 clap = { version = "4.6.1", features = ["derive"] }
 env_logger = { version = "0.11.10", features = ["kv"] }
 log = { version = "0.4.31", features = ["kv"] }
-hyprwire = "0.4.2"
+hyprwire = "0.4.3"
 calloop = { version = "0.14.4", features = ["signals"] }
 rustix = "1.1.4"
 users = "0.11.0"
 
 [build-dependencies]
-hyprwire-scanner = "0.4.2"
+hyprwire-scanner = "0.4.3"

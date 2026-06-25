@@ -21,7 +21,7 @@ pamsm = { git = "https://github.com/r0chd/pam_sm_rust", rev = "a86b725689e402ab3
 ] }
 libc = "0.2"
 users = "0.11.0"
-hyprwire = "0.4.2"
+hyprwire = "0.4.3"
 
 [build-dependencies]
-hyprwire-scanner = "0.4.2"
+hyprwire-scanner = "0.4.3"

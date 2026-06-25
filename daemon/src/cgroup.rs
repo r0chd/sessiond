@@ -124,8 +124,9 @@ impl CgroupManager {
         let procs = fs::read_to_string(cgroup.path.join("cgroup.procs"))?;
         for line in procs.lines() {
             let pid = line.trim().parse::<i32>()?;
+            let pid = process::Pid::from_raw(pid).context("invalid pid in cgroup.procs")?;
 
-            process::kill_process(process::Pid::from_raw(pid).unwrap(), process::Signal::TERM)?;
+            process::kill_process(pid, process::Signal::TERM)?;
         }
 
         self.poll_destroy(session_id)?;
@@ -134,13 +135,13 @@ impl CgroupManager {
     }
 
     pub fn find_session_by_pid(&self, pid: u32) -> anyhow::Result<Option<SessionId>> {
-        for cgroup in self.cgroups.iter() {
+        for cgroup in &self.cgroups {
             let procs = fs::read_to_string(cgroup.path.join("cgroup.procs"))?;
 
             if procs
                 .lines()
-                .find(|line| *line.trim() == pid.to_string())
-                .is_some()
+                .filter_map(|line| line.trim().parse::<u32>().ok())
+                .any(|cgroup_pid| cgroup_pid == pid)
             {
                 return Ok(Some(cgroup.session_id));
             }

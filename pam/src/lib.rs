@@ -1,4 +1,6 @@
 mod session_management_v1 {
+    #![allow(clippy::all, clippy::pedantic, clippy::nursery, clippy::unwrap_used)]
+
     hyprwire::include_protocol!("session_management_v1");
     pub use client::*;
 }
@@ -20,7 +22,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Session {
     ) {
         let session_manager::Event::SessionCreated { session_id, seat } = event;
         self.session_id = Some(session_id);
-        self.seat = Some(seat.to_string());
+        self.seat = Some(seat);
     }
 }
 
@@ -28,7 +30,7 @@ struct Pam;
 
 impl PamServiceModule for Pam {
     fn open_session(pamh: pamsm::Pam, _: pamsm::PamFlags, _: Vec<String>) -> pamsm::PamError {
-        fn inner(pamh: pamsm::Pam) -> Result<(), pamsm::PamError> {
+        fn inner(pamh: &pamsm::Pam) -> Result<(), pamsm::PamError> {
             let mut session = Session {
                 session_id: None,
                 seat: None,
@@ -74,7 +76,7 @@ impl PamServiceModule for Pam {
                     .map_err(|_| pamsm::PamError::SESSION_ERR)?;
             }
 
-            let session_id = session.session_id.unwrap();
+            let session_id = session.session_id.ok_or(pamsm::PamError::SESSION_ERR)?;
             pamh.send_bytes("sessiond", session_id.to_le_bytes().to_vec(), None)
                 .map_err(|_| pamsm::PamError::SESSION_ERR)?;
 
@@ -87,14 +89,14 @@ impl PamServiceModule for Pam {
             Ok(())
         }
 
-        match inner(pamh) {
+        match inner(&pamh) {
             Ok(()) => pamsm::PamError::SUCCESS,
             Err(e) => e,
         }
     }
 
     fn close_session(pamh: pamsm::Pam, _: pamsm::PamFlags, _: Vec<String>) -> pamsm::PamError {
-        fn inner(pamh: pamsm::Pam) -> Result<(), pamsm::PamError> {
+        fn inner(pamh: &pamsm::Pam) -> Result<(), pamsm::PamError> {
             let session_id = pamh
                 .retrieve_bytes("sessiond")
                 .map_err(|_| pamsm::PamError::SESSION_ERR)
@@ -129,7 +131,7 @@ impl PamServiceModule for Pam {
             Ok(())
         }
 
-        match inner(pamh) {
+        match inner(&pamh) {
             Ok(()) => pamsm::PamError::SUCCESS,
             Err(e) => e,
         }

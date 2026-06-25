@@ -1,13 +1,19 @@
 mod session_management_v1 {
+    #![allow(clippy::all, clippy::pedantic, clippy::nursery, clippy::unwrap_used)]
+
     hyprwire::include_protocol!("session_management_v1");
     pub use server::*;
 }
 mod session_core_v1 {
+    #![allow(clippy::all, clippy::pedantic, clippy::nursery, clippy::unwrap_used)]
+
     hyprwire::include_protocol!("session_core_v1");
     pub use server::*;
     pub use spec::*;
 }
 mod seat_v1 {
+    #![allow(clippy::all, clippy::pedantic, clippy::nursery, clippy::unwrap_used)]
+
     hyprwire::include_protocol!("seat_v1");
     pub use server::*;
     pub use spec::*;
@@ -54,7 +60,7 @@ struct SeatAccess {
 }
 
 impl SeatAccess {
-    fn new(user: process::Uid, group: process::Gid) -> Self {
+    const fn new(user: process::Uid, group: process::Gid) -> Self {
         Self { user, group }
     }
 
@@ -63,11 +69,11 @@ impl SeatAccess {
             return true;
         }
 
-        self.process_groups(creds.pid.as_raw_pid() as u32)
+        Self::process_groups(creds.pid.as_raw_pid().cast_unsigned())
             .is_ok_and(|groups| groups.contains(&self.group))
     }
 
-    fn process_groups(&self, pid: u32) -> anyhow::Result<Vec<process::Gid>> {
+    fn process_groups(pid: u32) -> anyhow::Result<Vec<process::Gid>> {
         let status = fs::read_to_string(format!("/proc/{pid}/status"))?;
         let Some(groups) = status.lines().find_map(|line| line.strip_prefix("Groups:")) else {
             return Ok(Vec::new());
@@ -249,7 +255,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
                 log::info!(session_id = session_id.as_raw(), uid = session.uid(), username = session.username(); "session destroyed");
 
                 session.set_state(session_core_v1::ActiveState::Closing);
-                for object in session.objects().iter() {
+                for object in session.objects() {
                     object.send_destroyed();
                 }
 
@@ -347,6 +353,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
@@ -417,13 +424,12 @@ fn main() -> anyhow::Result<()> {
         .insert_source(source, move |_, _, state| {
             _ = socket.dispatch_events(state, false);
             Ok(calloop::PostAction::Continue)
-        })
-        .unwrap();
+        })?;
 
     let signals = signals::Signals::new(&[signals::Signal::SIGUSR1, signals::Signal::SIGUSR2])?;
     event_loop
         .handle()
-        .insert_source(signals, move |event, _, state| {
+        .insert_source(signals, move |event, (), state| {
             let mut session_updates = Vec::new();
 
             for seat in state.seat.iter_mut().filter(|seat| seat.is_vt_bound()) {

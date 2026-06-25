@@ -4,6 +4,7 @@ use std::{fs, path};
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
+#[allow(clippy::struct_field_names)]
 struct VtStat {
     v_active: u16,
     v_signal: u16,
@@ -28,11 +29,11 @@ const KDSETMODE: ioctl::Opcode = 0x4B3A;
 const KDSKBMODE: ioctl::Opcode = 0x4B45;
 const VT_AUTO: u8 = 0x00;
 const VT_PROCESS: u8 = 0x01;
-const VT_ACKACQ: i32 = 0x02;
-const KD_TEXT: i32 = 0x00;
-const KD_GRAPHICS: i32 = 0x01;
-const K_UNICODE: i32 = 0x03;
-const K_OFF: i32 = 0x04;
+const VT_ACKACQ: usize = 0x02;
+const KD_TEXT: usize = 0x00;
+const KD_GRAPHICS: usize = 0x01;
+const K_UNICODE: usize = 0x03;
+const K_OFF: usize = 0x04;
 const FRSIG: i16 = 0;
 
 pub struct Terminal(fs::File);
@@ -60,12 +61,12 @@ impl Terminal {
             mode: if enable { VT_PROCESS } else { VT_AUTO },
             waitv: 0,
             relsig: if enable {
-                process::Signal::USR1.as_raw() as i16
+                i16::try_from(process::Signal::USR1.as_raw())?
             } else {
                 0
             },
             acqsig: if enable {
-                process::Signal::USR2.as_raw() as i16
+                i16::try_from(process::Signal::USR2.as_raw())?
             } else {
                 0
             },
@@ -87,13 +88,13 @@ impl Terminal {
         Ok(())
     }
 
-    pub fn switch_vt(&self, vt: i32) -> anyhow::Result<()> {
+    pub fn switch_vt(&self, vt: u32) -> anyhow::Result<()> {
         log::debug!("Switching to VT {vt}");
 
         let result = unsafe {
             ioctl::ioctl(
                 &self.0,
-                ioctl::IntegerSetter::<VT_ACTIVATE>::new_usize(vt as usize),
+                ioctl::IntegerSetter::<VT_ACTIVATE>::new_usize(usize::try_from(vt)?),
             )
         };
 
@@ -125,7 +126,7 @@ impl Terminal {
         let result = unsafe {
             ioctl::ioctl(
                 &self.0,
-                ioctl::IntegerSetter::<VT_RELDISP>::new_usize(VT_ACKACQ as usize),
+                ioctl::IntegerSetter::<VT_RELDISP>::new_usize(VT_ACKACQ),
             )
         };
 
@@ -143,9 +144,11 @@ impl Terminal {
         let result = unsafe {
             ioctl::ioctl(
                 &self.0,
-                ioctl::IntegerSetter::<KDSKBMODE>::new_usize(
-                    (if enable { K_UNICODE } else { K_OFF }) as usize,
-                ),
+                ioctl::IntegerSetter::<KDSKBMODE>::new_usize(if enable {
+                    K_UNICODE
+                } else {
+                    K_OFF
+                }),
             )
         };
 
@@ -167,9 +170,11 @@ impl Terminal {
         let result = unsafe {
             ioctl::ioctl(
                 &self.0,
-                ioctl::IntegerSetter::<KDSETMODE>::new_usize(
-                    (if enable { KD_GRAPHICS } else { KD_TEXT }) as usize,
-                ),
+                ioctl::IntegerSetter::<KDSETMODE>::new_usize(if enable {
+                    KD_GRAPHICS
+                } else {
+                    KD_TEXT
+                }),
             )
         };
 

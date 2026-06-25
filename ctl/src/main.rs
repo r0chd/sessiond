@@ -1,4 +1,6 @@
 mod session_core_v1 {
+    #![allow(clippy::all, clippy::pedantic, clippy::nursery, clippy::unwrap_used)]
+
     hyprwire::include_protocol!("session_core_v1");
     pub use client::*;
     pub use spec::*;
@@ -41,40 +43,41 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for State {
         match event {
             session_core_manager::Event::Sessions { session_ids } => {
                 for session_id in session_ids {
-                    let session = Session {
-                        id: session_id,
-                        object: object.send_get_session::<State>(session_id).unwrap(),
-                        uid: 0,
-                        username: String::new(),
-                        vt: 0,
-                        seat: None,
-                        leader: 0,
-                        timestamp: 0,
-                        done: false,
-                        active: session_core_v1::ActiveState::Online,
-                    };
-                    self.sessions.push(session);
+                    self.add_session(object, session_id);
                 }
             }
             session_core_manager::Event::SessionAdded { session_id } => {
-                let session = Session {
-                    id: session_id,
-                    object: object.send_get_session::<State>(session_id).unwrap(),
-                    uid: 0,
-                    username: String::new(),
-                    vt: 0,
-                    seat: None,
-                    leader: 0,
-                    timestamp: 0,
-                    done: false,
-                    active: session_core_v1::ActiveState::Online,
-                };
-                self.sessions.push(session);
+                self.add_session(object, session_id);
             }
             session_core_manager::Event::SessionRemoved { session_id } => {
                 self.sessions.retain(|session| session.id != session_id);
             }
         }
+    }
+}
+
+impl State {
+    fn add_session(&mut self, manager: &session_core_manager::SessionCoreManager, session_id: u32) {
+        let Some(object) = manager.send_get_session::<Self>(session_id) else {
+            self.error = Some(format!(
+                "failed to create session object for id {session_id}"
+            ));
+            self.done = true;
+            return;
+        };
+
+        self.sessions.push(Session {
+            id: session_id,
+            object,
+            uid: 0,
+            username: String::new(),
+            vt: 0,
+            seat: None,
+            leader: 0,
+            timestamp: 0,
+            done: false,
+            active: session_core_v1::ActiveState::Online,
+        });
     }
 }
 
@@ -100,7 +103,6 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for State {
             session_core_session::Event::Leader { leader } => session.leader = leader,
             session_core_session::Event::Timestamp { timestamp } => session.timestamp = timestamp,
             session_core_session::Event::Done => session.done = true,
-            session_core_session::Event::Destroyed => {}
             session_core_session::Event::Ok => {
                 self.done = true;
             }
@@ -214,7 +216,7 @@ enum SessionAction {
 }
 
 impl SessionAction {
-    fn from_command(command: &SessionCommand) -> Option<Self> {
+    const fn from_command(command: &SessionCommand) -> Option<Self> {
         match command {
             SessionCommand::List => None,
             SessionCommand::Close { .. } => Some(Self::Close),
@@ -224,7 +226,7 @@ impl SessionAction {
         }
     }
 
-    fn ids<'a>(command: &'a SessionCommand) -> Option<&'a [u32]> {
+    fn ids(command: &SessionCommand) -> Option<&[u32]> {
         match command {
             SessionCommand::List => None,
             SessionCommand::Close { ids, .. }
@@ -234,7 +236,7 @@ impl SessionAction {
         }
     }
 
-    fn targets_current(command: &SessionCommand) -> bool {
+    const fn targets_current(command: &SessionCommand) -> bool {
         match command {
             SessionCommand::List => false,
             SessionCommand::Close { current, .. } | SessionCommand::Kill { current, .. } => {
@@ -254,6 +256,7 @@ impl SessionAction {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
@@ -285,6 +288,10 @@ fn main() -> anyhow::Result<()> {
         event_queue.dispatch_events(&mut state, true)?;
     }
 
+    if let Some(err) = state.error.take() {
+        anyhow::bail!("{err}");
+    }
+
     let Command::Session(command) = &cli.command else {
         unreachable!();
     };
@@ -307,7 +314,7 @@ fn main() -> anyhow::Result<()> {
 
             let fmt_ts = |ts: u32| -> String {
                 use std::time::{Duration, UNIX_EPOCH};
-                let Some(t) = UNIX_EPOCH.checked_add(Duration::from_secs(ts as u64)) else {
+                let Some(t) = UNIX_EPOCH.checked_add(Duration::from_secs(u64::from(ts))) else {
                     return String::from("?");
                 };
                 let Ok(elapsed) = t.elapsed() else {
@@ -318,11 +325,11 @@ fn main() -> anyhow::Result<()> {
                 let m = (s % 3600) / 60;
                 let s = s % 60;
                 if h > 0 {
-                    format!("{}h {}min ago", h, m)
+                    format!("{h}h {m}min ago")
                 } else if m > 0 {
-                    format!("{}min {}s ago", m, s)
+                    format!("{m}min {s}s ago")
                 } else {
-                    format!("{}s ago", s)
+                    format!("{s}s ago")
                 }
             };
 
@@ -420,9 +427,16 @@ fn main() -> anyhow::Result<()> {
                 );
             }
         }
-        command => {
-            let action = SessionAction::from_command(command).unwrap();
-            let ids = SessionAction::ids(command).unwrap();
+        command @ (SessionCommand::Close { .. }
+        | SessionCommand::Kill { .. }
+        | SessionCommand::Lock { .. }
+        | SessionCommand::Unlock { .. }) => {
+            let Some(action) = SessionAction::from_command(command) else {
+                unreachable!();
+            };
+            let Some(ids) = SessionAction::ids(command) else {
+                unreachable!();
+            };
 
             if SessionAction::targets_current(command) {
                 let uid = process::getuid();
@@ -444,7 +458,7 @@ fn main() -> anyhow::Result<()> {
             let mut unmatched = Vec::new();
             let mut matched = Vec::new();
 
-            for id in ids.iter() {
+            for id in ids {
                 if let Some(session) = state.sessions.iter().find(|session| session.id == *id) {
                     matched.push(session.object.clone());
                 } else {
@@ -455,7 +469,7 @@ fn main() -> anyhow::Result<()> {
             if !unmatched.is_empty() {
                 let ids = unmatched
                     .iter()
-                    .map(|id| id.to_string())
+                    .map(std::string::ToString::to_string)
                     .collect::<Vec<_>>()
                     .join(", ");
                 eprintln!("{} unknown session ids: {ids}", "error:".red());

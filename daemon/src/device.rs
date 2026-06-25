@@ -176,15 +176,15 @@ impl Device {
         self.objects.push(object);
     }
 
-    pub(crate) fn id(&self) -> u32 {
+    pub(crate) const fn id(&self) -> u32 {
         self.id
     }
 
-    pub(crate) fn kind(&self) -> DeviceKind {
+    pub(crate) const fn kind(&self) -> DeviceKind {
         self.r#type
     }
 
-    pub(crate) fn fd(&self) -> &fd::OwnedFd {
+    pub(crate) const fn fd(&self) -> &fd::OwnedFd {
         &self.fd
     }
 
@@ -194,7 +194,7 @@ impl Device {
 
     pub(crate) fn absolute_path_string(&self) -> String {
         path::absolute(&self.path)
-            .unwrap_or(self.path.clone())
+            .unwrap_or_else(|_| self.path.clone())
             .display()
             .to_string()
     }
@@ -217,7 +217,7 @@ impl Device {
         }
     }
 
-    pub(crate) fn decrement_ref(&mut self) -> usize {
+    pub(crate) const fn decrement_ref(&mut self) -> usize {
         self.ref_cnt = self.ref_cnt.saturating_sub(1);
         self.ref_cnt
     }

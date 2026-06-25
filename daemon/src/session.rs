@@ -5,15 +5,15 @@ use std::time;
 pub struct SessionId(u32);
 
 impl SessionId {
-    pub fn as_raw(self) -> u32 {
+    pub const fn as_raw(self) -> u32 {
         self.0
     }
 
-    pub fn from_raw(id: u32) -> Self {
+    pub const fn from_raw(id: u32) -> Self {
         Self(id)
     }
 
-    pub fn next(self) -> Self {
+    pub const fn next(self) -> Self {
         Self(self.0.wrapping_add(1))
     }
 }
@@ -45,7 +45,7 @@ impl Session {
         }
     }
 
-    pub fn vt(&self) -> u32 {
+    pub const fn vt(&self) -> u32 {
         self.vt
     }
 
@@ -53,11 +53,11 @@ impl Session {
         &self.username
     }
 
-    pub fn uid(&self) -> u32 {
+    pub const fn uid(&self) -> u32 {
         self.uid
     }
 
-    pub fn id(&self) -> SessionId {
+    pub const fn id(&self) -> SessionId {
         self.id
     }
 
@@ -65,14 +65,14 @@ impl Session {
         &self.objects
     }
 
-    pub fn state(&self) -> session_core_v1::ActiveState {
+    pub const fn state(&self) -> session_core_v1::ActiveState {
         self.state
     }
 
     pub fn set_state(&mut self, state: session_core_v1::ActiveState) {
         log::info!(session_id = self.id.as_raw(), vt = self.vt; "session state changed");
         self.state = state;
-        for object in self.objects.iter() {
+        for object in &self.objects {
             object.send_active(self.state);
         }
     }
@@ -86,14 +86,14 @@ impl Session {
         self.seat = Some(seat);
 
         if let Some(seat) = self.seat.as_ref() {
-            for object in self.objects.iter() {
+            for object in &self.objects {
                 object.send_seat(seat);
             }
         }
     }
 
     pub fn add_object(&mut self, object: session_core_session::SessionCoreSession) {
-        log::debug!(session_id = self.id.as_raw(), uid = object.client().map(|c| c.creds().uid.as_raw()).unwrap_or(0); "session info requested");
+        log::debug!(session_id = self.id.as_raw(), uid = object.client().map_or(0, |c| c.creds().uid.as_raw()); "session info requested");
         object.send_session_id(self.id.as_raw());
         object.send_uid(self.uid);
         object.send_username(&self.username);
@@ -102,13 +102,14 @@ impl Session {
         if let Some(seat) = self.seat.as_ref() {
             object.send_seat(seat);
         }
-        object.send_leader(self.leader_id as u32);
-        object.send_timestamp(
-            self.timestamp
-                .duration_since(time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as u32,
-        );
+        object.send_leader(self.leader_id.cast_unsigned());
+        let timestamp_secs = self
+            .timestamp
+            .duration_since(time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let timestamp = u32::try_from(timestamp_secs).unwrap_or(u32::MAX);
+        object.send_timestamp(timestamp);
         object.send_done();
 
         self.objects.push(object);
@@ -130,7 +131,7 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
             return;
         };
 
-        if let session_core_session::Event::Destroy = event {
+        if matches!(event, session_core_session::Event::Destroy) {
             self.sessions[idx]
                 .objects
                 .retain(|session_object| session_object != object);
@@ -153,7 +154,7 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
                 let session = self.sessions.swap_remove(idx);
 
                 log::info!(session_id = session.id.as_raw(); "terminate requested");
-                for obj in session.objects.iter() {
+                for obj in &session.objects {
                     obj.send_active(session_core_v1::ActiveState::Closing);
                 }
                 if let Err(err) = self.cgroup_manager.terminate_session(session.id) {
@@ -162,7 +163,7 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
             }
             session_core_session::Event::Kill => {
                 log::info!(session_id = self.sessions[idx].id.as_raw(); "kill requested");
-                for obj in self.sessions[idx].objects.iter() {
+                for obj in &self.sessions[idx].objects {
                     obj.send_active(session_core_v1::ActiveState::Closing);
                 }
                 if let Err(err) = self.cgroup_manager.kill_session(self.sessions[idx].id) {
@@ -172,14 +173,14 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
             }
             session_core_session::Event::Lock => {
                 log::info!(session_id = self.sessions[idx].id.as_raw(); "lock requested");
-                for object in self.sessions[idx].objects.iter() {
+                for object in &self.sessions[idx].objects {
                     object.send_locked();
                     object.send_ok();
                 }
             }
             session_core_session::Event::Unlock => {
                 log::info!(session_id = self.sessions[idx].id.as_raw(); "unlock requested");
-                for object in self.sessions[idx].objects.iter() {
+                for object in &self.sessions[idx].objects {
                     object.send_unlocked();
                     object.send_ok();
                 }

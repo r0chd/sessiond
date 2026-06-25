@@ -10,7 +10,7 @@ impl seat_v1::SeatV1Handler for crate::Sessiond {
     fn bind(&mut self, object: seat_manager::SeatManager) {
         let Some(client) = object.client() else {
             object.error(
-                io::Errno::PERM.raw_os_error() as u32,
+                io::Errno::PERM.raw_os_error().cast_unsigned(),
                 "seat access requires peer credentials",
             );
             return;
@@ -27,7 +27,10 @@ impl seat_v1::SeatV1Handler for crate::Sessiond {
             gid = creds.gid.as_raw();
             "rejected seat_v1 bind from unauthorized client"
         );
-        object.error(io::Errno::PERM.raw_os_error() as u32, "seat access denied");
+        object.error(
+            io::Errno::PERM.raw_os_error().cast_unsigned(),
+            "seat access denied",
+        );
     }
 }
 
@@ -41,7 +44,7 @@ impl hyprwire::Dispatch<seat_manager::SeatManager> for crate::Sessiond {
             seat_manager::Event::OpenSeat { seat } => {
                 let Some(server_client) = object.client() else {
                     seat.error(
-                        io::Errno::PERM.raw_os_error() as u32,
+                        io::Errno::PERM.raw_os_error().cast_unsigned(),
                         "seat access requires peer credentials",
                     );
                     return;
@@ -55,12 +58,15 @@ impl hyprwire::Dispatch<seat_manager::SeatManager> for crate::Sessiond {
                         gid = creds.gid.as_raw();
                         "rejected seat open from unauthorized client"
                     );
-                    seat.error(io::Errno::PERM.raw_os_error() as u32, "seat access denied");
+                    seat.error(
+                        io::Errno::PERM.raw_os_error().cast_unsigned(),
+                        "seat access denied",
+                    );
                     return;
                 }
 
                 let session_id = {
-                    let pid = server_client.creds().pid.as_raw_pid() as u32;
+                    let pid = server_client.creds().pid.as_raw_pid().cast_unsigned();
                     match self.cgroup_manager.find_session_by_pid(pid) {
                         Ok(session_id) => session_id,
                         Err(err) => {
@@ -89,7 +95,7 @@ impl hyprwire::Dispatch<seat_manager::SeatManager> for crate::Sessiond {
                     client.borrow().object.send_disabled();
                     return;
                 }
-                if let Err(err) = seat.open_client(rc::Rc::clone(&client)) {
+                if let Err(err) = seat.open_client(&client) {
                     log::error!("Could not open client on seat: {err}");
                     let _ = seat.remove_client(&client);
                     client.borrow().object.send_disabled();
@@ -117,6 +123,7 @@ impl hyprwire::Dispatch<seat_manager::SeatManager> for crate::Sessiond {
 }
 
 impl hyprwire::Dispatch<seat::Seat> for crate::Sessiond {
+    #[allow(clippy::too_many_lines)]
     fn event(&mut self, object: &seat::Seat, event: <seat::Seat as hyprwire::Object>::Event<'_>) {
         let Some(client) = self
             .clients
@@ -154,14 +161,14 @@ impl hyprwire::Dispatch<seat::Seat> for crate::Sessiond {
             seat::Event::OpenDevice { device, path } => {
                 let seat_name = client.borrow().seat_name.clone();
                 let Some(seat) = self.seat.iter().find(|seat| seat.name() == seat_name) else {
-                    log::error!("No shared seat found for {}", seat_name);
+                    log::error!("No shared seat found for {seat_name}");
                     return;
                 };
 
                 if !seat.is_active_client(&client) {
                     device.send_failed(
                         seat_v1::DeviceError::SeatDisabled,
-                        io::Errno::PERM.raw_os_error() as u32,
+                        io::Errno::PERM.raw_os_error().cast_unsigned(),
                         "open_device is only valid for the active seat client",
                     );
                     return;
@@ -172,7 +179,7 @@ impl hyprwire::Dispatch<seat::Seat> for crate::Sessiond {
                 let Ok(sanitized_path) = fs::canonicalize(path) else {
                     device.send_failed(
                         seat_v1::DeviceError::OpenFailed,
-                        io::Errno::NOENT.raw_os_error() as u32,
+                        io::Errno::NOENT.raw_os_error().cast_unsigned(),
                         "could not canonicalize device path",
                     );
                     return;
@@ -181,7 +188,7 @@ impl hyprwire::Dispatch<seat::Seat> for crate::Sessiond {
                 if client.state != crate::seat::SeatState::Enabled {
                     device.send_failed(
                         seat_v1::DeviceError::SeatDisabled,
-                        io::Errno::BUSY.raw_os_error() as u32,
+                        io::Errno::BUSY.raw_os_error().cast_unsigned(),
                         "open_device is only valid while the seat is enabled",
                     );
                     return;
@@ -194,7 +201,7 @@ impl hyprwire::Dispatch<seat::Seat> for crate::Sessiond {
                     );
                     device.send_failed(
                         seat_v1::DeviceError::OpenFailed,
-                        io::Errno::INVAL.raw_os_error() as u32,
+                        io::Errno::INVAL.raw_os_error().cast_unsigned(),
                         "unsupported device type",
                     );
                     return;
@@ -206,20 +213,21 @@ impl hyprwire::Dispatch<seat::Seat> for crate::Sessiond {
                     .find(|device| device.matches_path(&sanitized_path))
                 {
                     old_device.add_object(device);
-                    let object = old_device.last_object().unwrap();
-                    object.send_opened(
-                        old_device.id(),
-                        old_device.fd().as_fd(),
-                        old_device.absolute_path_string(),
-                    );
+                    if let Some(object) = old_device.last_object() {
+                        object.send_opened(
+                            old_device.id(),
+                            old_device.fd().as_fd(),
+                            old_device.absolute_path_string(),
+                        );
+                    }
                     return;
                 }
 
-                if client.devices.len() as u8 >= MAX_SEAT_DEVICES {
+                if client.devices.len() >= usize::from(MAX_SEAT_DEVICES) {
                     log::error!("Client exceeded max seat devices");
                     device.send_failed(
                         seat_v1::DeviceError::OpenFailed,
-                        io::Errno::MFILE.raw_os_error() as u32,
+                        io::Errno::MFILE.raw_os_error().cast_unsigned(),
                         "client exceeded max seat devices",
                     );
                     return;
@@ -228,7 +236,7 @@ impl hyprwire::Dispatch<seat::Seat> for crate::Sessiond {
                 let device_id = client
                     .devices
                     .iter()
-                    .map(|device| device.id())
+                    .map(device::Device::id)
                     .max()
                     .map_or(1, |id| id + 1);
 
@@ -246,22 +254,19 @@ impl hyprwire::Dispatch<seat::Seat> for crate::Sessiond {
                         log::error!("Could not open file: {e}");
                         device.send_failed(
                             seat_v1::DeviceError::OpenFailed,
-                            e.raw_os_error() as u32,
+                            e.raw_os_error().cast_unsigned(),
                             "could not open device",
                         );
                         return;
                     }
                 };
 
-                let mut seat_device = crate::device::Device::new(
+                let mut seat_device = device::Device::new(
                     device,
-                    sanitized_path.clone(),
+                    sanitized_path,
                     kind,
                     device_id,
-                    matches!(
-                        kind,
-                        crate::device::DeviceKind::Evdev | crate::device::DeviceKind::Hidraw
-                    ),
+                    matches!(kind, device::DeviceKind::Evdev | device::DeviceKind::Hidraw),
                     fd,
                 );
 
@@ -272,19 +277,23 @@ impl hyprwire::Dispatch<seat::Seat> for crate::Sessiond {
                         .downcast_ref::<io::Errno>()
                         .copied()
                         .unwrap_or(io::Errno::INVAL);
-                    seat_device.last_object().unwrap().send_failed(
-                        seat_v1::DeviceError::OpenFailed,
-                        errno.raw_os_error() as u32,
-                        "could not activate device",
-                    );
+                    if let Some(object) = seat_device.last_object() {
+                        object.send_failed(
+                            seat_v1::DeviceError::OpenFailed,
+                            errno.raw_os_error().cast_unsigned(),
+                            "could not activate device",
+                        );
+                    }
                     return;
                 }
 
-                seat_device.last_object().unwrap().send_opened(
-                    device_id,
-                    seat_device.fd().as_fd(),
-                    seat_device.absolute_path_string(),
-                );
+                if let Some(object) = seat_device.last_object() {
+                    object.send_opened(
+                        device_id,
+                        seat_device.fd().as_fd(),
+                        seat_device.absolute_path_string(),
+                    );
+                }
                 client.devices.push(seat_device);
             }
             seat::Event::SwitchSession { session } => {
@@ -336,7 +345,7 @@ pub struct Seat {
 
 impl Default for Seat {
     fn default() -> Self {
-        Seat {
+        Self {
             name: "seat0".to_string(),
             clients: Vec::new(),
             active_client: None,
@@ -349,7 +358,7 @@ impl Default for Seat {
 
 impl Seat {
     pub fn vt_bound(name: String) -> Self {
-        log::info!("Created VT-bound seat {}", name);
+        log::info!("Created VT-bound seat {name}");
         Self {
             name,
             kind: SeatKind::VtBound,
@@ -424,7 +433,7 @@ impl Seat {
     pub fn vt_switch(&self, vt: u32) -> anyhow::Result<()> {
         let terminal = terminal::Terminal::open(self.cur_vt)?;
         terminal.set_process_switching(true)?;
-        terminal.switch_vt(vt as i32)?;
+        terminal.switch_vt(vt)?;
 
         Ok(())
     }
@@ -469,8 +478,7 @@ impl Seat {
         let released_vt = self
             .active_client
             .as_ref()
-            .map(|client| client.borrow().session_id)
-            .unwrap_or(self.cur_vt);
+            .map_or(self.cur_vt, |client| client.borrow().session_id);
         log::debug!("Releasing VT");
 
         if let Some(active_client) = self.active_client.clone() {
@@ -515,7 +523,7 @@ impl Seat {
         };
 
         if let Some(client) = next_client {
-            self.open_client(client)?;
+            self.open_client(&client)?;
         }
 
         Ok(())
@@ -523,7 +531,7 @@ impl Seat {
 
     pub fn open_client(
         &mut self,
-        client: rc::Rc<cell::RefCell<client::Client>>,
+        client: &rc::Rc<cell::RefCell<client::Client>>,
     ) -> anyhow::Result<()> {
         debug_assert_eq!(client.borrow().seat_name, self.name);
 
@@ -559,7 +567,7 @@ impl Seat {
         client.borrow().object.send_enabled();
 
         client.borrow_mut().state = SeatState::Enabled;
-        self.active_client = Some(rc::Rc::clone(&client));
+        self.active_client = Some(rc::Rc::clone(client));
         log::info!(
             "Opened client {} on {}",
             client.borrow().session_id,
@@ -626,7 +634,7 @@ impl Seat {
             client.borrow_mut().session_id = next_session;
         }
 
-        client.borrow_mut().seat_name = self.name.clone();
+        client.borrow_mut().seat_name.clone_from(&self.name);
         log::info!(
             "Added client {} to {}",
             client.borrow().session_id,
@@ -638,7 +646,7 @@ impl Seat {
     }
 
     pub fn disable_client(
-        &mut self,
+        &self,
         client: &rc::Rc<cell::RefCell<client::Client>>,
     ) -> anyhow::Result<()> {
         if client.borrow().state != SeatState::Enabled {

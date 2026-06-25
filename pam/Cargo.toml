@@ -12,6 +12,9 @@ readme.workspace = true
 [lib]
 crate-type = ["cdylib"]
 
+[lints]
+workspace = true
+
 [dependencies]
 pamsm = { git = "https://github.com/r0chd/pam_sm_rust", rev = "a86b725689e402ab3eec6c265e7d82b74b7f9227", features = [
   "libpam",

@@ -16,6 +16,7 @@ mod seat_v1 {
 mod cgroup;
 mod client;
 mod device;
+mod ecs;
 mod seat;
 mod session;
 mod terminal;
@@ -94,6 +95,7 @@ struct Sessiond {
     next_client_id: client::ClientId,
     clients: Vec<rc::Rc<cell::RefCell<client::Client>>>,
     seat_access: SeatAccess,
+    world: ecs::World,
 }
 
 impl Sessiond {
@@ -395,6 +397,7 @@ fn main() -> anyhow::Result<()> {
         next_client_id: client::ClientId::from_raw(1),
         clients: Vec::new(),
         seat_access,
+        world: ecs::World::new(),
     };
 
     let path = path::Path::new("/run/sessiond.sock");

@@ -3,6 +3,7 @@
   pkgs,
   modulesPath,
   sessiond,
+  seattest,
   ...
 }:
 let
@@ -10,6 +11,8 @@ let
 in
 {
   imports = [ "${modulesPath}/virtualisation/qemu-vm.nix" ];
+
+  environment.systemPackages = [ seattest.packages.default ];
 
   systemd.package = pkgs.systemd.override { withLogind = false; };
 
@@ -37,7 +40,10 @@ in
       isNormalUser = true;
       password = "";
       createHome = true;
-      extraGroups = [ "wheel" ];
+      extraGroups = [
+        "wheel"
+        "seat"
+      ];
     };
     user_2 = {
       isNormalUser = true;

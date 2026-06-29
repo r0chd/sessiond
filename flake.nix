@@ -103,12 +103,19 @@
       nixosConfigurations =
         let
           system = "x86_64-linux";
+          pkgs = pkgsFor system;
+          seattest = (import sources.seattest.outPath {
+            inherit pkgs;
+          }) // {
+            inherit (sources.seattest) outPath;
+          };
         in
         {
           nixos-vm = nixpkgs.lib.nixosSystem {
             inherit system;
             specialArgs = {
               inherit (self.packages.${system}) sessiond;
+              inherit seattest;
             };
             modules = [
               ./nix/nixos.nix
@@ -121,8 +128,10 @@
         let
           system = "x86_64-linux";
           pkgs = pkgsFor system;
-          moxseatd = (import sources.moxseatd.outPath { inherit pkgs; }) // {
-            inherit (sources.moxseatd) outPath;
+          seattest = (import sources.seattest.outPath {
+            inherit pkgs;
+          }) // {
+            inherit (sources.seattest) outPath;
           };
           finix = (import sources.finix.outPath) // {
             inherit (sources.finix) outPath;
@@ -133,10 +142,10 @@
             inherit (pkgs) lib;
             specialArgs = {
               inherit (self.packages.${system}) sessiond;
-              inherit moxseatd;
+              inherit seattest;
             };
             modules = [
-              { nixpkgs.pkgs = pkgs; }
+              { nixpkgs = { inherit pkgs; }; }
               ./nix/finix-vm.nix
               ./nix/finix.nix
               "${finix.outPath}/modules/virtualisation/qemu.nix"

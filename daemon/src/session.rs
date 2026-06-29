@@ -1,7 +1,7 @@
 use crate::{session_core_session, session_core_v1};
 use std::time;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SessionId(u32);
 
 impl SessionId {

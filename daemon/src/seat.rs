@@ -1,5 +1,5 @@
 use crate::seat_v1::{seat, seat_manager};
-use crate::{client, device, seat_v1, terminal};
+use crate::{client, device, seat_v1, session, terminal};
 use rustix::io;
 use std::os::fd::AsFd;
 use std::{cell, fs, rc};
@@ -81,7 +81,7 @@ impl hyprwire::Dispatch<seat_manager::SeatManager> for crate::Sessiond {
                     object: seat,
                     devices: Vec::new(),
                     state: crate::seat::SeatState::New,
-                    session_id: 0,
+                    session_id: None,
                 }));
 
                 let Some(seat) = self.seat.first_mut() else {
@@ -478,7 +478,8 @@ impl Seat {
         let released_vt = self
             .active_client
             .as_ref()
-            .map_or(self.cur_vt, |client| client.borrow().session_id);
+            .and_then(|client| client.borrow().session_id)
+            .map_or(self.cur_vt, session::SessionId::as_raw);
         log::debug!("Releasing VT");
 
         if let Some(active_client) = self.active_client.clone() {
@@ -503,11 +504,12 @@ impl Seat {
             log::info!("No clients on {} to activate", self.name());
             return Err(anyhow::anyhow!("No clients on {} to activate", self.name()));
         } else if self.is_vt_bound() {
-            if let Some(client) = self
-                .clients
-                .iter()
-                .find(|client| client.borrow().session_id == self.cur_vt)
-            {
+            if let Some(client) = self.clients.iter().find(|client| {
+                client
+                    .borrow()
+                    .session_id
+                    .is_some_and(|session_id| session_id.as_raw() == self.cur_vt)
+            }) {
                 log::debug!("Activating client belonging to VT {}", self.cur_vt);
                 Some(rc::Rc::clone(client))
             } else {
@@ -548,11 +550,12 @@ impl Seat {
             return Err(anyhow::anyhow!("seat already has an active client"));
         }
 
-        if self.is_vt_bound()
-            && let Err(err) = Self::vt_open(client.borrow().session_id)
-        {
-            log::error!("Could not open VT for client: {err}");
-            return Err(err);
+        let session_id = client.borrow().session_id()?;
+        if self.is_vt_bound() {
+            if let Err(err) = Self::vt_open(session_id.as_raw()) {
+                log::error!("Could not open VT for client: {err}");
+                return Err(err);
+            }
         }
 
         {
@@ -568,11 +571,7 @@ impl Seat {
 
         client.borrow_mut().state = SeatState::Enabled;
         self.active_client = Some(rc::Rc::clone(client));
-        log::info!(
-            "Opened client {} on {}",
-            client.borrow().session_id,
-            self.name
-        );
+        log::info!("Opened client {} on {}", session_id.as_raw(), self.name);
 
         Ok(())
     }
@@ -594,7 +593,7 @@ impl Seat {
             return Err(anyhow::anyhow!("seat is VT-bound and has an active client"));
         }
 
-        if client.borrow().session_id != 0 {
+        if client.borrow().session_id.is_some() {
             log::error!("Could not add client: client cannot be reused");
             return Err(anyhow::anyhow!("client cannot be reused"));
         }
@@ -607,10 +606,12 @@ impl Seat {
             }
 
             if self.active_client.is_some()
-                && self
-                    .clients
-                    .iter()
-                    .any(|existing| existing.borrow().session_id == self.cur_vt)
+                && self.clients.iter().any(|existing| {
+                    existing
+                        .borrow()
+                        .session_id
+                        .is_some_and(|session_id| session_id.as_raw() == self.cur_vt)
+                })
             {
                 log::error!(
                     "Could not add client: seat is VT-bound and already has pending client"
@@ -620,26 +621,24 @@ impl Seat {
                 ));
             }
 
-            client.borrow_mut().session_id = self.cur_vt;
+            client.borrow_mut().session_id = Some(session::SessionId::from_raw(self.cur_vt));
         } else {
             let mut next_session = 1;
-            while self
-                .clients
-                .iter()
-                .any(|existing| existing.borrow().session_id == next_session)
-            {
+            while self.clients.iter().any(|existing| {
+                existing
+                    .borrow()
+                    .session_id
+                    .is_some_and(|session_id| session_id.as_raw() == next_session)
+            }) {
                 next_session += 1;
             }
 
-            client.borrow_mut().session_id = next_session;
+            client.borrow_mut().session_id = Some(session::SessionId::from_raw(next_session));
         }
 
+        let session_id = client.borrow().session_id()?;
         client.borrow_mut().seat_name.clone_from(&self.name);
-        log::info!(
-            "Added client {} to {}",
-            client.borrow().session_id,
-            self.name
-        );
+        log::info!("Added client {} to {}", session_id.as_raw(), self.name);
         self.clients.push(client);
 
         Ok(())
@@ -684,7 +683,7 @@ impl Seat {
             client_ref.object.send_disabled();
             log::info!(
                 "Disabling client {} on {}",
-                client_ref.session_id,
+                client_ref.session_id()?.as_raw(),
                 self.name
             );
         }
@@ -704,7 +703,7 @@ impl Seat {
         client.borrow_mut().state = SeatState::Disabled;
         log::info!(
             "Disabled client {} on {}",
-            client.borrow().session_id,
+            client.borrow().session_id()?.as_raw(),
             self.name
         );
 
@@ -745,8 +744,9 @@ impl Seat {
             log::error!("Could not set next session: invalid session value {session}");
             return Err(anyhow::anyhow!("invalid session value"));
         }
+        let session = session::SessionId::from_raw(session);
 
-        if session == client.borrow().session_id {
+        if Some(session) == client.borrow().session_id {
             log::info!("Could not set next session: requested session is already active");
             return Ok(());
         }
@@ -757,8 +757,12 @@ impl Seat {
         }
 
         if self.is_vt_bound() {
-            log::info!("Switching from VT {} to VT {}", self.cur_vt, session);
-            if let Err(err) = self.vt_switch(session) {
+            log::info!(
+                "Switching from VT {} to VT {}",
+                self.cur_vt,
+                session.as_raw()
+            );
+            if let Err(err) = self.vt_switch(session.as_raw()) {
                 log::error!("Could not switch VT: {err}");
                 return Err(err);
             }
@@ -768,14 +772,18 @@ impl Seat {
         let Some(target) = self
             .clients
             .iter()
-            .find(|candidate| candidate.borrow().session_id == session)
+            .find(|candidate| candidate.borrow().session_id == Some(session))
             .cloned()
         else {
             log::error!("Could not set next session: no such client");
             return Err(anyhow::anyhow!("no such client"));
         };
 
-        log::info!("Queuing switch to client {} on {}", session, self.name);
+        log::info!(
+            "Queuing switch to client {} on {}",
+            session.as_raw(),
+            self.name
+        );
         self.next_client = Some(target);
         self.disable_client(client)?;
 
@@ -816,9 +824,12 @@ impl Seat {
             if was_current && self.active_client.is_none() {
                 log::debug!("Closing active VT");
                 Self::vt_close(self.cur_vt)?;
-            } else if !was_current && client_state != SeatState::Closed {
+            } else if let Some(session) = session
+                && !was_current
+                && client_state != SeatState::Closed
+            {
                 log::debug!("Closing inactive VT");
-                Self::vt_close(session)?;
+                Self::vt_close(session.as_raw())?;
             }
         }
 
@@ -828,7 +839,11 @@ impl Seat {
             client.seat_name.clear();
         }
 
-        log::info!("Removed client {} from {}", session, self.name);
+        log::info!(
+            "Removed client {} from {}",
+            session.map_or(0, session::SessionId::as_raw),
+            self.name
+        );
 
         Ok(())
     }

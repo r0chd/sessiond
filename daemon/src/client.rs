@@ -1,13 +1,14 @@
-use crate::device;
 use crate::seat_v1;
 use crate::seat_v1::seat;
+use crate::{device, session};
+use anyhow::Context;
 
 pub struct Client {
     pub(crate) seat_name: String,
     pub(crate) object: seat::Seat,
     pub(crate) devices: Vec<device::Device>,
     pub(crate) state: crate::seat::SeatState,
-    pub(crate) session_id: u32,
+    pub(crate) session_id: Option<session::SessionId>,
 }
 
 impl PartialEq for Client {
@@ -19,7 +20,12 @@ impl PartialEq for Client {
 impl Eq for Client {}
 
 impl Client {
+    pub(crate) fn session_id(&self) -> anyhow::Result<session::SessionId> {
+        self.session_id.context("client has no session id")
+    }
+
     pub(crate) fn close_device(&mut self, object: &seat_v1::device::Device) -> anyhow::Result<()> {
+        let session_id = self.session_id()?;
         let idx = self
             .devices
             .iter()
@@ -31,7 +37,7 @@ impl Client {
         log::debug!(
             "Closing device {} for client {} on {}",
             device.path().display(),
-            self.session_id,
+            session_id.as_raw(),
             self.seat_name
         );
 
@@ -43,7 +49,7 @@ impl Client {
             log::error!(
                 "Could not deactivate device {} for client {} on {}: {err}",
                 device.path().display(),
-                self.session_id,
+                session_id.as_raw(),
                 self.seat_name
             );
         }

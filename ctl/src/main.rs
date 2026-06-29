@@ -5,9 +5,7 @@ mod session_core_v1 {
 }
 
 use anyhow::Context;
-use clap::{ArgGroup, CommandFactory, Parser, Subcommand, ValueEnum};
-use clap_complete::{Shell, generate};
-use clap_complete_nushell::Nushell;
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use hyprwire::client;
 use owo_colors::OwoColorize;
 use rustix::process;
@@ -145,11 +143,36 @@ impl CompletionShell {
         let mut stdout = std::io::stdout();
 
         match self {
-            Self::Bash => generate(Shell::Bash, command, "sessionctl", &mut stdout),
-            Self::Elvish => generate(Shell::Elvish, command, "sessionctl", &mut stdout),
-            Self::Fish => generate(Shell::Fish, command, "sessionctl", &mut stdout),
-            Self::Nushell => generate(Nushell, command, "sessionctl", &mut stdout),
-            Self::Zsh => generate(Shell::Zsh, command, "sessionctl", &mut stdout),
+            Self::Bash => clap_complete::generate(
+                clap_complete::Shell::Bash,
+                command,
+                "sessionctl",
+                &mut stdout,
+            ),
+            Self::Elvish => clap_complete::generate(
+                clap_complete::Shell::Elvish,
+                command,
+                "sessionctl",
+                &mut stdout,
+            ),
+            Self::Fish => clap_complete::generate(
+                clap_complete::Shell::Fish,
+                command,
+                "sessionctl",
+                &mut stdout,
+            ),
+            Self::Nushell => clap_complete::generate(
+                clap_complete_nushell::Nushell,
+                command,
+                "sessionctl",
+                &mut stdout,
+            ),
+            Self::Zsh => clap_complete::generate(
+                clap_complete::Shell::Zsh,
+                command,
+                "sessionctl",
+                &mut stdout,
+            ),
         }
     }
 }
@@ -160,7 +183,7 @@ enum SessionCommand {
     List,
     #[command(
         about = "ask sessions to exit",
-        group(ArgGroup::new("target").required(true).args(["ids", "current"]))
+        group(clap::ArgGroup::new("target").required(true).args(["ids", "current"]))
     )]
     Close {
         #[arg(long, help = "target your current session")]
@@ -170,7 +193,7 @@ enum SessionCommand {
     },
     #[command(
         about = "force-stop sessions",
-        group(ArgGroup::new("target").required(true).args(["ids", "current"]))
+        group(clap::ArgGroup::new("target").required(true).args(["ids", "current"]))
     )]
     Kill {
         #[arg(long, help = "target your current session")]

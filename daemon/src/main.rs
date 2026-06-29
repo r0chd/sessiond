@@ -17,6 +17,8 @@ mod cgroup;
 mod client;
 mod device;
 mod seat;
+#[cfg(feature = "seatd")]
+mod seatd;
 mod session;
 mod terminal;
 
@@ -394,6 +396,34 @@ fn main() -> anyhow::Result<()> {
         clients: Vec::new(),
         seat_access,
     };
+
+    #[cfg(feature = "seatd")]
+    {
+        let path = path::Path::new(seatd::DEFAULT_SOCKET_PATH);
+        let seatd_socket = seatd::Socket::bind(path)?;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o770))?;
+        rustix::fs::chown(
+            path,
+            Some(rustix::fs::Uid::from_raw(sessiond.seat_access.user.as_raw())),
+            Some(rustix::fs::Gid::from_raw(sessiond.seat_access.group.as_raw())),
+        )?;
+
+        let fd_wrapper = unsafe { generic::FdWrapper::new(seatd_socket.as_raw_fd()) };
+        let source = generic::Generic::new(
+            fd_wrapper,
+            calloop::Interest {
+                readable: true,
+                writable: false,
+            },
+            calloop::Mode::Level,
+        );
+        event_loop
+            .handle()
+            .insert_source(source, move |_, _, _state| {
+                seatd_socket.accept_pending();
+                Ok(calloop::PostAction::Continue)
+            })?;
+    }
 
     let path = path::Path::new("/run/sessiond.sock");
     let mut socket = server::Server::bind(&path)?;

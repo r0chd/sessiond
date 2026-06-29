@@ -91,6 +91,7 @@ struct Sessiond {
     info_managers: Vec<session_core_manager::SessionCoreManager>,
     cgroup_manager: cgroup::CgroupManager,
     seat: Vec<seat::Seat>,
+    next_client_id: client::ClientId,
     clients: Vec<rc::Rc<cell::RefCell<client::Client>>>,
     seat_access: SeatAccess,
 }
@@ -391,6 +392,7 @@ fn main() -> anyhow::Result<()> {
         info_managers: Vec::new(),
         cgroup_manager,
         seat: vec![seat],
+        next_client_id: client::ClientId::from_raw(1),
         clients: Vec::new(),
         seat_access,
     };

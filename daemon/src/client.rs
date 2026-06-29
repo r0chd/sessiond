@@ -3,6 +3,22 @@ use crate::seat_v1::seat;
 use crate::{device, session};
 use anyhow::Context;
 
+pub struct ClientId(usize);
+
+impl ClientId {
+    pub const fn as_raw(self) -> usize {
+        self.0
+    }
+
+    pub const fn from_raw(id: usize) -> Self {
+        Self(id)
+    }
+
+    pub const fn next(self) -> Self {
+        Self(self.0.wrapping_add(1))
+    }
+}
+
 pub struct Client {
     pub(crate) seat_name: String,
     pub(crate) object: seat::Seat,

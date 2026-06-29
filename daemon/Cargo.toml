@@ -12,6 +12,10 @@ readme.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = ["seatd"]
+seatd = []
+
 [dependencies]
 anyhow = "1.0.102"
 clap = { version = "4.6.1", features = ["derive"] }

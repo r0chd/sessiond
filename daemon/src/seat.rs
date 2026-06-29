@@ -104,12 +104,19 @@ impl hyprwire::Dispatch<seat_manager::SeatManager> for crate::Sessiond {
 
                 if let Some(session_id) = session_id {
                     let seat_name = client.borrow().seat_name.clone();
-                    if let Some(session) = self
-                        .sessions
-                        .iter_mut()
-                        .find(|session| session.id() == session_id)
-                    {
-                        session.set_seat(seat_name);
+                    if let Some(entity) = self.world.session_entity(session_id) {
+                        if let Some(seat) = self.world.get_mut::<crate::ecs::Seat>(entity)
+                            && seat.0.as_deref() != Some(seat_name.as_str())
+                        {
+                            log::info!(session_id = session_id.as_raw(), seat = seat_name.as_str(); "session seat changed");
+                            seat.0 = Some(seat_name.clone());
+                        }
+                        if let Some(objects) = self.world.get::<crate::ecs::SessionObjects>(entity)
+                        {
+                            for object in &objects.0 {
+                                object.send_seat(&seat_name);
+                            }
+                        }
                     } else {
                         log::warn!(session_id = session_id.as_raw(); "seat opened for unknown session");
                     }
@@ -551,11 +558,11 @@ impl Seat {
         }
 
         let session_id = client.borrow().session_id()?;
-        if self.is_vt_bound() {
-            if let Err(err) = Self::vt_open(session_id.as_raw()) {
-                log::error!("Could not open VT for client: {err}");
-                return Err(err);
-            }
+        if self.is_vt_bound()
+            && let Err(err) = Self::vt_open(session_id.as_raw())
+        {
+            log::error!("Could not open VT for client: {err}");
+            return Err(err);
         }
 
         {

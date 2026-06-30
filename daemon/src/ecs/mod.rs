@@ -18,6 +18,7 @@ pub struct World {
     username_components: Vec<Option<Username>>,
     vt_components: Vec<Option<Vt>>,
     seat_name_components: Vec<Option<SeatName>>,
+    seat_entity_components: Vec<Option<SeatEntity>>,
     timestamp_components: Vec<Option<Timestamp>>,
     leader_id_components: Vec<Option<LeaderId>>,
     session_objects_components: Vec<Option<SessionObjects>>,
@@ -63,6 +64,7 @@ impl World {
         username: String,
         vt: u32,
         seat: Option<String>,
+        seat_entity: Option<Entity>,
         timestamp: time::SystemTime,
         leader_id: i32,
         objects: Vec<session_core_session::SessionCoreSession>,
@@ -75,6 +77,9 @@ impl World {
         self.insert(entity, Vt(vt));
         if let Some(seat) = seat {
             self.insert(entity, SeatName(seat));
+        }
+        if let Some(seat_entity) = seat_entity {
+            self.insert(entity, SeatEntity(seat_entity));
         }
         self.insert(entity, Timestamp(timestamp));
         self.insert(entity, LeaderId(leader_id));
@@ -159,6 +164,7 @@ impl World {
         clear_component(&mut self.username_components, entity);
         clear_component(&mut self.vt_components, entity);
         clear_component(&mut self.seat_name_components, entity);
+        clear_component(&mut self.seat_entity_components, entity);
         clear_component(&mut self.timestamp_components, entity);
         clear_component(&mut self.leader_id_components, entity);
         clear_component(&mut self.session_objects_components, entity);

@@ -15,14 +15,6 @@ pub enum SeatState {
     Closed,
 }
 
-pub fn entity(world: &ecs::World, entities: &[ecs::Entity], name: &str) -> Option<ecs::Entity> {
-    entities.iter().copied().find(|entity| {
-        world
-            .get::<ecs::SeatName>(*entity)
-            .is_some_and(|seat| seat.0 == name)
-    })
-}
-
 pub fn client_entity_by_seat_object(
     world: &ecs::World,
     entities: &[ecs::Entity],
@@ -134,6 +126,7 @@ pub fn add_client(
     }
 
     world.insert(client_entity, ecs::SeatName(seat_name.clone()));
+    world.insert(client_entity, ecs::SeatEntity(seat_entity));
     world.insert(client_entity, ecs::Session(session_id));
     world.insert(client_entity, ecs::SeatState(SeatState::Enabled));
     if let Some(clients) = world.get_mut::<ecs::SeatClients>(seat_entity) {
@@ -415,6 +408,7 @@ pub fn remove_client(
 
     world.insert(client_entity, ecs::SeatState(SeatState::Closed));
     let _ = world.remove::<ecs::SeatName>(client_entity);
+    let _ = world.remove::<ecs::SeatEntity>(client_entity);
     let _ = world.remove::<ecs::Session>(client_entity);
     world.remove_entity(client_entity);
 
@@ -933,11 +927,12 @@ impl hyprwire::Dispatch<seat_manager::SeatManager> for crate::Sessiond {
                     {
                         if self
                             .world
-                            .get::<ecs::SeatName>(entity)
-                            .is_none_or(|seat| seat.0.as_str() != seat_name.as_str())
+                            .get::<ecs::SeatEntity>(entity)
+                            .is_none_or(|seat| seat.0 != seat_entity)
                         {
                             log::info!(session_id = session_id.as_raw(), seat = seat_name.as_str(); "session seat changed");
                             self.world.insert(entity, ecs::SeatName(seat_name.clone()));
+                            self.world.insert(entity, ecs::SeatEntity(seat_entity));
                         }
                         if let Some(objects) = self.world.get::<ecs::SessionObjects>(entity) {
                             for object in &objects.0 {
@@ -961,15 +956,12 @@ impl hyprwire::Dispatch<seat::Seat> for crate::Sessiond {
         else {
             return;
         };
-        let Some(seat_name) = self
+        let Some(seat_entity) = self
             .world
-            .get::<ecs::SeatName>(client_entity)
-            .map(|seat| seat.0.clone())
+            .get::<ecs::SeatEntity>(client_entity)
+            .map(|seat| seat.0)
         else {
-            return;
-        };
-        let Some(seat_entity) = entity(&self.world, &self.seat_entities, &seat_name) else {
-            log::error!("No shared seat found for {seat_name}");
+            log::error!("Seat client has no seat entity");
             return;
         };
 

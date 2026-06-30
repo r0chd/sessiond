@@ -161,9 +161,10 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
 
                 seat::refresh_current_vts(&mut self.world, &self.seat_entities);
 
-                let mut session_seat = self.seat_entities.first().and_then(|seat_entity| {
+                let mut session_seat_entity = self.seat_entities.first().copied();
+                let mut session_seat = session_seat_entity.and_then(|seat_entity| {
                     self.world
-                        .get::<ecs::SeatName>(*seat_entity)
+                        .get::<ecs::SeatName>(seat_entity)
                         .map(|seat| seat.0.clone())
                         .filter(|seat| !seat.is_empty())
                 });
@@ -184,18 +185,21 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
                     log::error!(uid, error = e.to_string().as_str(); "failed to chmod runtime dir");
                 }
 
-                if let Some(seat) = self.seat_entities.iter().copied().find_map(|seat_entity| {
-                    let mode = self.world.get::<ecs::SeatMode>(seat_entity)?;
-                    if mode.0 != ecs::SeatKind::VtBound {
-                        return None;
-                    }
-                    let current_vt = self.world.get::<ecs::CurrentVt>(seat_entity)?.0;
-                    (current_vt == vt).then(|| {
-                        self.world
-                            .get::<ecs::SeatName>(seat_entity)
-                            .map(|seat| seat.0.clone())
-                    })?
-                }) {
+                if let Some((seat_entity, seat)) =
+                    self.seat_entities.iter().copied().find_map(|seat_entity| {
+                        let mode = self.world.get::<ecs::SeatMode>(seat_entity)?;
+                        if mode.0 != ecs::SeatKind::VtBound {
+                            return None;
+                        }
+                        let current_vt = self.world.get::<ecs::CurrentVt>(seat_entity)?.0;
+                        (current_vt == vt).then(|| {
+                            self.world
+                                .get::<ecs::SeatName>(seat_entity)
+                                .map(|seat| (seat_entity, seat.0.clone()))
+                        })?
+                    })
+                {
+                    session_seat_entity = Some(seat_entity);
                     session_seat = Some(seat);
                     active_state = session_core_v1::ActiveState::Active;
                 }
@@ -206,6 +210,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
                     username,
                     vt,
                     session_seat.clone(),
+                    session_seat_entity,
                     time::SystemTime::now(),
                     leader_id,
                     Vec::new(),

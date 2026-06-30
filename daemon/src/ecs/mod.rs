@@ -1,8 +1,10 @@
 mod components;
 
 use crate::session;
-use crate::{seat, seat_v1, session_core_session, session_core_v1};
+use crate::{device, seat, seat_v1, session_core_session, session_core_v1};
 pub use components::*;
+use std::os::fd;
+use std::path;
 use std::time;
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
@@ -23,6 +25,13 @@ pub struct World {
     session_components: Vec<Option<Session>>,
     seat_object_components: Vec<Option<SeatObject>>,
     devices_components: Vec<Option<Devices>>,
+    device_objects_components: Vec<Option<DeviceObjects>>,
+    device_path_components: Vec<Option<DevicePath>>,
+    device_ref_count_components: Vec<Option<DeviceRefCount>>,
+    device_kind_components: Vec<Option<DeviceKind>>,
+    device_id_components: Vec<Option<DeviceId>>,
+    device_active_components: Vec<Option<DeviceActive>>,
+    device_fd_components: Vec<Option<DeviceFd>>,
     seat_state_components: Vec<Option<SeatState>>,
     seat_mode_components: Vec<Option<SeatMode>>,
     current_vt_components: Vec<Option<CurrentVt>>,
@@ -91,6 +100,27 @@ impl World {
         entity
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn insert_device(
+        &mut self,
+        object: seat_v1::device::Device,
+        path: path::PathBuf,
+        kind: device::DeviceKind,
+        id: u32,
+        active: bool,
+        fd: fd::OwnedFd,
+    ) -> Entity {
+        let entity = self.entity();
+        self.insert(entity, DeviceObjects(vec![object]));
+        self.insert(entity, DevicePath(path));
+        self.insert(entity, DeviceRefCount(1));
+        self.insert(entity, DeviceKind(kind));
+        self.insert(entity, DeviceId(id));
+        self.insert(entity, DeviceActive(active));
+        self.insert(entity, DeviceFd(fd));
+        entity
+    }
+
     pub fn insert<C>(&mut self, entity: Entity, component: C)
     where
         C: Component,
@@ -136,6 +166,13 @@ impl World {
         clear_component(&mut self.session_components, entity);
         clear_component(&mut self.seat_object_components, entity);
         clear_component(&mut self.devices_components, entity);
+        clear_component(&mut self.device_objects_components, entity);
+        clear_component(&mut self.device_path_components, entity);
+        clear_component(&mut self.device_ref_count_components, entity);
+        clear_component(&mut self.device_kind_components, entity);
+        clear_component(&mut self.device_id_components, entity);
+        clear_component(&mut self.device_active_components, entity);
+        clear_component(&mut self.device_fd_components, entity);
         clear_component(&mut self.seat_state_components, entity);
         clear_component(&mut self.seat_mode_components, entity);
         clear_component(&mut self.current_vt_components, entity);

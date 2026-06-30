@@ -3,6 +3,7 @@ use crate::{ecs, seat, seat_v1};
 use rustix::{io, ioctl};
 use std::ffi::c_int;
 use std::os::fd;
+use std::os::fd::AsFd;
 use std::path;
 
 impl hyprwire::Dispatch<device::Device> for crate::Sessiond {
@@ -39,37 +40,41 @@ pub fn close_device(
         .map(|seat| seat.0.clone())
         .ok_or_else(|| anyhow::anyhow!("client has no seat"))?;
     let devices = world
-        .get_mut::<ecs::Devices>(client_entity)
+        .get::<ecs::Devices>(client_entity)
         .ok_or_else(|| anyhow::anyhow!("client has no devices"))?;
     let idx = devices
         .0
         .iter()
-        .position(|device| device.contains_object(object))
+        .position(|device_entity| contains_object(world, *device_entity, object))
         .ok_or_else(|| anyhow::anyhow!("device not found"))?;
 
-    let device = &mut devices.0[idx];
-    device.remove_object(object);
+    let device_entity = devices.0[idx];
+    remove_object(world, device_entity, object);
+    let device_path = device_path(world, device_entity)?;
     log::debug!(
         "Closing device {} for client {} on {}",
-        device.path().display(),
+        device_path.display(),
         session_id.as_raw(),
         seat_name
     );
 
-    if device.decrement_ref() > 0 {
+    if decrement_ref(world, device_entity) > 0 {
         return Ok(());
     }
 
-    if let Err(err) = device.deactivate() {
+    if let Err(err) = deactivate(world, device_entity) {
         log::error!(
             "Could not deactivate device {} for client {} on {}: {err}",
-            device.path().display(),
+            device_path.display(),
             session_id.as_raw(),
             seat_name
         );
     }
 
-    devices.0.remove(idx);
+    if let Some(devices) = world.get_mut::<ecs::Devices>(client_entity) {
+        devices.0.remove(idx);
+    }
+    world.remove_entity(device_entity);
 
     Ok(())
 }
@@ -130,159 +135,172 @@ fn matches_named_device(path: &path::Path, parent: &str, prefix: &str) -> bool {
             .is_some_and(|name| name.starts_with(prefix))
 }
 
-pub struct Device {
-    objects: Vec<device::Device>,
-    path: path::PathBuf,
-    ref_cnt: usize,
-    r#type: DeviceKind,
-    id: u32,
-    active: bool,
-    fd: fd::OwnedFd,
+pub fn activate(world: &mut ecs::World, entity: ecs::Entity) -> anyhow::Result<()> {
+    if world
+        .get::<ecs::DeviceActive>(entity)
+        .is_some_and(|active| active.0)
+    {
+        return Ok(());
+    }
+
+    let kind = device_kind(world, entity)?;
+    match kind {
+        DeviceKind::Drm => {
+            let fd = world
+                .get::<ecs::DeviceFd>(entity)
+                .ok_or_else(|| anyhow::anyhow!("device has no fd"))?;
+            drm_set_master(&fd.0)
+                .map_err(|err| anyhow::anyhow!("Could not make device fd drm master: {err}"))?;
+            world.insert(entity, ecs::DeviceActive(true));
+        }
+        DeviceKind::Evdev | DeviceKind::Hidraw => {
+            return Err(anyhow::anyhow!("device type cannot be activated"));
+        }
+        DeviceKind::Wscons => {
+            world.insert(entity, ecs::DeviceActive(true));
+        }
+    }
+
+    Ok(())
 }
 
-impl Device {
-    pub(crate) fn new(
-        object: device::Device,
-        path: path::PathBuf,
-        r#type: DeviceKind,
-        id: u32,
-        active: bool,
-        fd: fd::OwnedFd,
-    ) -> Self {
-        Self {
-            objects: vec![object],
-            path,
-            ref_cnt: 1,
-            r#type,
-            id,
-            active,
-            fd,
-        }
+pub fn deactivate(world: &mut ecs::World, entity: ecs::Entity) -> anyhow::Result<()> {
+    if !world
+        .get::<ecs::DeviceActive>(entity)
+        .is_some_and(|active| active.0)
+    {
+        return Ok(());
     }
 
-    pub(crate) fn activate(&mut self) -> anyhow::Result<()> {
-        if self.active {
-            return Ok(());
-        }
-
-        match self.r#type {
-            DeviceKind::Drm => {
-                drm_set_master(&self.fd)
-                    .map_err(|err| anyhow::anyhow!("Could not make device fd drm master: {err}"))?;
-                self.active = true;
-            }
-            DeviceKind::Evdev | DeviceKind::Hidraw => {
-                return Err(anyhow::anyhow!("device type cannot be activated"));
-            }
-            DeviceKind::Wscons => {
-                self.active = true;
+    let kind = device_kind(world, entity)?;
+    match kind {
+        DeviceKind::Drm => {
+            let fd = world
+                .get::<ecs::DeviceFd>(entity)
+                .ok_or_else(|| anyhow::anyhow!("device has no fd"))?;
+            if let Err(err) = drm_drop_master(&fd.0) {
+                log::error!("Could not revoke drm master on device fd: {err}");
+                return Err(err.into());
             }
         }
-
-        Ok(())
-    }
-
-    pub(crate) fn deactivate(&mut self) -> anyhow::Result<()> {
-        if !self.active {
-            return Ok(());
+        DeviceKind::Evdev => {
+            let fd = world
+                .get::<ecs::DeviceFd>(entity)
+                .ok_or_else(|| anyhow::anyhow!("device has no fd"))?;
+            if let Err(err) = evdev_revoke(&fd.0) {
+                log::error!("Could not revoke evdev on device fd: {err}");
+                return Err(err.into());
+            }
         }
-
-        match self.r#type {
-            DeviceKind::Drm => {
-                if let Err(err) = drm_drop_master(&self.fd) {
-                    log::error!("Could not revoke drm master on device fd: {err}");
-                    return Err(err.into());
-                }
+        DeviceKind::Hidraw => {
+            let fd = world
+                .get::<ecs::DeviceFd>(entity)
+                .ok_or_else(|| anyhow::anyhow!("device has no fd"))?;
+            if let Err(err) = hidraw_revoke(&fd.0) {
+                log::error!("Could not revoke hidraw on device fd: {err}");
+                return Err(err.into());
             }
-            DeviceKind::Evdev => {
-                if let Err(err) = evdev_revoke(&self.fd) {
-                    log::error!("Could not revoke evdev on device fd: {err}");
-                    return Err(err.into());
-                }
-            }
-            DeviceKind::Hidraw => {
-                if let Err(err) = hidraw_revoke(&self.fd) {
-                    log::error!("Could not revoke hidraw on device fd: {err}");
-                    return Err(err.into());
-                }
-            }
-            DeviceKind::Wscons => {}
         }
-
-        self.active = false;
-        Ok(())
+        DeviceKind::Wscons => {}
     }
 
-    pub(crate) fn matches_path(&self, path: &path::Path) -> bool {
-        self.path == path
-    }
+    world.insert(entity, ecs::DeviceActive(false));
+    Ok(())
+}
 
-    pub(crate) fn add_object(&mut self, object: device::Device) {
-        self.ref_cnt += 1;
-        self.objects.push(object);
-    }
+pub fn matches_path(world: &ecs::World, entity: ecs::Entity, path: &path::Path) -> bool {
+    world
+        .get::<ecs::DevicePath>(entity)
+        .is_some_and(|device_path| device_path.0 == path)
+}
 
-    pub(crate) const fn id(&self) -> u32 {
-        self.id
+pub fn add_object(world: &mut ecs::World, entity: ecs::Entity, object: device::Device) {
+    if let Some(ref_count) = world.get_mut::<ecs::DeviceRefCount>(entity) {
+        ref_count.0 += 1;
     }
-
-    pub(crate) const fn kind(&self) -> DeviceKind {
-        self.r#type
+    if let Some(objects) = world.get_mut::<ecs::DeviceObjects>(entity) {
+        objects.0.push(object);
     }
+}
 
-    pub(crate) const fn fd(&self) -> &fd::OwnedFd {
-        &self.fd
+pub fn id(world: &ecs::World, entity: ecs::Entity) -> Option<u32> {
+    world.get::<ecs::DeviceId>(entity).map(|id| id.0)
+}
+
+pub fn device_kind(world: &ecs::World, entity: ecs::Entity) -> anyhow::Result<DeviceKind> {
+    world
+        .get::<ecs::DeviceKind>(entity)
+        .map(|kind| kind.0)
+        .ok_or_else(|| anyhow::anyhow!("device has no kind"))
+}
+
+pub fn device_path(world: &ecs::World, entity: ecs::Entity) -> anyhow::Result<path::PathBuf> {
+    world
+        .get::<ecs::DevicePath>(entity)
+        .map(|path| path.0.clone())
+        .ok_or_else(|| anyhow::anyhow!("device has no path"))
+}
+
+pub fn path_display(world: &ecs::World, entity: ecs::Entity) -> String {
+    device_path(world, entity).map_or_else(
+        |_| "<unknown>".to_string(),
+        |path| path.display().to_string(),
+    )
+}
+
+pub fn absolute_path_string(world: &ecs::World, entity: ecs::Entity) -> anyhow::Result<String> {
+    let device_path = device_path(world, entity)?;
+    Ok(path::absolute(&device_path)
+        .unwrap_or(device_path)
+        .display()
+        .to_string())
+}
+
+pub fn last_object(world: &ecs::World, entity: ecs::Entity) -> Option<&device::Device> {
+    world
+        .get::<ecs::DeviceObjects>(entity)
+        .and_then(|objects| objects.0.last())
+}
+
+pub fn contains_object(world: &ecs::World, entity: ecs::Entity, object: &device::Device) -> bool {
+    world
+        .get::<ecs::DeviceObjects>(entity)
+        .is_some_and(|objects| objects.0.iter().any(|candidate| candidate == object))
+}
+
+pub fn remove_object(world: &mut ecs::World, entity: ecs::Entity, object: &device::Device) {
+    if let Some(objects) = world.get_mut::<ecs::DeviceObjects>(entity) {
+        objects.0.retain(|candidate| candidate != object);
     }
+}
 
-    pub(crate) fn path(&self) -> &path::Path {
-        &self.path
-    }
-
-    pub(crate) fn absolute_path_string(&self) -> String {
-        path::absolute(&self.path)
-            .unwrap_or_else(|_| self.path.clone())
-            .display()
-            .to_string()
-    }
-
-    pub(crate) fn last_object(&self) -> Option<&device::Device> {
-        self.objects.last()
-    }
-
-    pub(crate) fn contains_object(&self, object: &device::Device) -> bool {
-        self.objects.iter().any(|candidate| candidate == object)
-    }
-
-    pub(crate) fn remove_object(&mut self, object: &device::Device) {
-        self.objects.retain(|candidate| candidate != object);
-    }
-
-    pub(crate) fn send_revoked(&self) {
-        for object in &self.objects {
+pub fn send_revoked(world: &ecs::World, entity: ecs::Entity) {
+    if let Some(objects) = world.get::<ecs::DeviceObjects>(entity) {
+        for object in &objects.0 {
             object.send_revoked();
         }
     }
-
-    pub(crate) const fn decrement_ref(&mut self) -> usize {
-        self.ref_cnt = self.ref_cnt.saturating_sub(1);
-        self.ref_cnt
-    }
 }
 
-impl Drop for Device {
-    fn drop(&mut self) {
-        if !self.active {
-            return;
-        }
+pub fn decrement_ref(world: &mut ecs::World, entity: ecs::Entity) -> usize {
+    let Some(ref_count) = world.get_mut::<ecs::DeviceRefCount>(entity) else {
+        return 0;
+    };
+    ref_count.0 = ref_count.0.saturating_sub(1);
+    ref_count.0
+}
 
-        if let Err(err) = self.deactivate() {
-            log::error!(
-                "Could not deactivate {} during drop: {err}",
-                self.path.display()
-            );
-        }
-        self.active = false;
-    }
+pub fn send_opened(world: &ecs::World, entity: ecs::Entity) -> anyhow::Result<()> {
+    let Some(object) = last_object(world, entity) else {
+        return Ok(());
+    };
+    let id = id(world, entity).ok_or_else(|| anyhow::anyhow!("device has no id"))?;
+    let path = absolute_path_string(world, entity)?;
+    let fd = world
+        .get::<ecs::DeviceFd>(entity)
+        .ok_or_else(|| anyhow::anyhow!("device has no fd"))?;
+    object.send_opened(id, fd.0.as_fd(), path);
+    Ok(())
 }
 
 #[cfg(test)]

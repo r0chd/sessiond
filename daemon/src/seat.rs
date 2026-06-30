@@ -3,7 +3,6 @@ use crate::{device, ecs, seat_v1, session, session_core_v1, terminal};
 use calloop::signals;
 use rustix::io;
 use std::fs;
-use std::os::fd::AsFd;
 
 const MAX_SEAT_DEVICES: u8 = 128;
 
@@ -46,7 +45,7 @@ pub fn client_entity_by_device_object(
             devices
                 .0
                 .iter()
-                .any(|device| device.contains_object(object))
+                .any(|device_entity| device::contains_object(world, *device_entity, object))
         })
     })
 }
@@ -189,9 +188,10 @@ pub fn open_client(
     }
 
     if let Some(devices) = world.get_mut::<ecs::Devices>(client_entity) {
-        for device in &mut devices.0 {
-            if let Err(err) = device.activate() {
-                log::error!("Could not activate {}: {err}", device.path().display());
+        for device_entity in devices.0.clone() {
+            if let Err(err) = device::activate(world, device_entity) {
+                let path = device::path_display(world, device_entity);
+                log::error!("Could not activate {path}: {err}");
             }
         }
     }
@@ -223,21 +223,33 @@ pub fn disable_client(
 
     let session_id = client_session_id(world, client_entity)?;
     let seat_name = seat_name(world, seat_entity)?;
-    if let Some(devices) = world.get_mut::<ecs::Devices>(client_entity) {
-        devices.0.retain_mut(|device| {
-            if let Err(err) = device.deactivate() {
-                log::error!("Could not deactivate {}: {err}", device.path().display());
-                return true;
+    if let Some(devices) = world.get::<ecs::Devices>(client_entity) {
+        let mut retained_devices = Vec::new();
+        for device_entity in devices.0.clone() {
+            if let Err(err) = device::deactivate(world, device_entity) {
+                let path = device::path_display(world, device_entity);
+                log::error!("Could not deactivate {path}: {err}");
+                retained_devices.push(device_entity);
+                continue;
             }
 
-            match device.kind() {
-                device::DeviceKind::Drm | device::DeviceKind::Wscons => true,
-                device::DeviceKind::Evdev | device::DeviceKind::Hidraw => {
-                    device.send_revoked();
-                    false
+            match device::device_kind(world, device_entity) {
+                Ok(device::DeviceKind::Drm | device::DeviceKind::Wscons) => {
+                    retained_devices.push(device_entity);
+                }
+                Ok(device::DeviceKind::Evdev | device::DeviceKind::Hidraw) => {
+                    device::send_revoked(world, device_entity);
+                    world.remove_entity(device_entity);
+                }
+                Err(err) => {
+                    log::error!("Could not determine device kind: {err}");
+                    retained_devices.push(device_entity);
                 }
             }
-        });
+        }
+        if let Some(devices) = world.get_mut::<ecs::Devices>(client_entity) {
+            devices.0 = retained_devices;
+        }
     }
 
     world.insert(client_entity, ecs::SeatState(SeatState::PendingDisabled));
@@ -365,6 +377,15 @@ pub fn remove_client(
         clients.0.retain(|client| *client != client_entity);
     }
 
+    if let Some(devices) = world.get::<ecs::Devices>(client_entity) {
+        for device_entity in devices.0.clone() {
+            if let Err(err) = device::deactivate(world, device_entity) {
+                let path = device::path_display(world, device_entity);
+                log::error!("Could not deactivate {path}: {err}");
+            }
+            world.remove_entity(device_entity);
+        }
+    }
     if let Some(devices) = world.get_mut::<ecs::Devices>(client_entity) {
         devices.0.clear();
     }
@@ -454,7 +475,10 @@ pub fn open_device(
         return;
     };
 
-    let Some(devices) = world.get_mut::<ecs::Devices>(client_entity) else {
+    let Some(device_entities) = world
+        .get::<ecs::Devices>(client_entity)
+        .map(|devices| devices.0.clone())
+    else {
         device.send_failed(
             seat_v1::DeviceError::OpenFailed,
             io::Errno::INVAL.raw_os_error().cast_unsigned(),
@@ -463,23 +487,19 @@ pub fn open_device(
         return;
     };
 
-    if let Some(old_device) = devices
-        .0
-        .iter_mut()
-        .find(|device| device.matches_path(&sanitized_path))
+    if let Some(old_device) = device_entities
+        .iter()
+        .find(|device_entity| device::matches_path(world, **device_entity, &sanitized_path))
+        .copied()
     {
-        old_device.add_object(device);
-        if let Some(object) = old_device.last_object() {
-            object.send_opened(
-                old_device.id(),
-                old_device.fd().as_fd(),
-                old_device.absolute_path_string(),
-            );
+        device::add_object(world, old_device, device);
+        if let Err(err) = device::send_opened(world, old_device) {
+            log::error!("Could not send opened device event: {err}");
         }
         return;
     }
 
-    if devices.0.len() >= usize::from(MAX_SEAT_DEVICES) {
+    if device_entities.len() >= usize::from(MAX_SEAT_DEVICES) {
         log::error!("Client exceeded max seat devices");
         device.send_failed(
             seat_v1::DeviceError::OpenFailed,
@@ -489,10 +509,9 @@ pub fn open_device(
         return;
     }
 
-    let device_id = devices
-        .0
+    let device_id = device_entities
         .iter()
-        .map(device::Device::id)
+        .filter_map(|device_entity| device::id(world, *device_entity))
         .max()
         .map_or(1, |id| id + 1);
 
@@ -517,7 +536,7 @@ pub fn open_device(
         }
     };
 
-    let mut seat_device = device::Device::new(
+    let device_entity = world.insert_device(
         device,
         sanitized_path,
         kind,
@@ -526,31 +545,31 @@ pub fn open_device(
         fd,
     );
 
-    if let Err(err) = seat_device.activate() {
-        log::error!("Could not activate {}: {err}", seat_device.path().display());
+    if let Err(err) = device::activate(world, device_entity) {
+        let path = device::path_display(world, device_entity);
+        log::error!("Could not activate {path}: {err}");
         let errno = err
             .root_cause()
             .downcast_ref::<io::Errno>()
             .copied()
             .unwrap_or(io::Errno::INVAL);
-        if let Some(object) = seat_device.last_object() {
+        if let Some(object) = device::last_object(world, device_entity) {
             object.send_failed(
                 seat_v1::DeviceError::OpenFailed,
                 errno.raw_os_error().cast_unsigned(),
                 "could not activate device",
             );
         }
+        world.remove_entity(device_entity);
         return;
     }
 
-    if let Some(object) = seat_device.last_object() {
-        object.send_opened(
-            device_id,
-            seat_device.fd().as_fd(),
-            seat_device.absolute_path_string(),
-        );
+    if let Err(err) = device::send_opened(world, device_entity) {
+        log::error!("Could not send opened device event: {err}");
     }
-    devices.0.push(seat_device);
+    if let Some(devices) = world.get_mut::<ecs::Devices>(client_entity) {
+        devices.0.push(device_entity);
+    }
 }
 
 pub fn refresh_current_vts(world: &mut ecs::World, seat_entities: &[ecs::Entity]) {

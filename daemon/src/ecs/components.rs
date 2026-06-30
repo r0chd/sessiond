@@ -1,5 +1,6 @@
 use crate::{device, seat, seat_v1, session, session_core_session, session_core_v1};
-use std::time;
+use std::os::fd;
+use std::{path, time};
 
 pub trait Component: Sized {
     fn storage(world: &mut super::World) -> &mut Vec<Option<Self>>;
@@ -49,8 +50,29 @@ component!(Session, session_components);
 pub struct SeatObject(pub seat_v1::seat::Seat);
 component!(SeatObject, seat_object_components);
 
-pub struct Devices(pub Vec<device::Device>);
+pub struct Devices(pub Vec<super::Entity>);
 component!(Devices, devices_components);
+
+pub struct DeviceObjects(pub Vec<seat_v1::device::Device>);
+component!(DeviceObjects, device_objects_components);
+
+pub struct DevicePath(pub path::PathBuf);
+component!(DevicePath, device_path_components);
+
+pub struct DeviceRefCount(pub usize);
+component!(DeviceRefCount, device_ref_count_components);
+
+pub struct DeviceKind(pub device::DeviceKind);
+component!(DeviceKind, device_kind_components);
+
+pub struct DeviceId(pub u32);
+component!(DeviceId, device_id_components);
+
+pub struct DeviceActive(pub bool);
+component!(DeviceActive, device_active_components);
+
+pub struct DeviceFd(pub fd::OwnedFd);
+component!(DeviceFd, device_fd_components);
 
 pub struct SeatState(pub seat::SeatState);
 component!(SeatState, seat_state_components);

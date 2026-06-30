@@ -1,4 +1,4 @@
-use crate::{session_core_session, session_core_v1};
+use crate::{device, seat, seat_v1, session, session_core_session, session_core_v1};
 use std::time;
 
 pub trait Component: Sized {
@@ -28,8 +28,8 @@ component!(Username, username_components);
 pub struct Vt(pub u32);
 component!(Vt, vt_components);
 
-pub struct Seat(pub Option<String>);
-component!(Seat, seat_components);
+pub struct SeatName(pub String);
+component!(SeatName, seat_name_components);
 
 pub struct Timestamp(pub time::SystemTime);
 component!(Timestamp, timestamp_components);
@@ -42,3 +42,36 @@ component!(SessionObjects, session_objects_components);
 
 pub struct ActiveState(pub session_core_v1::ActiveState);
 component!(ActiveState, active_state_components);
+
+pub struct Session(pub session::SessionId);
+component!(Session, session_components);
+
+pub struct SeatObject(pub seat_v1::seat::Seat);
+component!(SeatObject, seat_object_components);
+
+pub struct Devices(pub Vec<device::Device>);
+component!(Devices, devices_components);
+
+pub struct SeatState(pub seat::SeatState);
+component!(SeatState, seat_state_components);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum SeatKind {
+    VtBound,
+    NonVtBound,
+}
+
+pub struct SeatMode(pub SeatKind);
+component!(SeatMode, seat_mode_components);
+
+pub struct CurrentVt(pub u32);
+component!(CurrentVt, current_vt_components);
+
+pub struct SeatClients(pub Vec<super::Entity>);
+component!(SeatClients, seat_clients_components);
+
+pub struct ActiveClient(pub super::Entity);
+component!(ActiveClient, active_client_components);
+
+pub struct NextClient(pub super::Entity);
+component!(NextClient, next_client_components);

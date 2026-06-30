@@ -14,7 +14,6 @@ mod seat_v1 {
 }
 
 mod cgroup;
-mod client;
 mod device;
 mod ecs;
 mod seat;
@@ -29,7 +28,7 @@ use session_core_v1::{session_core_manager, session_core_session};
 use session_management_v1::session_manager;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
-use std::{cell, env, fs, path, rc, time};
+use std::{env, fs, path, time};
 
 #[derive(Parser)]
 struct Args {
@@ -90,125 +89,23 @@ struct Sessiond {
     next_session_id: session::SessionId,
     info_managers: Vec<session_core_manager::SessionCoreManager>,
     cgroup_manager: cgroup::CgroupManager,
-    seat: Vec<seat::Seat>,
-    clients: Vec<rc::Rc<cell::RefCell<client::Client>>>,
+    session_entities: Vec<ecs::Entity>,
+    seat_entities: Vec<ecs::Entity>,
+    client_entities: Vec<ecs::Entity>,
     seat_access: SeatAccess,
     world: ecs::World,
 }
 
 impl Sessiond {
-    fn add_session_object(
-        &mut self,
-        session_id: session::SessionId,
-        entity: ecs::Entity,
-        object: session_core_session::SessionCoreSession,
-    ) {
-        log::debug!(session_id = session_id.as_raw(), uid = object.client().map_or(0, |c| c.creds().uid.as_raw()); "session info requested");
-
-        object.send_session_id(session_id.as_raw());
-        if let Some(uid) = self.world.get::<ecs::Uid>(entity) {
-            object.send_uid(uid.0);
-        }
-        if let Some(username) = self.world.get::<ecs::Username>(entity) {
-            object.send_username(&username.0);
-        }
-        if let Some(vt) = self.world.get::<ecs::Vt>(entity) {
-            object.send_vt(vt.0);
-        }
-        if let Some(active_state) = self.world.get::<ecs::ActiveState>(entity) {
-            object.send_active(active_state.0);
-        }
-        if let Some(seat) = self
-            .world
-            .get::<ecs::Seat>(entity)
-            .and_then(|seat| seat.0.as_ref())
-        {
-            object.send_seat(seat);
-        }
-        if let Some(leader_id) = self.world.get::<ecs::LeaderId>(entity) {
-            object.send_leader(leader_id.0.cast_unsigned());
-        }
-        if let Some(timestamp) = self.world.get::<ecs::Timestamp>(entity) {
-            let timestamp_secs = timestamp
-                .0
-                .duration_since(time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            let timestamp = u32::try_from(timestamp_secs).unwrap_or(u32::MAX);
-            object.send_timestamp(timestamp);
-        }
-        object.send_done();
-
-        if let Some(objects) = self.world.get_mut::<ecs::SessionObjects>(entity) {
-            objects.0.push(object);
-        }
-    }
-
-    pub(crate) fn set_session_state(
-        &mut self,
-        session_id: session::SessionId,
-        entity: ecs::Entity,
-        state: session_core_v1::ActiveState,
-    ) {
-        let vt = self.world.get::<ecs::Vt>(entity).map_or(0, |vt| vt.0);
-        log::info!(session_id = session_id.as_raw(), vt; "session state changed");
-        if let Some(active_state) = self.world.get_mut::<ecs::ActiveState>(entity) {
-            active_state.0 = state;
-        }
-        if let Some(objects) = self.world.get::<ecs::SessionObjects>(entity) {
-            for object in &objects.0 {
-                object.send_active(state);
-            }
-        }
-    }
-
-    fn sync_vt_session_states(&mut self) {
-        let active_vts = self
-            .seat
-            .iter_mut()
-            .filter_map(|seat| {
-                seat.active_vt()
-                    .inspect_err(|err| log::error!("Could not query active VT: {err}"))
-                    .ok()
-                    .flatten()
-            })
-            .collect::<Vec<_>>();
-
-        if active_vts.is_empty() {
-            return;
-        }
-
-        for session_id in self.world.session_ids().collect::<Vec<_>>() {
-            let Some(entity) = self.world.session_entity(session_id) else {
-                continue;
-            };
-            let Some(active_state) = self
-                .world
-                .get::<ecs::ActiveState>(entity)
-                .map(|state| state.0)
-            else {
-                continue;
-            };
-            if matches!(
-                active_state,
-                session_core_v1::ActiveState::Opening | session_core_v1::ActiveState::Closing
-            ) {
-                continue;
-            }
-
-            let Some(vt) = self.world.get::<ecs::Vt>(entity).map(|vt| vt.0) else {
-                continue;
-            };
-            let state = if active_vts.contains(&vt) {
-                session_core_v1::ActiveState::Active
-            } else {
-                session_core_v1::ActiveState::Online
-            };
-
-            if active_state != state {
-                session::set_state(&mut self.world, session_id, entity, state);
-            }
-        }
+    fn remove_session(&mut self, session_id: session::SessionId) -> Option<ecs::Entity> {
+        let idx = self.session_entities.iter().position(|entity| {
+            self.world
+                .get::<ecs::Session>(*entity)
+                .is_some_and(|session| session.0 == session_id)
+        })?;
+        let entity = self.session_entities.remove(idx);
+        self.world.remove_entity(entity);
+        Some(entity)
     }
 }
 
@@ -216,12 +113,15 @@ impl session_management_v1::SessionManagementV1Handler for Sessiond {}
 
 impl session_core_v1::SessionCoreV1Handler for Sessiond {
     fn bind(&mut self, object: session_core_manager::SessionCoreManager) {
-        self.sync_vt_session_states();
+        session::sync_vt_session_states(
+            &mut self.world,
+            &self.seat_entities,
+            &self.session_entities,
+        );
 
-        let session_ids = self
-            .world
-            .session_ids()
-            .map(|session| session.as_raw())
+        let session_ids = session::entities(&self.world, &self.session_entities)
+            .filter_map(|entity| session::id(&self.world, entity))
+            .map(session::SessionId::as_raw)
             .collect::<Vec<_>>();
         object.send_sessions(&session_ids);
         self.info_managers.push(object);
@@ -229,6 +129,7 @@ impl session_core_v1::SessionCoreV1Handler for Sessiond {
 }
 
 impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
+    #[allow(clippy::too_many_lines)]
     fn event(
         &mut self,
         object: &session_manager::SessionManager,
@@ -258,11 +159,14 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
                     log::error!(session_id = session_id.as_raw(), error = e.to_string().as_str(); "failed to create session cgroup");
                 }
 
-                let mut session_seat = self
-                    .seat
-                    .first()
-                    .map(|seat| seat.name().to_string())
-                    .filter(|seat| !seat.is_empty());
+                seat::refresh_current_vts(&mut self.world, &self.seat_entities);
+
+                let mut session_seat = self.seat_entities.first().and_then(|seat_entity| {
+                    self.world
+                        .get::<ecs::SeatName>(*seat_entity)
+                        .map(|seat| seat.0.clone())
+                        .filter(|seat| !seat.is_empty())
+                });
                 let mut active_state = session_core_v1::ActiveState::Online;
 
                 let runtime_dir = format!("/run/user/{uid}");
@@ -280,29 +184,23 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
                     log::error!(uid, error = e.to_string().as_str(); "failed to chmod runtime dir");
                 }
 
-                if let Some(seat) = self
-                    .seat
-                    .iter_mut()
-                    .filter(|seat| seat.is_vt_bound())
-                    .find_map(|seat| match seat.is_vt_active(vt) {
-                        Ok(true) => Some(seat.name().to_string()),
-                        Ok(false) => None,
-                        Err(err) => {
-                            log::error!(
-                                session_id = session_id.as_raw(),
-                                vt,
-                                error = err.to_string().as_str();
-                                "failed to check active VT"
-                            );
-                            None
-                        }
-                    })
-                {
+                if let Some(seat) = self.seat_entities.iter().copied().find_map(|seat_entity| {
+                    let mode = self.world.get::<ecs::SeatMode>(seat_entity)?;
+                    if mode.0 != ecs::SeatKind::VtBound {
+                        return None;
+                    }
+                    let current_vt = self.world.get::<ecs::CurrentVt>(seat_entity)?.0;
+                    (current_vt == vt).then(|| {
+                        self.world
+                            .get::<ecs::SeatName>(seat_entity)
+                            .map(|seat| seat.0.clone())
+                    })?
+                }) {
                     session_seat = Some(seat);
                     active_state = session_core_v1::ActiveState::Active;
                 }
 
-                self.world.insert_session(
+                let session_entity = self.world.insert_session(
                     session_id,
                     uid,
                     username,
@@ -313,6 +211,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
                     Vec::new(),
                     active_state,
                 );
+                self.session_entities.push(session_entity);
 
                 object.send_session_created(
                     session_id.as_raw(),
@@ -325,7 +224,8 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
             }
             session_manager::Event::DestroySession { session_id } => {
                 let session_id = session::SessionId::from_raw(session_id);
-                let Some(entity) = self.world.session_entity(session_id) else {
+                let Some(entity) = session::entity(&self.world, &self.session_entities, session_id)
+                else {
                     log::warn!(session_id = session_id.as_raw(); "destroy requested for unknown session");
                     return;
                 };
@@ -350,7 +250,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
                         object.send_destroyed();
                     }
                 }
-                let _ = self.world.remove_session(session_id);
+                let _ = self.remove_session(session_id);
 
                 for manager in &self.info_managers {
                     manager.send_session_removed(session_id.as_raw());
@@ -360,10 +260,9 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
                     log::error!(session_id = session_id.as_raw(), error = e.to_string().as_str(); "failed to poll destroy session cgroup");
                 }
 
-                if !self.world.session_ids().any(|session_id| {
+                if !session::entities(&self.world, &self.session_entities).any(|entity| {
                     self.world
-                        .session_entity(session_id)
-                        .and_then(|entity| self.world.get::<ecs::Uid>(entity))
+                        .get::<ecs::Uid>(entity)
                         .is_some_and(|session_uid| session_uid.0 == uid)
                 }) && let Err(e) = fs::remove_dir(format!("/run/user/{uid}"))
                 {
@@ -386,11 +285,22 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
                 session_core_session,
                 session_id,
             } => {
-                self.sync_vt_session_states();
+                session::sync_vt_session_states(
+                    &mut self.world,
+                    &self.seat_entities,
+                    &self.session_entities,
+                );
 
                 let session_id = session::SessionId::from_raw(session_id);
-                if let Some(entity) = self.world.session_entity(session_id) {
-                    self.add_session_object(session_id, entity, session_core_session);
+                if let Some(entity) =
+                    session::entity(&self.world, &self.session_entities, session_id)
+                {
+                    session::add_session_object(
+                        &mut self.world,
+                        session_id,
+                        entity,
+                        session_core_session,
+                    );
                     return;
                 }
 
@@ -401,7 +311,11 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
                 session_core_session,
                 pid,
             } => {
-                self.sync_vt_session_states();
+                session::sync_vt_session_states(
+                    &mut self.world,
+                    &self.seat_entities,
+                    &self.session_entities,
+                );
 
                 let Ok(Some(session_id)) = self.cgroup_manager.find_session_by_pid(pid) else {
                     log::warn!(pid; "get_session_by_pid: no session found for pid");
@@ -409,8 +323,15 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
                     return;
                 };
 
-                if let Some(entity) = self.world.session_entity(session_id) {
-                    self.add_session_object(session_id, entity, session_core_session);
+                if let Some(entity) =
+                    session::entity(&self.world, &self.session_entities, session_id)
+                {
+                    session::add_session_object(
+                        &mut self.world,
+                        session_id,
+                        entity,
+                        session_core_session,
+                    );
                     return;
                 }
 
@@ -421,10 +342,22 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
                 session_core_session,
                 uid,
             } => {
-                self.sync_vt_session_states();
+                session::sync_vt_session_states(
+                    &mut self.world,
+                    &self.seat_entities,
+                    &self.session_entities,
+                );
 
-                if let Some((session_id, entity)) = self.world.session_entity_by_uid(uid) {
-                    self.add_session_object(session_id, entity, session_core_session);
+                if let Some(entity) =
+                    session::entity_by_uid(&self.world, &self.session_entities, uid)
+                    && let Some(session_id) = session::id(&self.world, entity)
+                {
+                    session::add_session_object(
+                        &mut self.world,
+                        session_id,
+                        entity,
+                        session_core_session,
+                    );
                     return;
                 }
 
@@ -470,21 +403,27 @@ fn main() -> anyhow::Result<()> {
         .ok()
         .is_none_or(|vtbound| vtbound == "1");
 
-    let seat = if vtbound {
-        seat::Seat::vt_bound("seat0".to_string())
-    } else {
-        seat::Seat::non_vt_bound("seat0".to_string())
-    };
-
     let mut sessiond = Sessiond {
         next_session_id: session::SessionId::from_raw(1),
         info_managers: Vec::new(),
         cgroup_manager,
-        seat: vec![seat],
-        clients: Vec::new(),
+        session_entities: Vec::new(),
+        seat_entities: Vec::new(),
+        client_entities: Vec::new(),
         seat_access,
         world: ecs::World::new(),
     };
+
+    let seat_entity = sessiond.world.insert_seat(
+        "seat0".to_string(),
+        if vtbound {
+            ecs::SeatKind::VtBound
+        } else {
+            ecs::SeatKind::NonVtBound
+        },
+        0,
+    );
+    sessiond.seat_entities.push(seat_entity);
 
     let path = path::Path::new("/run/sessiond.sock");
     let mut socket = server::Server::bind(&path)?;
@@ -515,69 +454,38 @@ fn main() -> anyhow::Result<()> {
     event_loop
         .handle()
         .insert_source(signals, move |event, (), state| {
-            let mut session_updates = Vec::new();
-
-            for seat in state.seat.iter_mut().filter(|seat| seat.is_vt_bound()) {
-                match event.signal() {
-                    signals::Signal::SIGUSR1 => match seat.vt_release() {
-                        Ok(vt) => {
-                            session_updates.push((vt, session_core_v1::ActiveState::Online));
-                        }
-                        Err(e) => {
-                            log::error!("Could not release VT: {e}");
-                        }
-                    },
-                    signals::Signal::SIGUSR2 => match seat.vt_activate() {
-                        Ok(vt) => {
-                            session_updates.push((vt, session_core_v1::ActiveState::Active));
-                        }
-                        Err(e) => {
-                            log::error!("Could not activate VT: {e}");
-                        }
-                    },
-                    _ => unreachable!(),
-                }
-            }
+            let session_updates =
+                seat::handle_vt_signal(&mut state.world, &state.seat_entities, event.signal());
 
             for (vt, active_state) in session_updates {
+                let mut state_updates = Vec::new();
+
                 if active_state == session_core_v1::ActiveState::Active {
-                    for session_id in state.world.session_ids().collect::<Vec<_>>() {
-                        let Some(entity) = state.world.session_entity(session_id) else {
-                            continue;
-                        };
-                        let Some(session_vt) = state.world.get::<ecs::Vt>(entity).map(|vt| vt.0)
-                        else {
-                            continue;
-                        };
-                        let Some(session_state) = state
-                            .world
-                            .get::<ecs::ActiveState>(entity)
-                            .map(|state| state.0)
-                        else {
-                            continue;
-                        };
-                        if session_vt != vt && session_state == session_core_v1::ActiveState::Active
-                        {
-                            session::set_state(
-                                &mut state.world,
-                                session_id,
-                                entity,
-                                session_core_v1::ActiveState::Online,
-                            );
-                        }
-                    }
+                    state_updates.extend(
+                        session::entities(&state.world, &state.session_entities).filter_map(
+                            |entity| {
+                                let session_vt = state.world.get::<ecs::Vt>(entity)?.0;
+                                let session_state = state.world.get::<ecs::ActiveState>(entity)?.0;
+                                (session_vt != vt
+                                    && session_state == session_core_v1::ActiveState::Active)
+                                    .then_some((entity, session_core_v1::ActiveState::Online))
+                            },
+                        ),
+                    );
                 }
 
-                for session_id in state.world.session_ids().collect::<Vec<_>>() {
-                    let Some(entity) = state.world.session_entity(session_id) else {
+                state_updates.extend(
+                    session::entities(&state.world, &state.session_entities).filter_map(|entity| {
+                        let session_vt = state.world.get::<ecs::Vt>(entity)?.0;
+                        (session_vt == vt).then_some((entity, active_state))
+                    }),
+                );
+
+                for (entity, active_state) in state_updates {
+                    let Some(session_id) = session::id(&state.world, entity) else {
                         continue;
                     };
-                    let Some(session_vt) = state.world.get::<ecs::Vt>(entity).map(|vt| vt.0) else {
-                        continue;
-                    };
-                    if session_vt == vt {
-                        session::set_state(&mut state.world, session_id, entity, active_state);
-                    }
+                    session::set_state(&mut state.world, session_id, entity, active_state);
                 }
             }
         })?;

@@ -1,4 +1,5 @@
 use crate::seat_v1::device;
+use crate::{ecs, seat, seat_v1};
 use rustix::{io, ioctl};
 use std::ffi::c_int;
 use std::os::fd;
@@ -12,20 +13,65 @@ impl hyprwire::Dispatch<device::Device> for crate::Sessiond {
     ) {
         let device::Event::Destroy = event;
 
-        let Some(client) = self.clients.iter().find(|client| {
-            client
-                .borrow()
-                .devices
-                .iter()
-                .any(|device| device.contains_object(object))
-        }) else {
+        let Some(client_entity) =
+            seat::client_entity_by_device_object(&self.world, &self.client_entities, object)
+        else {
             return;
         };
 
-        if let Err(err) = client.borrow_mut().close_device(object) {
+        if let Err(err) = close_device(&mut self.world, client_entity, object) {
             log::error!("Could not close device: {err}");
         }
     }
+}
+
+pub fn close_device(
+    world: &mut ecs::World,
+    client_entity: ecs::Entity,
+    object: &seat_v1::device::Device,
+) -> anyhow::Result<()> {
+    let session_id = world
+        .get::<ecs::Session>(client_entity)
+        .map(|session| session.0)
+        .ok_or_else(|| anyhow::anyhow!("client has no session id"))?;
+    let seat_name = world
+        .get::<ecs::SeatName>(client_entity)
+        .map(|seat| seat.0.clone())
+        .ok_or_else(|| anyhow::anyhow!("client has no seat"))?;
+    let devices = world
+        .get_mut::<ecs::Devices>(client_entity)
+        .ok_or_else(|| anyhow::anyhow!("client has no devices"))?;
+    let idx = devices
+        .0
+        .iter()
+        .position(|device| device.contains_object(object))
+        .ok_or_else(|| anyhow::anyhow!("device not found"))?;
+
+    let device = &mut devices.0[idx];
+    device.remove_object(object);
+    log::debug!(
+        "Closing device {} for client {} on {}",
+        device.path().display(),
+        session_id.as_raw(),
+        seat_name
+    );
+
+    if device.decrement_ref() > 0 {
+        return Ok(());
+    }
+
+    if let Err(err) = device.deactivate() {
+        log::error!(
+            "Could not deactivate device {} for client {} on {}: {err}",
+            device.path().display(),
+            session_id.as_raw(),
+            seat_name
+        );
+    }
+
+    devices.0.remove(idx);
+
+    Ok(())
 }
 
 const DRM_SET_MASTER: ioctl::Opcode = ioctl::opcode::none(b'd', 0x1e);

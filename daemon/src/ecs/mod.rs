@@ -1,9 +1,8 @@
 mod components;
 
 use crate::session;
-use crate::{session_core_session, session_core_v1};
+use crate::{seat, seat_v1, session_core_session, session_core_v1};
 pub use components::*;
-use std::collections::HashMap;
 use std::time;
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
@@ -13,16 +12,23 @@ pub struct Entity(usize);
 pub struct World {
     next_entity: usize,
     free_entities: Vec<Entity>,
-    session_entities: HashMap<session::SessionId, Entity>,
-    session_order: Vec<session::SessionId>,
     uid_components: Vec<Option<Uid>>,
     username_components: Vec<Option<Username>>,
     vt_components: Vec<Option<Vt>>,
-    seat_components: Vec<Option<Seat>>,
+    seat_name_components: Vec<Option<SeatName>>,
     timestamp_components: Vec<Option<Timestamp>>,
     leader_id_components: Vec<Option<LeaderId>>,
     session_objects_components: Vec<Option<SessionObjects>>,
     active_state_components: Vec<Option<ActiveState>>,
+    session_components: Vec<Option<Session>>,
+    seat_object_components: Vec<Option<SeatObject>>,
+    devices_components: Vec<Option<Devices>>,
+    seat_state_components: Vec<Option<SeatState>>,
+    seat_mode_components: Vec<Option<SeatMode>>,
+    current_vt_components: Vec<Option<CurrentVt>>,
+    seat_clients_components: Vec<Option<SeatClients>>,
+    active_client_components: Vec<Option<ActiveClient>>,
+    next_client_components: Vec<Option<NextClient>>,
 }
 
 impl World {
@@ -54,12 +60,13 @@ impl World {
         active_state: session_core_v1::ActiveState,
     ) -> Entity {
         let entity = self.entity();
-        self.session_entities.insert(session_id, entity);
-        self.session_order.push(session_id);
+        self.insert(entity, Session(session_id));
         self.insert(entity, Uid(uid));
         self.insert(entity, Username(username));
         self.insert(entity, Vt(vt));
-        self.insert(entity, Seat(seat));
+        if let Some(seat) = seat {
+            self.insert(entity, SeatName(seat));
+        }
         self.insert(entity, Timestamp(timestamp));
         self.insert(entity, LeaderId(leader_id));
         self.insert(entity, SessionObjects(objects));
@@ -67,38 +74,21 @@ impl World {
         entity
     }
 
-    pub fn session_entity(&self, session_id: session::SessionId) -> Option<Entity> {
-        self.session_entities.get(&session_id).copied()
+    pub fn insert_client(&mut self, object: seat_v1::seat::Seat) -> Entity {
+        let entity = self.entity();
+        self.insert(entity, SeatObject(object));
+        self.insert(entity, Devices(Vec::new()));
+        self.insert(entity, SeatState(seat::SeatState::New));
+        entity
     }
 
-    pub fn session_ids(&self) -> impl Iterator<Item = session::SessionId> + '_ {
-        self.session_order.iter().copied()
-    }
-
-    pub fn session_entity_by_uid(&self, uid: u32) -> Option<(session::SessionId, Entity)> {
-        self.session_order.iter().copied().find_map(|session_id| {
-            let entity = self.session_entity(session_id)?;
-            self.get::<Uid>(entity)
-                .is_some_and(|session_uid| session_uid.0 == uid)
-                .then_some((session_id, entity))
-        })
-    }
-
-    pub fn session_entity_by_object(
-        &self,
-        object: &session_core_session::SessionCoreSession,
-    ) -> Option<(session::SessionId, Entity)> {
-        self.session_entities
-            .iter()
-            .find(|(_, entity)| {
-                self.get::<SessionObjects>(**entity).is_some_and(|objects| {
-                    objects
-                        .0
-                        .iter()
-                        .any(|session_object| session_object == object)
-                })
-            })
-            .map(|(session_id, entity)| (*session_id, *entity))
+    pub fn insert_seat(&mut self, name: String, mode: SeatKind, current_vt: u32) -> Entity {
+        let entity = self.entity();
+        self.insert(entity, SeatName(name));
+        self.insert(entity, SeatMode(mode));
+        self.insert(entity, CurrentVt(current_vt));
+        self.insert(entity, SeatClients(Vec::new()));
+        entity
     }
 
     pub fn insert<C>(&mut self, entity: Entity, component: C)
@@ -127,24 +117,32 @@ impl World {
         C::storage(self).get_mut(entity.0)?.as_mut()
     }
 
+    pub fn remove<C>(&mut self, entity: Entity) -> Option<C>
+    where
+        C: Component,
+    {
+        C::storage(self).get_mut(entity.0)?.take()
+    }
+
     pub fn remove_entity(&mut self, entity: Entity) {
         clear_component(&mut self.uid_components, entity);
         clear_component(&mut self.username_components, entity);
         clear_component(&mut self.vt_components, entity);
-        clear_component(&mut self.seat_components, entity);
+        clear_component(&mut self.seat_name_components, entity);
         clear_component(&mut self.timestamp_components, entity);
         clear_component(&mut self.leader_id_components, entity);
         clear_component(&mut self.session_objects_components, entity);
         clear_component(&mut self.active_state_components, entity);
+        clear_component(&mut self.session_components, entity);
+        clear_component(&mut self.seat_object_components, entity);
+        clear_component(&mut self.devices_components, entity);
+        clear_component(&mut self.seat_state_components, entity);
+        clear_component(&mut self.seat_mode_components, entity);
+        clear_component(&mut self.current_vt_components, entity);
+        clear_component(&mut self.seat_clients_components, entity);
+        clear_component(&mut self.active_client_components, entity);
+        clear_component(&mut self.next_client_components, entity);
         self.free_entities.push(entity);
-    }
-
-    pub fn remove_session(&mut self, session_id: session::SessionId) -> Option<Entity> {
-        let entity = self.session_entities.remove(&session_id)?;
-        self.session_order
-            .retain(|existing| *existing != session_id);
-        self.remove_entity(entity);
-        Some(entity)
     }
 }
 

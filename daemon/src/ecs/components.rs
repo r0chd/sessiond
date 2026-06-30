@@ -32,6 +32,9 @@ component!(Vt, vt_components);
 pub struct SeatName(pub String);
 component!(SeatName, seat_name_components);
 
+pub struct SeatEntity(pub super::Entity);
+component!(SeatEntity, seat_entity_components);
+
 pub struct Timestamp(pub time::SystemTime);
 component!(Timestamp, timestamp_components);
 

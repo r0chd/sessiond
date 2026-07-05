@@ -145,10 +145,17 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
         }
 
         match event {
-            session_manager::Event::CreateSession { uid, username, vt } => {
+            session_manager::Event::CreateSession {
+                uid,
+                username,
+                vt,
+                is_local,
+                remote_host,
+            } => {
                 let session_id = self.next_session_id;
                 self.next_session_id = self.next_session_id.next();
-                log::info!(session_id = session_id.as_raw(), uid, username = username.as_str(), vt; "session created");
+                let is_local = is_local != 0;
+                log::info!(session_id = session_id.as_raw(), uid, username = username.as_str(), vt, is_local, remote_host = remote_host.as_str(); "session created");
 
                 let leader_id = client.creds().pid.as_raw_pid();
 
@@ -213,6 +220,8 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
                     session_seat_entity,
                     time::SystemTime::now(),
                     leader_id,
+                    is_local,
+                    remote_host,
                     Vec::new(),
                     active_state,
                 );

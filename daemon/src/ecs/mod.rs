@@ -21,6 +21,8 @@ pub struct World {
     seat_entity_components: Vec<Option<SeatEntity>>,
     timestamp_components: Vec<Option<Timestamp>>,
     leader_id_components: Vec<Option<LeaderId>>,
+    is_local_components: Vec<Option<IsLocal>>,
+    remote_host_components: Vec<Option<RemoteHost>>,
     session_objects_components: Vec<Option<SessionObjects>>,
     active_state_components: Vec<Option<ActiveState>>,
     session_components: Vec<Option<Session>>,
@@ -67,6 +69,8 @@ impl World {
         seat_entity: Option<Entity>,
         timestamp: time::SystemTime,
         leader_id: i32,
+        is_local: bool,
+        remote_host: String,
         objects: Vec<session_core_session::SessionCoreSession>,
         active_state: session_core_v1::ActiveState,
     ) -> Entity {
@@ -83,6 +87,8 @@ impl World {
         }
         self.insert(entity, Timestamp(timestamp));
         self.insert(entity, LeaderId(leader_id));
+        self.insert(entity, IsLocal(is_local));
+        self.insert(entity, RemoteHost(remote_host));
         self.insert(entity, SessionObjects(objects));
         self.insert(entity, ActiveState(active_state));
         entity
@@ -167,6 +173,8 @@ impl World {
         clear_component(&mut self.seat_entity_components, entity);
         clear_component(&mut self.timestamp_components, entity);
         clear_component(&mut self.leader_id_components, entity);
+        clear_component(&mut self.is_local_components, entity);
+        clear_component(&mut self.remote_host_components, entity);
         clear_component(&mut self.session_objects_components, entity);
         clear_component(&mut self.active_state_components, entity);
         clear_component(&mut self.session_components, entity);

@@ -18,10 +18,20 @@ in
     package = sessiond;
   };
 
-  systemd.targets.getty.wants = lib.mkForce (map (tty: "autovt@${tty}.service") virtualTerminals);
+  boot.kernelParams = [
+    "console=ttyS0"
+  ];
+
+  systemd.targets.getty.wants = lib.mkForce (
+    map (tty: "autovt@${tty}.service") virtualTerminals
+    ++ [ "serial-getty@ttyS0.service" ]
+  );
 
   virtualisation = {
-    qemu.options = [ "-vga virtio" ];
+    qemu.options = [
+      "-display none"
+      "-serial stdio"
+    ];
     memorySize = 2048;
     forwardPorts = [
       {

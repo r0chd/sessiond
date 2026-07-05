@@ -1,5 +1,18 @@
 {
   "pins": {
+    "finix": {
+      "type": "Git",
+      "repository": {
+        "type": "GitHub",
+        "owner": "finix-community",
+        "repo": "finix"
+      },
+      "branch": "main",
+      "submodules": false,
+      "revision": "c3e2fbcb2eb3aa4faaedc850b52840608dcd7c54",
+      "url": "https://github.com/finix-community/finix/archive/c3e2fbcb2eb3aa4faaedc850b52840608dcd7c54.tar.gz",
+      "hash": "sha256-Y4LMhpl++3ZDA+M2O75FoOt65lClDjsvJBO2N7mVDPw="
+    },
     "nixpkgs": {
       "type": "Channel",
       "name": "nixpkgs-unstable",

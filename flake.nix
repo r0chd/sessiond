@@ -25,11 +25,18 @@
       pkgsFor =
         system:
         import nixpkgs {
-          inherit system;
+          localSystem = {
+            inherit system;
+            linux-kernel.target = "bzImage";
+          };
           overlays = [ rust-overlay.overlays.default ];
         };
 
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f (pkgsFor system));
+
+      finix = (import sources.finix.outPath) // {
+        inherit (sources.finix) outPath;
+      };
     in
     {
       devShells = forAllSystems (pkgs: {
@@ -121,9 +128,6 @@
         let
           system = "x86_64-linux";
           pkgs = pkgsFor system;
-          finix = (import sources.finix.outPath) // {
-            inherit (sources.finix) outPath;
-          };
         in
         {
           finix-vm = finix.lib.finixSystem {
@@ -132,7 +136,7 @@
               inherit (self.packages.${system}) sessiond;
             };
             modules = [
-              { nixpkgs.pkgs = pkgs; }
+              { nixpkgs = { inherit pkgs; }; }
               ./nix/finix-vm.nix
               ./nix/finix.nix
               "${finix.outPath}/modules/virtualisation/qemu.nix"
@@ -141,9 +145,18 @@
               inherit (finix.nixosModules)
                 getty
                 sysklogd
+                polkit
                 ;
             };
           };
         };
+
+      checks = forAllSystems (
+        pkgs:
+        import ./nix/finix-checks.nix {
+          inherit self finix;
+          inherit pkgs;
+        }
+      );
     };
 }

@@ -20,6 +20,7 @@ clap_complete_nushell = "4.6.0"
 hyprwire = "0.4.3"
 owo-colors = "4.3.0"
 rustix = "1.1.4"
+serde_json = "1.0.145"
 
 [build-dependencies]
 hyprwire-scanner = "0.4.3"

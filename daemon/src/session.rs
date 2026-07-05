@@ -194,6 +194,12 @@ pub fn add_session_object(
         let timestamp = u32::try_from(timestamp_secs).unwrap_or(u32::MAX);
         object.send_timestamp(timestamp);
     }
+    if let Some(is_local) = world.get::<ecs::IsLocal>(entity) {
+        object.send_is_local(u32::from(is_local.0));
+    }
+    if let Some(remote_host) = world.get::<ecs::RemoteHost>(entity) {
+        object.send_remote_host(&remote_host.0);
+    }
     object.send_done();
 
     if let Some(objects) = world.get_mut::<ecs::SessionObjects>(entity) {

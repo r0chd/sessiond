@@ -41,6 +41,12 @@ component!(Timestamp, timestamp_components);
 pub struct LeaderId(pub i32);
 component!(LeaderId, leader_id_components);
 
+pub struct IsLocal(pub bool);
+component!(IsLocal, is_local_components);
+
+pub struct RemoteHost(pub String);
+component!(RemoteHost, remote_host_components);
+
 pub struct SessionObjects(pub Vec<session_core_session::SessionCoreSession>);
 component!(SessionObjects, session_objects_components);
 

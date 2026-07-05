@@ -1,18 +1,11 @@
 {
   "pins": {
-    "finix": {
-      "type": "Git",
-      "repository": {
-        "type": "GitHub",
-        "owner": "finix-community",
-        "repo": "finix"
-      },
-      "branch": "main",
-      "submodules": false,
-      "revision": "498455b1140a4ee643d8d9bf4b97a2f13b187dad",
-      "url": "https://github.com/finix-community/finix/archive/498455b1140a4ee643d8d9bf4b97a2f13b187dad.tar.gz",
-      "hash": "sha256-SEJRBVnp4rEKevJ1Epvaozax9U91hxft/mm5ftpj+QE="
+    "nixpkgs": {
+      "type": "Channel",
+      "name": "nixpkgs-unstable",
+      "url": "https://releases.nixos.org/nixpkgs/nixpkgs-26.11pre1026211.9e92285f211d/nixexprs.tar.xz",
+      "hash": "sha256-VGtEDss4T0hPTnlWiiaa29y/lXM9SxuSMVtzPYf3wS0="
     }
   },
-  "version": 8
+  "version": 7
 }

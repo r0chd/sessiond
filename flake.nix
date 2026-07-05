@@ -121,9 +121,6 @@
         let
           system = "x86_64-linux";
           pkgs = pkgsFor system;
-          moxseatd = (import sources.moxseatd.outPath { inherit pkgs; }) // {
-            inherit (sources.moxseatd) outPath;
-          };
           finix = (import sources.finix.outPath) // {
             inherit (sources.finix) outPath;
           };
@@ -133,7 +130,6 @@
             inherit (pkgs) lib;
             specialArgs = {
               inherit (self.packages.${system}) sessiond;
-              inherit moxseatd;
             };
             modules = [
               { nixpkgs.pkgs = pkgs; }

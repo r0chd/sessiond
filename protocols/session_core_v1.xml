@@ -79,6 +79,12 @@
   <s2c name="timestamp">
    <arg name="timestamp" type="uint" summary="session start time (seconds since Unix epoch)"/>
   </s2c>
+  <s2c name="is_local">
+   <arg name="is_local" type="uint" summary="non-zero if the session originates from the local machine, zero if remote"/>
+  </s2c>
+  <s2c name="remote_host">
+   <arg name="remote_host" type="varchar" summary="remote host name, empty for local sessions"/>
+  </s2c>
   <s2c name="active">
    <description summary="session active state"/>
    <arg name="state" type="enum" interface="active_state" summary="session active state"/>

@@ -11,6 +11,7 @@ use clap_complete_nushell::Nushell;
 use hyprwire::client;
 use owo_colors::OwoColorize;
 use rustix::process;
+use serde_json::json;
 use session_core_v1::{session_core_manager, session_core_session};
 
 struct Session {
@@ -157,7 +158,10 @@ impl CompletionShell {
 #[derive(Subcommand)]
 enum SessionCommand {
     #[command(about = "show live sessions")]
-    List,
+    List {
+        #[arg(long, help = "emit machine-readable JSON output")]
+        json: bool,
+    },
     #[command(
         about = "ask sessions to exit",
         group(ArgGroup::new("target").required(true).args(["ids", "current"]))
@@ -216,7 +220,7 @@ enum SessionAction {
 impl SessionAction {
     const fn from_command(command: &SessionCommand) -> Option<Self> {
         match command {
-            SessionCommand::List => None,
+            SessionCommand::List { .. } => None,
             SessionCommand::Close { .. } => Some(Self::Close),
             SessionCommand::Kill { .. } => Some(Self::Kill),
             SessionCommand::Lock { .. } => Some(Self::Lock),
@@ -226,7 +230,7 @@ impl SessionAction {
 
     fn ids(command: &SessionCommand) -> Option<&[u32]> {
         match command {
-            SessionCommand::List => None,
+            SessionCommand::List { .. } => None,
             SessionCommand::Close { ids, .. }
             | SessionCommand::Kill { ids, .. }
             | SessionCommand::Lock { ids }
@@ -236,7 +240,7 @@ impl SessionAction {
 
     const fn targets_current(command: &SessionCommand) -> bool {
         match command {
-            SessionCommand::List => false,
+            SessionCommand::List { .. } => false,
             SessionCommand::Close { current, .. } | SessionCommand::Kill { current, .. } => {
                 *current
             }
@@ -252,6 +256,20 @@ impl SessionAction {
             Self::Unlock => object.send_unlock(),
         }
     }
+}
+
+const fn active_state_name(state: session_core_v1::ActiveState) -> &'static str {
+    match state {
+        session_core_v1::ActiveState::Online => "online",
+        session_core_v1::ActiveState::Active => "active",
+        session_core_v1::ActiveState::Closing => "closing",
+        session_core_v1::ActiveState::Opening => "opening",
+    }
+}
+
+fn print_json(value: &serde_json::Value) -> anyhow::Result<()> {
+    println!("{}", serde_json::to_string_pretty(value)?);
+    Ok(())
 }
 
 #[allow(clippy::too_many_lines)]
@@ -295,20 +313,29 @@ fn main() -> anyhow::Result<()> {
     };
 
     match command {
-        SessionCommand::List => {
+        SessionCommand::List { json: emit_json } => {
+            if *emit_json {
+                return print_json(&json!({
+                    "sessions": state.sessions.iter().map(|session| {
+                        json!({
+                            "id": session.id,
+                            "uid": session.uid,
+                            "username": session.username,
+                            "vt": session.vt,
+                            "tty": format!("tty{}", session.vt),
+                            "seat": session.seat,
+                            "leader": session.leader,
+                            "timestamp": session.timestamp,
+                            "active": active_state_name(session.active),
+                        })
+                    }).collect::<Vec<_>>(),
+                }));
+            }
+
             if state.sessions.is_empty() {
                 println!("No active sessions.");
                 return Ok(());
             }
-
-            let fmt_state = |s: &session_core_v1::ActiveState| -> &'static str {
-                match s {
-                    session_core_v1::ActiveState::Online => "online",
-                    session_core_v1::ActiveState::Active => "active",
-                    session_core_v1::ActiveState::Closing => "closing",
-                    session_core_v1::ActiveState::Opening => "opening",
-                }
-            };
 
             let fmt_ts = |ts: u32| -> String {
                 use std::time::{Duration, UNIX_EPOCH};
@@ -383,7 +410,7 @@ fn main() -> anyhow::Result<()> {
             let state_w = state
                 .sessions
                 .iter()
-                .map(|s| fmt_state(&s.active).len())
+                .map(|s| active_state_name(s.active).len())
                 .max()
                 .unwrap_or(0)
                 .max(5);
@@ -421,7 +448,7 @@ fn main() -> anyhow::Result<()> {
                     session.seat.as_deref().unwrap_or("-"),
                     session.leader,
                     fmt_ts(session.timestamp),
-                    fmt_state(&session.active),
+                    active_state_name(session.active),
                 );
             }
         }

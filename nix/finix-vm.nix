@@ -8,6 +8,7 @@ let
 in
 {
   services = {
+    polkit.enable = true;
     sysklogd.enable = true;
     sessiond = {
       enable = true;
@@ -23,10 +24,10 @@ in
   };
 
   boot = {
-    kernelParams = [ ];
+    kernelParams = [
+      "console=ttyS0"
+    ];
     kernelModules = [
-      "virtio_gpu"
-      "virtio_input"
       "usbhid"
       "hid_generic"
     ];
@@ -55,17 +56,12 @@ in
     cores = 2;
     qemu = {
       extraArgs = [
-        "-vga"
-        "virtio"
-        "-device"
-        "virtio-keyboard"
-        "-usb"
-        "-device"
-        "usb-tablet,bus=usb-bus.0"
+        "-display"
+        "none"
         "-monitor"
         "unix:/tmp/sessiond-vm-monitor.sock,server,nowait"
         "-serial"
-        "unix:/tmp/sessiond-vm-serial.sock,server,nowait"
+        "stdio"
       ];
       package = pkgs.qemu_full;
       nics.default.args = [

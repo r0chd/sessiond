@@ -4,6 +4,7 @@
     system = builtins.currentSystem;
     overlays = [ rust-overlay ];
   },
+  finix ? (import ./npins).finix,
 }:
 let
   rustToolchain = pkgs.rust-bin.stable.latest.default.override {
@@ -40,4 +41,6 @@ in
     };
     sessiond = default;
   };
+
+  checks = import ./internal/finix-checks.nix { inherit finix pkgs; };
 }

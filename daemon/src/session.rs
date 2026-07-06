@@ -120,6 +120,7 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
                 if let Err(err) = self.cgroup_manager.terminate_session(session_id) {
                     log::error!(session_id = session_id.as_raw(), err = err.to_string().as_str(); "terminate failed");
                 }
+                #[cfg(feature = "consolekit")]
                 self.sync_consolekit_session(session_id, entity);
                 let _ = self.remove_session(session_id);
             }
@@ -134,6 +135,7 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
                 if let Err(err) = self.cgroup_manager.kill_session(session_id) {
                     log::error!(session_id = session_id.as_raw(), err = err.to_string().as_str(); "kill failed");
                 }
+                #[cfg(feature = "consolekit")]
                 self.sync_consolekit_session(session_id, entity);
                 let _ = self.remove_session(session_id);
             }

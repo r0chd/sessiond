@@ -14,6 +14,7 @@ mod seat_v1 {
 }
 
 mod cgroup;
+#[cfg(feature = "consolekit")]
 mod consolekit;
 mod device;
 mod ecs;
@@ -94,6 +95,7 @@ struct Sessiond {
     seat_entities: Vec<ecs::Entity>,
     client_entities: Vec<ecs::Entity>,
     seat_access: SeatAccess,
+    #[cfg(feature = "consolekit")]
     consolekit: consolekit::Server,
     shutting_down: bool,
     loop_signal: calloop::LoopSignal,
@@ -109,10 +111,12 @@ impl Sessiond {
         })?;
         let entity = self.session_entities.remove(idx);
         self.world.remove_entity(entity);
+        #[cfg(feature = "consolekit")]
         self.consolekit.remove_session(session_id);
         Some(entity)
     }
 
+    #[cfg(feature = "consolekit")]
     fn sync_consolekit_session(&self, session_id: session::SessionId, entity: ecs::Entity) {
         if let Some(info) = consolekit::SessionInfo::from_world(&self.world, entity, session_id) {
             self.consolekit.upsert_session(info);
@@ -237,6 +241,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
                     active_state,
                 );
                 self.session_entities.push(session_entity);
+                #[cfg(feature = "consolekit")]
                 self.sync_consolekit_session(session_id, session_entity);
 
                 object.send_session_created(
@@ -266,6 +271,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
                 if let Some(active_state) = self.world.get_mut::<ecs::ActiveState>(entity) {
                     active_state.0 = session_core_v1::ActiveState::Closing;
                 }
+                #[cfg(feature = "consolekit")]
                 self.sync_consolekit_session(session_id, entity);
                 if let Some(objects) = self.world.get::<ecs::SessionObjects>(entity) {
                     for object in &objects.0 {
@@ -540,6 +546,7 @@ fn main() -> anyhow::Result<()> {
         seat_entities: Vec::new(),
         client_entities: Vec::new(),
         seat_access,
+        #[cfg(feature = "consolekit")]
         consolekit: consolekit::Server::start(),
         shutting_down: false,
         loop_signal,
@@ -652,6 +659,7 @@ fn main() -> anyhow::Result<()> {
                         continue;
                     };
                     session::set_state(&mut state.world, session_id, entity, active_state);
+                    #[cfg(feature = "consolekit")]
                     state.sync_consolekit_session(session_id, entity);
                 }
             }

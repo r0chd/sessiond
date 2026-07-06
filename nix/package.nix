@@ -1,4 +1,5 @@
 {
+  withConsoleKit ? true,
   rustPlatform,
   lib,
   pkg-config,
@@ -43,6 +44,8 @@ rustPlatform.buildRustPackage {
   ];
 
   cargoBuildFlags = [ "--workspace" ];
+
+  cargoFeatures = lib.optionals withConsoleKit [ "consolekit" ];
 
   postInstall = ''
     mkdir -p $out/lib/security

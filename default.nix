@@ -40,6 +40,10 @@ in
       };
     };
     sessiond = default;
+    polkit = pkgs.callPackage ./nix/polkit {
+      useConsoleKit = true;
+      useSystemd = false;
+    };
   };
 
   checks = import ./internal/finix-checks.nix { inherit finix pkgs; };

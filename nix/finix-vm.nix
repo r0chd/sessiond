@@ -1,6 +1,7 @@
 {
   pkgs,
   sessiond,
+  polkit,
   ...
 }:
 let
@@ -32,6 +33,7 @@ in
   services = {
     polkit = {
       enable = true;
+      package = polkit;
       extraConfig = ''
         polkit.addRule(function(action, subject) {
           if (

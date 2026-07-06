@@ -421,7 +421,6 @@ pub fn remove_client(
     Ok(())
 }
 
-#[allow(clippy::too_many_lines)]
 pub fn open_device(
     world: &mut ecs::World,
     seat_entity: ecs::Entity,

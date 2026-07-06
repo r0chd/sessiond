@@ -43,9 +43,13 @@ rustPlatform.buildRustPackage {
     installShellFiles
   ];
 
-  cargoBuildFlags = [ "--workspace" ];
-
-  cargoFeatures = lib.optionals withConsoleKit [ "consolekit" ];
+  cargoBuildFlags = [
+    "--workspace"
+  ]
+  ++ lib.optionals withConsoleKit [
+    "--features"
+    "daemon/consolekit"
+  ];
 
   postInstall = ''
     mkdir -p $out/lib/security
@@ -53,6 +57,13 @@ rustPlatform.buildRustPackage {
     mv $out/bin/daemon $out/bin/sessiond
     mv $out/bin/ctl $out/bin/sessionctl
 
+    installShellCompletion --cmd sessionctl \
+      --bash <($out/bin/sessionctl completions bash) \
+      --zsh <($out/bin/sessionctl completions zsh) \
+      --fish <($out/bin/sessionctl completions fish) \
+      --nushell <($out/bin/sessionctl completions nushell)
+  ''
+  + lib.optionals withConsoleKit ''
     mkdir -p $out/share/dbus-1/system.d
     cat > $out/share/dbus-1/system.d/org.freedesktop.ConsoleKit.conf <<'EOF'
     <!DOCTYPE busconfig PUBLIC
@@ -68,16 +79,10 @@ rustPlatform.buildRustPackage {
       </policy>
     </busconfig>
     EOF
-
-    installShellCompletion --cmd sessionctl \
-      --bash <($out/bin/sessionctl completions bash) \
-      --zsh <($out/bin/sessionctl completions zsh) \
-      --fish <($out/bin/sessionctl completions fish) \
-      --nushell <($out/bin/sessionctl completions nushell)
   '';
 
   meta = {
-    description = "";
+    description = "session and seat management daemon";
     homepage = "https://tangled.org/r0chd.pl/sessiond";
     license = lib.licenses.gpl3;
     maintainers = builtins.attrValues { inherit (lib.maintainers) r0chd; };

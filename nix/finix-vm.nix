@@ -57,7 +57,11 @@ in
     qemu = {
       extraArgs = [
         "-display"
-        "none"
+        "gtk,gl=off"
+        "-device"
+        "virtio-vga"
+        "-device"
+        "virtio-tablet-pci"
         "-monitor"
         "unix:/tmp/sessiond-vm-monitor.sock,server,nowait"
         "-serial"

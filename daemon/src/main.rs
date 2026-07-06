@@ -93,6 +93,8 @@ struct Sessiond {
     seat_entities: Vec<ecs::Entity>,
     client_entities: Vec<ecs::Entity>,
     seat_access: SeatAccess,
+    shutting_down: bool,
+    loop_signal: calloop::LoopSignal,
     world: ecs::World,
 }
 
@@ -398,17 +400,17 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
 
                 log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), session_count; "reboot accepted");
 
-                let session_ids = session::entities(&self.world, &self.session_entities)
+                for session_id in session::entities(&self.world, &self.session_entities)
                     .filter_map(|entity| self.world.get::<ecs::Session>(entity))
-                    .map(|session| session.0)
-                    .collect::<Vec<_>>();
-
-                for session_id in session_ids {
-                    if let Err(err) = self.cgroup_manager.terminate_session(session_id) {
-                        log::error!(session_id = session_id.as_raw(), error = err.to_string().as_str(); "failed to terminate session before reboot");
+                {
+                    if let Err(err) = self.cgroup_manager.terminate_session(session_id.0) {
+                        log::error!(session_id = session_id.0.as_raw(), error = err.to_string().as_str(); "failed to terminate session before reboot");
                         object.send_error(
                             session_core_v1::ErrorCode::Io,
-                            format!("failed to terminate session {}: {err}", session_id.as_raw()),
+                            format!(
+                                "failed to terminate session {}: {err}",
+                                session_id.0.as_raw()
+                            ),
                         );
                         return;
                     }
@@ -445,17 +447,17 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
 
                 log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), session_count; "poweroff accepted");
 
-                let session_ids = session::entities(&self.world, &self.session_entities)
+                for session_id in session::entities(&self.world, &self.session_entities)
                     .filter_map(|entity| self.world.get::<ecs::Session>(entity))
-                    .map(|session| session.0)
-                    .collect::<Vec<_>>();
-
-                for session_id in session_ids {
-                    if let Err(err) = self.cgroup_manager.terminate_session(session_id) {
-                        log::error!(session_id = session_id.as_raw(), error = err.to_string().as_str(); "failed to terminate session before poweroff");
+                {
+                    if let Err(err) = self.cgroup_manager.terminate_session(session_id.0) {
+                        log::error!(session_id = session_id.0.as_raw(), error = err.to_string().as_str(); "failed to terminate session before poweroff");
                         object.send_error(
                             session_core_v1::ErrorCode::Io,
-                            format!("failed to terminate session {}: {err}", session_id.as_raw()),
+                            format!(
+                                "failed to terminate session {}: {err}",
+                                session_id.0.as_raw()
+                            ),
                         );
                         return;
                     }
@@ -506,6 +508,7 @@ fn main() -> anyhow::Result<()> {
     );
 
     let mut event_loop = calloop::EventLoop::try_new()?;
+    let loop_signal = event_loop.get_signal();
 
     let cgroup_manager = cgroup::CgroupManager::new(event_loop.handle())?;
 
@@ -521,6 +524,8 @@ fn main() -> anyhow::Result<()> {
         seat_entities: Vec::new(),
         client_entities: Vec::new(),
         seat_access,
+        shutting_down: false,
+        loop_signal,
         world: ecs::World::new(),
     };
 
@@ -556,11 +561,13 @@ fn main() -> anyhow::Result<()> {
     event_loop
         .handle()
         .insert_source(source, move |_, _, state| {
+            if state.shutting_down {
+                return Ok(calloop::PostAction::Continue);
+            }
+
             _ = socket.dispatch_events(state, false);
             Ok(calloop::PostAction::Continue)
         })?;
-
-    let loop_signal = event_loop.get_signal();
 
     let signals = signals::Signals::new(&[
         signals::Signal::SIGUSR1,
@@ -576,8 +583,25 @@ fn main() -> anyhow::Result<()> {
                     seat::handle_vt_signal(&mut state.world, &state.seat_entities, event.signal())
                 }
                 signals::Signal::SIGTERM | signals::Signal::SIGINT => {
-                    loop_signal.stop();
-                    Vec::new()
+                    if state.shutting_down {
+                        return;
+                    }
+
+                    state.shutting_down = true;
+
+                    for session_id in session::entities(&state.world, &state.session_entities)
+                        .filter_map(|entity| state.world.get::<ecs::Session>(entity))
+                    {
+                        if let Err(err) = state.cgroup_manager.terminate_session(session_id.0) {
+                            log::error!(session_id = session_id.0.as_raw(), error = err.to_string().as_str(); "failed to terminate session during shutdown");
+                        }
+                    }
+
+                    if state.cgroup_manager.is_empty() {
+                        state.loop_signal.stop();
+                    }
+
+                    return;
                 }
                 _ => unreachable!(),
             };
@@ -616,10 +640,6 @@ fn main() -> anyhow::Result<()> {
         })?;
 
     event_loop.run(None, &mut sessiond, |_| {})?;
-
-    session::entities(&sessiond.world, &sessiond.session_entities)
-        .filter_map(|entity| sessiond.world.get::<ecs::Session>(entity))
-        .for_each(|session| _ = sessiond.cgroup_manager.terminate_session(session.0));
 
     let _ = fs::remove_file("/run/sessiond.sock");
 

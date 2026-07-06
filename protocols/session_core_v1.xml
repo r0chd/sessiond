@@ -63,6 +63,12 @@
   <c2s name="poweroff">
    <description summary="power off the system"/>
   </c2s>
+  <c2s name="suspend">
+   <description summary="suspend the system"/>
+  </c2s>
+  <c2s name="hibernate">
+   <description summary="hibernate the system"/>
+  </c2s>
   <c2s name="destroy" destructor="true">
    <description summary="destroy this object"/>
   </c2s>

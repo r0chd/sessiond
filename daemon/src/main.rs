@@ -23,7 +23,7 @@ mod terminal;
 use calloop::{generic, signals};
 use clap::Parser;
 use hyprwire::server;
-use rustix::{net, process};
+use rustix::{net, process, system};
 use session_core_v1::{session_core_manager, session_core_session};
 use session_management_v1::session_manager;
 use std::os::fd::AsRawFd;
@@ -124,6 +124,7 @@ impl session_core_v1::SessionCoreV1Handler for Sessiond {
             .map(session::SessionId::as_raw)
             .collect::<Vec<_>>();
         object.send_sessions(&session_ids);
+        object.send_done();
         self.info_managers.push(object);
     }
 }
@@ -289,6 +290,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
 }
 
 impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
+    #[allow(clippy::too_many_lines)]
     fn event(
         &mut self,
         object: &session_core_manager::SessionCoreManager,
@@ -377,6 +379,100 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
 
                 log::warn!(uid; "get_session_by_uid requested for unknown session");
                 session_core_session.send_destroyed();
+            }
+            session_core_manager::Event::Reboot => {
+                let Some(client) = object.client() else {
+                    return;
+                };
+
+                let session_count = session::entities(&self.world, &self.session_entities).count();
+
+                if !client.creds().uid.is_root() && session_count > 1 {
+                    log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), session_count; "reboot denied: multiple sessions active");
+                    object.send_error(
+                        session_core_v1::ErrorCode::ActiveSessions,
+                        "cannot reboot while multiple sessions are active (root privileges required)",
+                    );
+                    return;
+                }
+
+                log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), session_count; "reboot accepted");
+
+                let session_ids = session::entities(&self.world, &self.session_entities)
+                    .filter_map(|entity| self.world.get::<ecs::Session>(entity))
+                    .map(|session| session.0)
+                    .collect::<Vec<_>>();
+
+                for session_id in session_ids {
+                    if let Err(err) = self.cgroup_manager.terminate_session(session_id) {
+                        log::error!(session_id = session_id.as_raw(), error = err.to_string().as_str(); "failed to terminate session before reboot");
+                        object.send_error(
+                            session_core_v1::ErrorCode::Io,
+                            format!("failed to terminate session {}: {err}", session_id.as_raw()),
+                        );
+                        return;
+                    }
+                }
+
+                rustix::fs::sync();
+
+                if let Err(err) = system::reboot(system::RebootCommand::Restart) {
+                    log::error!(error = err.to_string().as_str(); "reboot syscall failed");
+                    object.send_error(
+                        session_core_v1::ErrorCode::Io,
+                        format!("failed to reboot: {err}"),
+                    );
+                    return;
+                }
+
+                object.send_done();
+            }
+            session_core_manager::Event::Poweroff => {
+                let Some(client) = object.client() else {
+                    return;
+                };
+
+                let session_count = session::entities(&self.world, &self.session_entities).count();
+
+                if !client.creds().uid.is_root() && session_count > 1 {
+                    log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), session_count; "poweroff denied: multiple sessions active");
+                    object.send_error(
+                        session_core_v1::ErrorCode::ActiveSessions,
+                        "cannot power off while multiple sessions are active (root privileges required)",
+                    );
+                    return;
+                }
+
+                log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), session_count; "poweroff accepted");
+
+                let session_ids = session::entities(&self.world, &self.session_entities)
+                    .filter_map(|entity| self.world.get::<ecs::Session>(entity))
+                    .map(|session| session.0)
+                    .collect::<Vec<_>>();
+
+                for session_id in session_ids {
+                    if let Err(err) = self.cgroup_manager.terminate_session(session_id) {
+                        log::error!(session_id = session_id.as_raw(), error = err.to_string().as_str(); "failed to terminate session before poweroff");
+                        object.send_error(
+                            session_core_v1::ErrorCode::Io,
+                            format!("failed to terminate session {}: {err}", session_id.as_raw()),
+                        );
+                        return;
+                    }
+                }
+
+                rustix::fs::sync();
+
+                if let Err(err) = system::reboot(system::RebootCommand::PowerOff) {
+                    log::error!(error = err.to_string().as_str(); "poweroff syscall failed");
+                    object.send_error(
+                        session_core_v1::ErrorCode::Io,
+                        format!("failed to power off: {err}"),
+                    );
+                    return;
+                }
+
+                object.send_done();
             }
             session_core_manager::Event::Destroy => {
                 self.info_managers.retain(|m| m != object);

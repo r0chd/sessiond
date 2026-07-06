@@ -22,6 +22,14 @@
    </description>
    <arg name="session_id" type="uint" summary="destroyed session identifier"/>
   </s2c>
+  <s2c name="done">
+   <description summary="initial field dump complete"/>
+  </s2c>
+  <s2c name="error">
+   <description summary="last operation failed"/>
+   <arg name="code" type="enum" interface="error_code" summary="error kind"/>
+   <arg name="message" type="varchar" summary="human-readable error detail"/>
+  </s2c>
   <c2s name="get_session">
    <description summary="create a per-session info object">
     Creates a `session_core_session` object for the given session_id.
@@ -48,6 +56,12 @@
    </description>
    <arg name="uid" type="uint" summary="user ID of the session to query"/>
    <returns iface="session_core_session"/>
+  </c2s>
+  <c2s name="reboot">
+   <description summary="reboot the system"/>
+  </c2s>
+  <c2s name="poweroff">
+   <description summary="power off the system"/>
   </c2s>
   <c2s name="destroy" destructor="true">
    <description summary="destroy this object"/>
@@ -109,7 +123,7 @@
   </s2c>
   <s2c name="error">
    <description summary="last operation failed"/>
-   <arg name="code" type="uint" enum="error_code" summary="error kind"/>
+   <arg name="code" type="enum" interface="error_code" summary="error kind"/>
    <arg name="message" type="varchar" summary="human-readable error detail"/>
   </s2c>
   <c2s name="lock">
@@ -140,5 +154,6 @@
   <value idx="0" name="not_found" summary="session or cgroup not found"/>
   <value idx="1" name="permission_denied" summary="insufficient permissions to signal processes"/>
   <value idx="2" name="io" summary="generic I/O error"/>
+  <value idx="3" name="active_sessions" summary="other sessions are active"/>
  </enum>
 </protocol>

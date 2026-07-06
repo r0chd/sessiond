@@ -51,6 +51,13 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for State {
             session_core_manager::Event::SessionRemoved { session_id } => {
                 self.sessions.retain(|session| session.id != session_id);
             }
+            session_core_manager::Event::Done => {
+                self.done = true;
+            }
+            session_core_manager::Event::Error { code: _, message } => {
+                self.error = Some(message);
+                self.done = true;
+            }
         }
     }
 }
@@ -105,8 +112,8 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for State {
             session_core_session::Event::Ok => {
                 self.done = true;
             }
-            session_core_session::Event::Error { code, message } => {
-                self.error = Some(format!("{message} (code={code})"));
+            session_core_session::Event::Error { code: _, message } => {
+                self.error = Some(message);
                 self.done = true;
             }
             session_core_session::Event::Active { state } => {
@@ -125,6 +132,10 @@ enum Command {
         arg_required_else_help = true
     )]
     Session(SessionCommand),
+    #[command(about = "reboot the system")]
+    Reboot,
+    #[command(about = "power off the system")]
+    Poweroff,
     #[command(about = "generate shell completions")]
     Completions {
         #[arg(value_name = "SHELL")]
@@ -295,7 +306,7 @@ fn main() -> anyhow::Result<()> {
 
     event_queue.wait_for_handshake(&mut state)?;
 
-    let _manager =
+    let manager =
         socket.bind::<session_core_manager::SessionCoreManager, _>(&event_queue, &mut state, 1)?;
 
     event_queue.roundtrip(&mut state)?;
@@ -308,202 +319,213 @@ fn main() -> anyhow::Result<()> {
         anyhow::bail!("{err}");
     }
 
-    let Command::Session(command) = &cli.command else {
-        unreachable!();
-    };
-
-    match command {
-        SessionCommand::List { json: emit_json } => {
-            if *emit_json {
-                return print_json(&json!({
-                    "sessions": state.sessions.iter().map(|session| {
-                        json!({
-                            "id": session.id,
-                            "uid": session.uid,
-                            "username": session.username,
-                            "vt": session.vt,
-                            "tty": format!("tty{}", session.vt),
-                            "seat": session.seat,
-                            "leader": session.leader,
-                            "timestamp": session.timestamp,
-                            "active": active_state_name(session.active),
-                        })
-                    }).collect::<Vec<_>>(),
-                }));
-            }
-
-            if state.sessions.is_empty() {
-                println!("No active sessions.");
-                return Ok(());
-            }
-
-            let fmt_ts = |ts: u32| -> String {
-                use std::time::{Duration, UNIX_EPOCH};
-                let Some(t) = UNIX_EPOCH.checked_add(Duration::from_secs(u64::from(ts))) else {
-                    return String::from("?");
-                };
-                let Ok(elapsed) = t.elapsed() else {
-                    return String::from("?");
-                };
-                let s = elapsed.as_secs();
-                let h = s / 3600;
-                let m = (s % 3600) / 60;
-                let s = s % 60;
-                if h > 0 {
-                    format!("{h}h {m}min ago")
-                } else if m > 0 {
-                    format!("{m}min {s}s ago")
-                } else {
-                    format!("{s}s ago")
+    match cli.command {
+        Command::Session(command) => match command {
+            SessionCommand::List { json } => {
+                if json {
+                    return print_json(&json!({
+                        "sessions": state.sessions.iter().map(|session| {
+                            json!({
+                                "id": session.id,
+                                "uid": session.uid,
+                                "username": session.username,
+                                "vt": session.vt,
+                                "tty": format!("tty{}", session.vt),
+                                "seat": session.seat,
+                                "leader": session.leader,
+                                "timestamp": session.timestamp,
+                                "active": active_state_name(session.active),
+                            })
+                        }).collect::<Vec<_>>(),
+                    }));
                 }
-            };
 
-            let id_w = state
-                .sessions
-                .iter()
-                .map(|s| s.id.to_string().len())
-                .max()
-                .unwrap_or(0)
-                .max(2);
-            let uid_w = state
-                .sessions
-                .iter()
-                .map(|s| s.uid.to_string().len())
-                .max()
-                .unwrap_or(0)
-                .max(3);
-            let user_w = state
-                .sessions
-                .iter()
-                .map(|s| s.username.len())
-                .max()
-                .unwrap_or(0)
-                .max(4);
-            let vt_w = state
-                .sessions
-                .iter()
-                .map(|s| format!("tty{}", s.vt).len())
-                .max()
-                .unwrap_or(0)
-                .max(3);
-            let seat_w = state
-                .sessions
-                .iter()
-                .map(|s| s.seat.as_deref().unwrap_or("-").len())
-                .max()
-                .unwrap_or(0)
-                .max(4);
-            let leader_w = state
-                .sessions
-                .iter()
-                .map(|s| s.leader.to_string().len())
-                .max()
-                .unwrap_or(0)
-                .max(6);
-            let since_w = state
-                .sessions
-                .iter()
-                .map(|s| fmt_ts(s.timestamp).len())
-                .max()
-                .unwrap_or(0)
-                .max(5);
-            let state_w = state
-                .sessions
-                .iter()
-                .map(|s| active_state_name(s.active).len())
-                .max()
-                .unwrap_or(0)
-                .max(5);
+                if state.sessions.is_empty() {
+                    println!("No active sessions.");
+                    return Ok(());
+                }
 
-            println!(
-                "  {:<id_w$}  {:<uid_w$}  {:<user_w$}  {:<vt_w$}  {:<seat_w$}  {:<leader_w$}  {:<since_w$}  {:<state_w$}",
-                "ID", "UID", "USER", "TTY", "SEAT", "LEADER", "SINCE", "STATE",
-            );
-            println!(
-                "  {}",
-                "─".repeat(
-                    id_w + 2
-                        + uid_w
-                        + 2
-                        + user_w
-                        + 2
-                        + vt_w
-                        + 2
-                        + seat_w
-                        + 2
-                        + leader_w
-                        + 2
-                        + since_w
-                        + 2
-                        + state_w
-                )
-            );
-            for session in state.sessions {
-                println!(
-                    "  {:<id_w$}  {:<uid_w$}  {:<user_w$}  {:<vt_w$}  {:<seat_w$}  {:<leader_w$}  {:<since_w$}  {:<state_w$}",
-                    session.id,
-                    session.uid,
-                    session.username,
-                    format!("tty{}", session.vt),
-                    session.seat.as_deref().unwrap_or("-"),
-                    session.leader,
-                    fmt_ts(session.timestamp),
-                    active_state_name(session.active),
-                );
-            }
-        }
-        command @ (SessionCommand::Close { .. }
-        | SessionCommand::Kill { .. }
-        | SessionCommand::Lock { .. }
-        | SessionCommand::Unlock { .. }) => {
-            let Some(action) = SessionAction::from_command(command) else {
-                unreachable!();
-            };
-            let Some(ids) = SessionAction::ids(command) else {
-                unreachable!();
-            };
+                let fmt_ts = |ts: u32| -> String {
+                    use std::time::{Duration, UNIX_EPOCH};
+                    let Some(t) = UNIX_EPOCH.checked_add(Duration::from_secs(u64::from(ts))) else {
+                        return String::from("?");
+                    };
+                    let Ok(elapsed) = t.elapsed() else {
+                        return String::from("?");
+                    };
+                    let s = elapsed.as_secs();
+                    let h = s / 3600;
+                    let m = (s % 3600) / 60;
+                    let s = s % 60;
+                    if h > 0 {
+                        format!("{h}h {m}min ago")
+                    } else if m > 0 {
+                        format!("{m}min {s}s ago")
+                    } else {
+                        format!("{s}s ago")
+                    }
+                };
 
-            if SessionAction::targets_current(command) {
-                let uid = process::getuid();
-
-                let session = state
+                let id_w = state
                     .sessions
                     .iter()
-                    .find(|session| session.uid == uid.as_raw())
-                    .context(format!(
-                        "{} Session for uid {} not found, check if pam module is installed",
-                        "error:".red(),
-                        uid.as_raw()
-                    ))?;
-                action.send(&session.object);
+                    .map(|s| s.id.to_string().len())
+                    .max()
+                    .unwrap_or(0)
+                    .max(2);
+                let uid_w = state
+                    .sessions
+                    .iter()
+                    .map(|s| s.uid.to_string().len())
+                    .max()
+                    .unwrap_or(0)
+                    .max(3);
+                let user_w = state
+                    .sessions
+                    .iter()
+                    .map(|s| s.username.len())
+                    .max()
+                    .unwrap_or(0)
+                    .max(4);
+                let vt_w = state
+                    .sessions
+                    .iter()
+                    .map(|s| format!("tty{}", s.vt).len())
+                    .max()
+                    .unwrap_or(0)
+                    .max(3);
+                let seat_w = state
+                    .sessions
+                    .iter()
+                    .map(|s| s.seat.as_deref().unwrap_or("-").len())
+                    .max()
+                    .unwrap_or(0)
+                    .max(4);
+                let leader_w = state
+                    .sessions
+                    .iter()
+                    .map(|s| s.leader.to_string().len())
+                    .max()
+                    .unwrap_or(0)
+                    .max(6);
+                let since_w = state
+                    .sessions
+                    .iter()
+                    .map(|s| fmt_ts(s.timestamp).len())
+                    .max()
+                    .unwrap_or(0)
+                    .max(5);
+                let state_w = state
+                    .sessions
+                    .iter()
+                    .map(|s| active_state_name(s.active).len())
+                    .max()
+                    .unwrap_or(0)
+                    .max(5);
 
-                return Ok(());
-            }
-
-            let mut unmatched = Vec::new();
-            let mut matched = Vec::new();
-
-            for id in ids {
-                if let Some(session) = state.sessions.iter().find(|session| session.id == *id) {
-                    matched.push(session.object.clone());
-                } else {
-                    unmatched.push(id);
+                println!(
+                    "  {:<id_w$}  {:<uid_w$}  {:<user_w$}  {:<vt_w$}  {:<seat_w$}  {:<leader_w$}  {:<since_w$}  {:<state_w$}",
+                    "ID", "UID", "USER", "TTY", "SEAT", "LEADER", "SINCE", "STATE",
+                );
+                println!(
+                    "  {}",
+                    "─".repeat(
+                        id_w + 2
+                            + uid_w
+                            + 2
+                            + user_w
+                            + 2
+                            + vt_w
+                            + 2
+                            + seat_w
+                            + 2
+                            + leader_w
+                            + 2
+                            + since_w
+                            + 2
+                            + state_w
+                    )
+                );
+                for session in state.sessions {
+                    println!(
+                        "  {:<id_w$}  {:<uid_w$}  {:<user_w$}  {:<vt_w$}  {:<seat_w$}  {:<leader_w$}  {:<since_w$}  {:<state_w$}",
+                        session.id,
+                        session.uid,
+                        session.username,
+                        format!("tty{}", session.vt),
+                        session.seat.as_deref().unwrap_or("-"),
+                        session.leader,
+                        fmt_ts(session.timestamp),
+                        active_state_name(session.active),
+                    );
                 }
             }
+            command @ (SessionCommand::Close { .. }
+            | SessionCommand::Kill { .. }
+            | SessionCommand::Lock { .. }
+            | SessionCommand::Unlock { .. }) => {
+                let Some(action) = SessionAction::from_command(&command) else {
+                    unreachable!();
+                };
+                let Some(ids) = SessionAction::ids(&command) else {
+                    unreachable!();
+                };
 
-            if !unmatched.is_empty() {
-                let ids = unmatched
-                    .iter()
-                    .map(std::string::ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                eprintln!("{} unknown session ids: {ids}", "error:".red());
-                return Ok(());
-            }
+                if SessionAction::targets_current(&command) {
+                    let uid = process::getuid();
 
-            for obj in matched {
-                action.send(&obj);
+                    let session = state
+                        .sessions
+                        .iter()
+                        .find(|session| session.uid == uid.as_raw())
+                        .context(format!(
+                            "{} Session for uid {} not found, check if pam module is installed",
+                            "error:".red(),
+                            uid.as_raw()
+                        ))?;
+                    action.send(&session.object);
+
+                    return Ok(());
+                }
+
+                let mut unmatched = Vec::new();
+                let mut matched = Vec::new();
+
+                for id in ids {
+                    if let Some(session) = state.sessions.iter().find(|session| session.id == *id) {
+                        matched.push(session.object.clone());
+                    } else {
+                        unmatched.push(id);
+                    }
+                }
+
+                if !unmatched.is_empty() {
+                    let ids = unmatched
+                        .iter()
+                        .map(std::string::ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    eprintln!("{} unknown session ids: {ids}", "error:".red());
+                    return Ok(());
+                }
+
+                for obj in matched {
+                    action.send(&obj);
+                }
+
+                while !state.done {
+                    event_queue.dispatch_events(&mut state, true)?;
+                }
+
+                if let Some(err) = state.error {
+                    eprintln!("{} {err}", "error:".red());
+                }
             }
+        },
+        Command::Reboot => {
+            state.done = false;
+            state.error = None;
+            manager.send_reboot();
 
             while !state.done {
                 event_queue.dispatch_events(&mut state, true)?;
@@ -513,6 +535,20 @@ fn main() -> anyhow::Result<()> {
                 eprintln!("{} {err}", "error:".red());
             }
         }
+        Command::Poweroff => {
+            state.done = false;
+            state.error = None;
+            manager.send_poweroff();
+
+            while !state.done {
+                event_queue.dispatch_events(&mut state, true)?;
+            }
+
+            if let Some(err) = state.error {
+                eprintln!("{} {err}", "error:".red());
+            }
+        }
+        Command::Completions { shell: _ } => unreachable!(),
     }
 
     Ok(())

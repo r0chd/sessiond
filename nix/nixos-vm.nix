@@ -23,8 +23,7 @@ in
   ];
 
   systemd.targets.getty.wants = lib.mkForce (
-    map (tty: "autovt@${tty}.service") virtualTerminals
-    ++ [ "serial-getty@ttyS0.service" ]
+    map (tty: "autovt@${tty}.service") virtualTerminals ++ [ "serial-getty@ttyS0.service" ]
   );
 
   virtualisation = {

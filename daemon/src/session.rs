@@ -102,7 +102,7 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
             .map_or(0, |uid| uid.0);
         if !client.creds().uid.is_root() && client.creds().uid.as_raw() != session_uid {
             object.send_error(
-                session_core_v1::ErrorCode::PermissionDenied as u32,
+                session_core_v1::ErrorCode::PermissionDenied,
                 "permission denied",
             );
             return;

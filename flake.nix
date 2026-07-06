@@ -65,6 +65,7 @@
         };
 
       packages = forAllSystems (pkgs: {
+        polkit = pkgs.callPackage ./nix/polkit { };
         sessiond = pkgs.callPackage ./nix/package.nix {
           rustPlatform =
             let
@@ -133,7 +134,7 @@
           finix-vm = finix.lib.finixSystem {
             inherit (pkgs) lib;
             specialArgs = {
-              inherit (self.packages.${system}) sessiond;
+              inherit (self.packages.${system}) sessiond polkit;
             };
             modules = [
               { nixpkgs = { inherit pkgs; }; }

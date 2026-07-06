@@ -1,5 +1,7 @@
 use crate::{ecs, session, session_core_v1};
 use std::collections::HashMap;
+use std::fmt::Write as _;
+use std::io::Write as _;
 use std::sync;
 use std::sync::mpsc;
 use std::thread;
@@ -13,6 +15,10 @@ use zbus::{fdo, interface};
 
 const BUS_NAME: &str = "org.freedesktop.ConsoleKit";
 const MANAGER_PATH: &str = "/org/freedesktop/ConsoleKit/Manager";
+const DATABASE_DIR: &str = "/var/run/ConsoleKit";
+const DATABASE_PATH: &str = "/var/run/ConsoleKit/database";
+const DATABASE_TMP_PATH: &str = "/var/run/ConsoleKit/database~";
+
 #[derive(Clone)]
 pub struct SessionInfo {
     pub id: session::SessionId,
@@ -166,6 +172,11 @@ impl Session {
         self.with_session(|session| session.uid)
     }
 
+    #[zbus(name = "GetUser")]
+    fn get_user(&self) -> fdo::Result<u32> {
+        self.get_unix_user()
+    }
+
     #[zbus(name = "IsActive")]
     fn is_active(&self) -> fdo::Result<bool> {
         self.with_session(|session| session.active == session_core_v1::ActiveState::Active)
@@ -242,6 +253,10 @@ fn run(receiver: &mpsc::Receiver<Command>) {
     let mut connection = None;
     let mut warned_unavailable = false;
 
+    if let Err(err) = write_database(&state) {
+        log::warn!(error = err.to_string().as_str(); "failed to write ConsoleKit database");
+    }
+
     loop {
         if connection.is_none() {
             match start_connection(&state) {
@@ -304,6 +319,10 @@ fn apply_command(connection: Option<&blocking::Connection>, state: &SharedState,
             if should_register && let Some(connection) = connection {
                 register_session(connection, state, id);
             }
+
+            if let Err(err) = write_database(state) {
+                log::warn!(error = err.to_string().as_str(); "failed to write ConsoleKit database");
+            }
         }
         Command::Remove(id) => {
             if let Ok(mut state) = state.write() {
@@ -315,6 +334,10 @@ fn apply_command(connection: Option<&blocking::Connection>, state: &SharedState,
                 if let Err(err) = connection.object_server().remove::<Session, _>(path) {
                     log::debug!(session_id = id, error = err.to_string().as_str(); "failed to unregister ConsoleKit session object");
                 }
+            }
+
+            if let Err(err) = write_database(state) {
+                log::warn!(error = err.to_string().as_str(); "failed to write ConsoleKit database");
             }
         }
     }
@@ -333,14 +356,17 @@ fn register_session(connection: &blocking::Connection, state: &SharedState, id: 
 }
 
 fn session_path(session_id: session::SessionId) -> zvariant::OwnedObjectPath {
-    object_path(&format!(
-        "/org/freedesktop/ConsoleKit/Session/{}",
-        session_id.as_raw()
-    ))
-    .unwrap_or_else(|_| {
+    object_path(&session_path_string(session_id)).unwrap_or_else(|_| {
         zvariant::ObjectPath::from_static_str_unchecked("/org/freedesktop/ConsoleKit/Session/0")
             .into()
     })
+}
+
+fn session_path_string(session_id: session::SessionId) -> String {
+    format!(
+        "/org/freedesktop/ConsoleKit/Session/{}",
+        session_id.as_raw()
+    )
 }
 
 fn object_path(path: &str) -> fdo::Result<zvariant::OwnedObjectPath> {
@@ -372,4 +398,151 @@ fn timestamp_string(timestamp: time::SystemTime) -> String {
         .unwrap_or_default()
         .as_secs()
         .to_string()
+}
+
+fn write_database(state: &SharedState) -> std::io::Result<()> {
+    let sessions = state
+        .read()
+        .map(|state| state.sessions.values().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+
+    std::fs::create_dir_all(DATABASE_DIR)?;
+
+    let mut database = String::new();
+    append_database(&mut database, &sessions);
+
+    let mut file = std::fs::File::create(DATABASE_TMP_PATH)?;
+    file.write_all(database.as_bytes())?;
+    file.sync_all()?;
+    drop(file);
+
+    std::fs::rename(DATABASE_TMP_PATH, DATABASE_PATH)?;
+
+    Ok(())
+}
+
+fn append_database(database: &mut String, sessions: &[SessionInfo]) {
+    let seats = sessions
+        .iter()
+        .map(|session| seat_name(session).to_string())
+        .fold(Vec::<String>::new(), |mut seats, seat| {
+            if !seats.contains(&seat) {
+                seats.push(seat);
+            }
+            seats
+        });
+
+    let _ = writeln!(database, "[Seats]");
+    let _ = writeln!(database, "seats={}", key_file_list(seats.iter()));
+    let _ = writeln!(database);
+
+    for session in sessions {
+        append_session_group(database, session, &session_path_string(session.id));
+    }
+
+    for seat in &seats {
+        append_seat_group(database, seat, sessions);
+    }
+
+    append_user_groups(database, sessions);
+}
+
+fn append_session_group(database: &mut String, session: &SessionInfo, id: &str) {
+    let is_active = session.active == session_core_v1::ActiveState::Active;
+    let _ = writeln!(database, "[Session {id}]");
+    let _ = writeln!(database, "uid={}", session.uid);
+    let _ = writeln!(database, "seat={}", key_file_escape(seat_name(session)));
+    let _ = writeln!(database, "type=unspecified");
+    let _ = writeln!(database, "display_device=");
+    let _ = writeln!(database, "remote_host_name=");
+    let _ = writeln!(database, "is_active={}", key_file_bool(is_active));
+    let _ = writeln!(database, "is_local={}", key_file_bool(session.is_local));
+    let _ = writeln!(database, "XDG_RUNTIME_DIR=/run/user/{}", session.uid);
+    let _ = writeln!(
+        database,
+        "creation_time={}",
+        key_file_escape(&timestamp_string(session.timestamp))
+    );
+    let _ = writeln!(database);
+}
+
+fn append_seat_group(database: &mut String, seat: &str, sessions: &[SessionInfo]) {
+    let session_paths = sessions
+        .iter()
+        .filter(|session| seat_name(session) == seat)
+        .map(|session| session_path_string(session.id))
+        .collect::<Vec<_>>();
+
+    let _ = writeln!(database, "[Seat {}]", key_file_escape(seat));
+    let _ = writeln!(database, "sessions={}", key_file_list(session_paths.iter()));
+    if let Some(active) = sessions
+        .iter()
+        .find(|session| {
+            seat_name(session) == seat && session.active == session_core_v1::ActiveState::Active
+        })
+        .map(|session| session_path_string(session.id))
+    {
+        let _ = writeln!(database, "active_session={}", key_file_escape(&active));
+    }
+    let _ = writeln!(database);
+}
+
+fn append_user_groups(database: &mut String, sessions: &[SessionInfo]) {
+    let mut uids = sessions
+        .iter()
+        .map(|session| session.uid)
+        .collect::<Vec<_>>();
+    uids.sort_unstable();
+    uids.dedup();
+
+    for uid in uids {
+        let user_sessions = sessions
+            .iter()
+            .filter(|session| session.uid == uid)
+            .collect::<Vec<_>>();
+        let session_paths = user_sessions
+            .iter()
+            .map(|session| session_path_string(session.id))
+            .collect::<Vec<_>>();
+        let is_local = user_sessions.iter().any(|session| session.is_local);
+
+        let _ = writeln!(database, "[User {uid}]");
+        let _ = writeln!(database, "is_local={}", key_file_bool(is_local));
+        let _ = writeln!(database, "sessions={}", key_file_list(session_paths.iter()));
+        let _ = writeln!(database);
+    }
+}
+
+const fn seat_name(session: &SessionInfo) -> &str {
+    if session.seat.is_empty() {
+        "seat0"
+    } else {
+        session.seat.as_str()
+    }
+}
+
+const fn key_file_bool(value: bool) -> &'static str {
+    if value { "true" } else { "false" }
+}
+
+fn key_file_list<'a>(values: impl Iterator<Item = &'a String>) -> String {
+    values
+        .map(|value| key_file_escape(value))
+        .collect::<Vec<_>>()
+        .join(";")
+}
+
+fn key_file_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            ';' => escaped.push_str("\\;"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
 }

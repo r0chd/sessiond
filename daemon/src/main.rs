@@ -558,8 +558,8 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
 
                 rustix::fs::sync();
 
-                if let Err(err) = system::reboot(system::RebootCommand::SwSuspend) {
-                    log::error!(error = err.to_string().as_str(); "sw_suspend syscall failed");
+                if let Err(err) = fs::write("/sys/power/state", "disk") {
+                    log::error!(error = err.to_string().as_str(); "hibernate failed");
                     object.send_error(
                         session_core_v1::ErrorCode::Io,
                         format!("failed to hibernate: {err}"),

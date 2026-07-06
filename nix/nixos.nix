@@ -41,6 +41,7 @@ in
     security.pam.services.login.sessiond = lib.mkDefault true;
 
     environment.systemPackages = [ cfg.package ];
+    services.dbus.packages = [ cfg.package ];
 
     users.groups.${cfg.seat.group} = { };
   };

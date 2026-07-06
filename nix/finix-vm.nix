@@ -5,10 +5,47 @@
 }:
 let
   virtualTerminals = builtins.genList (index: "tty${toString (index + 1)}") 9;
+  polkitTestAction = pkgs.writeTextFile {
+    name = "sessiond-polkit-test-action";
+    destination = "/share/polkit-1/actions/org.sessiond.consolekit-test.policy";
+    text = ''
+      <?xml version="1.0" encoding="UTF-8"?>
+      <!DOCTYPE policyconfig PUBLIC
+        "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+        "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+      <policyconfig>
+        <vendor>sessiond test</vendor>
+        <action id="org.sessiond.consolekit-test">
+          <description>Test ConsoleKit subject resolution</description>
+          <message>Testing ConsoleKit subject resolution</message>
+          <defaults>
+            <allow_any>no</allow_any>
+            <allow_inactive>no</allow_inactive>
+            <allow_active>no</allow_active>
+          </defaults>
+        </action>
+      </policyconfig>
+    '';
+  };
 in
 {
   services = {
-    polkit.enable = true;
+    polkit = {
+      enable = true;
+      extraConfig = ''
+        polkit.addRule(function(action, subject) {
+          if (
+            action.id == "org.sessiond.consolekit-test" &&
+            subject.local &&
+            subject.active
+          ) {
+            return polkit.Result.YES;
+          }
+
+          return polkit.Result.NO;
+        });
+      '';
+    };
     sysklogd.enable = true;
     sessiond = {
       enable = true;
@@ -78,6 +115,10 @@ in
 
   finit.tmpfiles.rules = [
     "d /var/log 0755 root root -"
+  ];
+
+  environment.systemPackages = [
+    polkitTestAction
   ];
 
   users.users = {

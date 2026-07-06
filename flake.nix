@@ -65,7 +65,10 @@
         };
 
       packages = forAllSystems (pkgs: {
-        polkit = pkgs.callPackage ./nix/polkit { };
+        polkit = pkgs.callPackage ./nix/polkit {
+          useConsoleKit = true;
+          useSystemd = false;
+        };
         sessiond = pkgs.callPackage ./nix/package.nix {
           rustPlatform =
             let

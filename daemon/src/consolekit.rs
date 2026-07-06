@@ -174,7 +174,7 @@ impl Session {
 
     #[zbus(name = "IsActive")]
     fn is_active(&self) -> fdo::Result<bool> {
-        self.with_session(|session| session.active == session_core_v1::ActiveState::Active)
+        self.with_session(is_active)
     }
 
     #[zbus(name = "IsLocal")]
@@ -443,14 +443,13 @@ fn append_database(database: &mut String, sessions: &[SessionInfo]) {
 }
 
 fn append_session_group(database: &mut String, session: &SessionInfo, id: &str) {
-    let is_active = session.active == session_core_v1::ActiveState::Active;
     let _ = writeln!(database, "[Session {id}]");
     let _ = writeln!(database, "uid={}", session.uid);
     let _ = writeln!(database, "seat={}", key_file_escape(seat_name(session)));
     let _ = writeln!(database, "type=unspecified");
     let _ = writeln!(database, "display_device=");
     let _ = writeln!(database, "remote_host_name=");
-    let _ = writeln!(database, "is_active={}", key_file_bool(is_active));
+    let _ = writeln!(database, "is_active={}", key_file_bool(is_active(session)));
     let _ = writeln!(database, "is_local={}", key_file_bool(session.is_local));
     let _ = writeln!(database, "XDG_RUNTIME_DIR=/run/user/{}", session.uid);
     let _ = writeln!(
@@ -514,6 +513,13 @@ const fn seat_name(session: &SessionInfo) -> &str {
     } else {
         session.seat.as_str()
     }
+}
+
+const fn is_active(session: &SessionInfo) -> bool {
+    matches!(
+        session.active,
+        session_core_v1::ActiveState::Active | session_core_v1::ActiveState::Online
+    )
 }
 
 const fn key_file_bool(value: bool) -> &'static str {

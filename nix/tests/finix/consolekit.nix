@@ -3,6 +3,7 @@
   sessiondTest,
   sessiondModule,
   sessiondPackage,
+  polkitPackage,
 }:
 let
   polkitTestAction = pkgs.writeTextFile {
@@ -63,6 +64,7 @@ sessiondTest {
     services.mdevd.enable = true;
     services.polkit = {
       enable = true;
+      package = polkitPackage;
       extraConfig = ''
         polkit.addRule(function(action, subject) {
           if (

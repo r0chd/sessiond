@@ -2,16 +2,11 @@ use crate::{ecs, session, session_core_v1};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::io::Write as _;
-use std::sync;
 use std::sync::mpsc;
-use std::thread;
-use std::time;
-use zbus::blocking;
+use std::{fs, io, sync, thread, time};
+use zbus::blocking::connection;
 use zbus::blocking::fdo::DBusProxy;
-use zbus::message;
-use zbus::names;
-use zbus::zvariant;
-use zbus::{fdo, interface};
+use zbus::{blocking, fdo, interface, message, names, zvariant};
 
 const BUS_NAME: &str = "org.freedesktop.ConsoleKit";
 const MANAGER_PATH: &str = "/org/freedesktop/ConsoleKit/Manager";
@@ -284,7 +279,7 @@ fn run(receiver: &mpsc::Receiver<Command>) {
 }
 
 fn start_connection(state: &SharedState) -> zbus::Result<blocking::Connection> {
-    zbus::blocking::connection::Builder::system()?
+    connection::Builder::system()?
         .serve_at(
             MANAGER_PATH,
             Manager {
@@ -376,7 +371,7 @@ fn object_path(path: &str) -> fdo::Result<zvariant::OwnedObjectPath> {
 }
 
 fn session_id_for_pid(pid: u32) -> fdo::Result<u32> {
-    let cgroup = std::fs::read_to_string(format!("/proc/{pid}/cgroup"))
+    let cgroup = fs::read_to_string(format!("/proc/{pid}/cgroup"))
         .map_err(|err| fdo::Error::Failed(format!("could not read process cgroup: {err}")))?;
 
     cgroup
@@ -400,23 +395,23 @@ fn timestamp_string(timestamp: time::SystemTime) -> String {
         .to_string()
 }
 
-fn write_database(state: &SharedState) -> std::io::Result<()> {
+fn write_database(state: &SharedState) -> io::Result<()> {
     let sessions = state
         .read()
         .map(|state| state.sessions.values().cloned().collect::<Vec<_>>())
         .unwrap_or_default();
 
-    std::fs::create_dir_all(DATABASE_DIR)?;
+    fs::create_dir_all(DATABASE_DIR)?;
 
     let mut database = String::new();
     append_database(&mut database, &sessions);
 
-    let mut file = std::fs::File::create(DATABASE_TMP_PATH)?;
+    let mut file = fs::File::create(DATABASE_TMP_PATH)?;
     file.write_all(database.as_bytes())?;
     file.sync_all()?;
     drop(file);
 
-    std::fs::rename(DATABASE_TMP_PATH, DATABASE_PATH)?;
+    fs::rename(DATABASE_TMP_PATH, DATABASE_PATH)?;
 
     Ok(())
 }

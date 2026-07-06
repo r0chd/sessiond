@@ -111,7 +111,6 @@ impl World {
         entity
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn insert_device(
         &mut self,
         object: seat_v1::device::Device,

@@ -1,6 +1,4 @@
 mod session_management_v1 {
-    #![allow(clippy::all, clippy::pedantic, clippy::nursery, clippy::unwrap_used)]
-
     hyprwire::include_protocol!("session_management_v1");
     pub use client::*;
 }

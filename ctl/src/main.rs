@@ -283,7 +283,6 @@ fn print_json(value: &serde_json::Value) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[allow(clippy::too_many_lines)]
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 

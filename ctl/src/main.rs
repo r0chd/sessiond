@@ -136,6 +136,10 @@ enum Command {
     Reboot,
     #[command(about = "power off the system")]
     Poweroff,
+    #[command(about = "suspend the system")]
+    Suspend,
+    #[command(about = "hibernate the system")]
+    Hibernate,
     #[command(about = "generate shell completions")]
     Completions {
         #[arg(value_name = "SHELL")]
@@ -521,33 +525,27 @@ fn main() -> anyhow::Result<()> {
                 }
             }
         },
-        Command::Reboot => {
-            state.done = false;
-            state.error = None;
-            manager.send_reboot();
-
-            while !state.done {
-                event_queue.dispatch_events(&mut state, true)?;
-            }
-
-            if let Some(err) = state.error {
-                eprintln!("{} {err}", "error:".red());
-            }
-        }
-        Command::Poweroff => {
-            state.done = false;
-            state.error = None;
-            manager.send_poweroff();
-
-            while !state.done {
-                event_queue.dispatch_events(&mut state, true)?;
-            }
-
-            if let Some(err) = state.error {
-                eprintln!("{} {err}", "error:".red());
-            }
-        }
         Command::Completions { shell: _ } => unreachable!(),
+        cmd => {
+            state.done = false;
+            state.error = None;
+
+            match cmd {
+                Command::Reboot => manager.send_reboot(),
+                Command::Poweroff => manager.send_poweroff(),
+                Command::Hibernate => manager.send_hibernate(),
+                Command::Suspend => manager.send_suspend(),
+                _ => unreachable!(),
+            }
+
+            while !state.done {
+                event_queue.dispatch_events(&mut state, true)?;
+            }
+
+            if let Some(err) = state.error {
+                eprintln!("{} {err}", "error:".red());
+            }
+        }
     }
 
     Ok(())

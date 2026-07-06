@@ -403,13 +403,13 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
                 };
 
                 // let user reboot only if there are no other user sessions active
-                let session_count = session::entities(&self.world, &self.session_entities)
+                let foreign_session_count = session::entities(&self.world, &self.session_entities)
                     .filter_map(|entity| self.world.get::<ecs::Uid>(entity))
                     .filter(|session| session.0 != client.creds().uid.as_raw())
                     .count();
 
-                if !client.creds().uid.is_root() && session_count > 1 {
-                    log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), session_count; "reboot denied: multiple sessions active");
+                if !client.creds().uid.is_root() && foreign_session_count > 0 {
+                    log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "reboot denied: multiple sessions active");
                     object.send_error(
                         session_core_v1::ErrorCode::ActiveSessions,
                         "cannot reboot while multiple sessions are active (root privileges required)",
@@ -417,7 +417,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
                     return;
                 }
 
-                log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), session_count; "reboot accepted");
+                log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "reboot accepted");
 
                 for session_id in session::entities(&self.world, &self.session_entities)
                     .filter_map(|entity| self.world.get::<ecs::Session>(entity))
@@ -454,13 +454,13 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
                 };
 
                 // let user poweroff only if there are no other user sessions active
-                let session_count = session::entities(&self.world, &self.session_entities)
+                let foreign_session_count = session::entities(&self.world, &self.session_entities)
                     .filter_map(|entity| self.world.get::<ecs::Uid>(entity))
                     .filter(|session| session.0 != client.creds().uid.as_raw())
                     .count();
 
-                if !client.creds().uid.is_root() && session_count > 1 {
-                    log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), session_count; "poweroff denied: multiple sessions active");
+                if !client.creds().uid.is_root() && foreign_session_count > 0 {
+                    log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "poweroff denied: multiple sessions active");
                     object.send_error(
                         session_core_v1::ErrorCode::ActiveSessions,
                         "cannot power off while multiple sessions are active (root privileges required)",
@@ -468,7 +468,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
                     return;
                 }
 
-                log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), session_count; "poweroff accepted");
+                log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "poweroff accepted");
 
                 for session_id in session::entities(&self.world, &self.session_entities)
                     .filter_map(|entity| self.world.get::<ecs::Session>(entity))
@@ -493,6 +493,76 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
                     object.send_error(
                         session_core_v1::ErrorCode::Io,
                         format!("failed to power off: {err}"),
+                    );
+                    return;
+                }
+
+                object.send_done();
+            }
+            session_core_manager::Event::Suspend => {
+                let Some(client) = object.client() else {
+                    return;
+                };
+
+                // let user suspend only if there are no other user sessions active
+                let foreign_session_count = session::entities(&self.world, &self.session_entities)
+                    .filter_map(|entity| self.world.get::<ecs::Uid>(entity))
+                    .filter(|session| session.0 != client.creds().uid.as_raw())
+                    .count();
+
+                if !client.creds().uid.is_root() && foreign_session_count > 0 {
+                    log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "suspend denied: multiple sessions active");
+                    object.send_error(
+                        session_core_v1::ErrorCode::ActiveSessions,
+                        "cannot suspend while multiple sessions are active (root privileges required)",
+                    );
+                    return;
+                }
+
+                log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "suspend accepted");
+
+                rustix::fs::sync();
+
+                if let Err(err) = fs::write("/sys/power/state", "mem") {
+                    log::error!(error = err.to_string().as_str(); "suspend failed");
+                    object.send_error(
+                        session_core_v1::ErrorCode::Io,
+                        format!("failed to suspend: {err}"),
+                    );
+                    return;
+                }
+
+                object.send_done();
+            }
+            session_core_manager::Event::Hibernate => {
+                let Some(client) = object.client() else {
+                    return;
+                };
+
+                // let user hibernate only if there are no other user sessions active
+                let foreign_session_count = session::entities(&self.world, &self.session_entities)
+                    .filter_map(|entity| self.world.get::<ecs::Uid>(entity))
+                    .filter(|session| session.0 != client.creds().uid.as_raw())
+                    .count();
+
+                if !client.creds().uid.is_root() && foreign_session_count > 0 {
+                    log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "hibernate denied: multiple sessions active");
+                    object.send_error(
+                        session_core_v1::ErrorCode::ActiveSessions,
+                        "cannot hibernate while multiple sessions are active (root privileges required)",
+                    );
+                    return;
+                }
+
+                log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "hibernate accepted");
+
+                rustix::fs::sync();
+
+                if let Err(err) = system::reboot(system::RebootCommand::SwSuspend) {
+                    log::error!(error = err.to_string().as_str(); "sw_suspend syscall failed");
+                    object.send_error(
+                        session_core_v1::ErrorCode::Io,
+                        format!("failed to hibernate: {err}"),
                     );
                     return;
                 }

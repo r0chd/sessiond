@@ -53,7 +53,7 @@ impl Server {
         let (sender, receiver) = mpsc::channel();
         if let Err(err) = thread::Builder::new()
             .name("sessiond-consolekit".to_string())
-            .spawn(move || run(receiver))
+            .spawn(move || run(&receiver))
         {
             log::error!(error = err.to_string().as_str(); "failed to spawn ConsoleKit thread");
         }
@@ -237,8 +237,7 @@ impl Session {
     }
 }
 
-#[allow(clippy::needless_pass_by_value)]
-fn run(receiver: mpsc::Receiver<Command>) {
+fn run(receiver: &mpsc::Receiver<Command>) {
     let state = SharedState::default();
     let mut connection = None;
     let mut warned_unavailable = false;

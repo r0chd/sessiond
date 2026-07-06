@@ -141,7 +141,6 @@ impl session_core_v1::SessionCoreV1Handler for Sessiond {
 }
 
 impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
-    #[allow(clippy::too_many_lines)]
     fn event(
         &mut self,
         object: &session_manager::SessionManager,
@@ -303,7 +302,6 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
 }
 
 impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
-    #[allow(clippy::too_many_lines)]
     fn event(
         &mut self,
         object: &session_core_manager::SessionCoreManager,
@@ -502,7 +500,6 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
     }
 }
 
-#[allow(clippy::too_many_lines)]
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 

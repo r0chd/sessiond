@@ -84,6 +84,11 @@ impl CgroupManager {
 
                     fs::remove_dir(&cgroup.path)?;
                     log::info!(session_id = session_id.as_raw(), path = cgroup.path.to_str(); "cgroup destroyed");
+
+                    if state.shutting_down && state.cgroup_manager.is_empty() {
+                        state.loop_signal.stop();
+                    }
+
                     return Ok(calloop::PostAction::Remove);
                 }
 
@@ -122,6 +127,7 @@ impl CgroupManager {
             .find(|cgroup| cgroup.session_id == session_id)
             .context("session not found")?;
         let procs = fs::read_to_string(cgroup.path.join("cgroup.procs"))?;
+
         for line in procs.lines() {
             let pid = line.trim().parse::<i32>()?;
             let pid = process::Pid::from_raw(pid).context("invalid pid in cgroup.procs")?;
@@ -148,6 +154,10 @@ impl CgroupManager {
         }
 
         Ok(None)
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.cgroups.is_empty()
     }
 }
 

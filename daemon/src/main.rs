@@ -560,12 +560,27 @@ fn main() -> anyhow::Result<()> {
             Ok(calloop::PostAction::Continue)
         })?;
 
-    let signals = signals::Signals::new(&[signals::Signal::SIGUSR1, signals::Signal::SIGUSR2])?;
+    let loop_signal = event_loop.get_signal();
+
+    let signals = signals::Signals::new(&[
+        signals::Signal::SIGUSR1,
+        signals::Signal::SIGUSR2,
+        signals::Signal::SIGTERM,
+        signals::Signal::SIGINT,
+    ])?;
     event_loop
         .handle()
         .insert_source(signals, move |event, (), state| {
-            let session_updates =
-                seat::handle_vt_signal(&mut state.world, &state.seat_entities, event.signal());
+            let session_updates = match event.signal() {
+                signals::Signal::SIGUSR1 | signals::Signal::SIGUSR2 => {
+                    seat::handle_vt_signal(&mut state.world, &state.seat_entities, event.signal())
+                }
+                signals::Signal::SIGTERM | signals::Signal::SIGINT => {
+                    loop_signal.stop();
+                    Vec::new()
+                }
+                _ => unreachable!(),
+            };
 
             for (vt, active_state) in session_updates {
                 let mut state_updates = Vec::new();
@@ -601,6 +616,12 @@ fn main() -> anyhow::Result<()> {
         })?;
 
     event_loop.run(None, &mut sessiond, |_| {})?;
+
+    session::entities(&sessiond.world, &sessiond.session_entities)
+        .filter_map(|entity| sessiond.world.get::<ecs::Session>(entity))
+        .for_each(|session| _ = sessiond.cgroup_manager.terminate_session(session.0));
+
+    let _ = fs::remove_file("/run/sessiond.sock");
 
     Ok(())
 }

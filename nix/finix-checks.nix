@@ -20,7 +20,7 @@ let
 
   checks = prefixAttrs "finix" {
     basic = pkgs.callPackage ./tests/finix/basic.nix testArgs;
-    # consolekit = pkgs.callPackage ./tests/finix/consolekit.nix testArgs;
+    consolekit = pkgs.callPackage ./tests/finix/consolekit.nix testArgs;
   };
 in
 checks

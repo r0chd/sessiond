@@ -50,6 +50,22 @@ rustPlatform.buildRustPackage {
     mv $out/bin/daemon $out/bin/sessiond
     mv $out/bin/ctl $out/bin/sessionctl
 
+    mkdir -p $out/share/dbus-1/system.d
+    cat > $out/share/dbus-1/system.d/org.freedesktop.ConsoleKit.conf <<'EOF'
+    <!DOCTYPE busconfig PUBLIC
+      "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
+      "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+    <busconfig>
+      <policy user="root">
+        <allow own="org.freedesktop.ConsoleKit"/>
+        <allow send_destination="org.freedesktop.ConsoleKit"/>
+      </policy>
+      <policy context="default">
+        <allow send_destination="org.freedesktop.ConsoleKit"/>
+      </policy>
+    </busconfig>
+    EOF
+
     installShellCompletion --cmd sessionctl \
       --bash <($out/bin/sessionctl completions bash) \
       --zsh <($out/bin/sessionctl completions zsh) \

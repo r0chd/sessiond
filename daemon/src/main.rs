@@ -387,7 +387,11 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
                     return;
                 };
 
-                let session_count = session::entities(&self.world, &self.session_entities).count();
+                // let user reboot only if there are no other user sessions active
+                let session_count = session::entities(&self.world, &self.session_entities)
+                    .filter_map(|entity| self.world.get::<ecs::Uid>(entity))
+                    .filter(|session| session.0 != client.creds().uid.as_raw())
+                    .count();
 
                 if !client.creds().uid.is_root() && session_count > 1 {
                     log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), session_count; "reboot denied: multiple sessions active");
@@ -434,7 +438,11 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
                     return;
                 };
 
-                let session_count = session::entities(&self.world, &self.session_entities).count();
+                // let user poweroff only if there are no other user sessions active
+                let session_count = session::entities(&self.world, &self.session_entities)
+                    .filter_map(|entity| self.world.get::<ecs::Uid>(entity))
+                    .filter(|session| session.0 != client.creds().uid.as_raw())
+                    .count();
 
                 if !client.creds().uid.is_root() && session_count > 1 {
                     log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), session_count; "poweroff denied: multiple sessions active");

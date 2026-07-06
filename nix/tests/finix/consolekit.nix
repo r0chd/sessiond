@@ -103,6 +103,7 @@ sessiondTest {
     machine.succeed("sessionctl session list --json > /tmp/sessions.json")
     machine.succeed("jq -e '.sessions | length == 1' /tmp/sessions.json >/dev/null")
     pid = machine.succeed("jq -r '.sessions[0].leader' /tmp/sessions.json").strip()
+    uid = machine.succeed("jq -r '.sessions[0].uid' /tmp/sessions.json").strip()
 
     machine.wait_until_succeeds("${pkgs.systemd}/bin/busctl --system call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus NameHasOwner s org.freedesktop.ConsoleKit | grep -q true")
     machine.wait_until_succeeds("${pkgs.systemd}/bin/busctl --system call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus NameHasOwner s org.freedesktop.PolicyKit1 | grep -q true")
@@ -112,8 +113,14 @@ sessiondTest {
     machine.succeed("${pkgs.systemd}/bin/busctl --system introspect org.freedesktop.ConsoleKit /org/freedesktop/ConsoleKit/Manager org.freedesktop.ConsoleKit.Manager")
 
     session = machine.succeed(f"${pkgs.systemd}/bin/busctl --system call org.freedesktop.ConsoleKit /org/freedesktop/ConsoleKit/Manager org.freedesktop.ConsoleKit.Manager GetSessionForUnixProcess u {pid} | cut -d '\"' -f 2").strip()
+    machine.succeed("test -f /var/run/ConsoleKit/database")
+    machine.succeed(f"grep -F '[Session {session}]' /var/run/ConsoleKit/database")
+    machine.succeed(f"grep -F 'uid={uid}' /var/run/ConsoleKit/database")
+    machine.succeed("grep -F 'is_active=true' /var/run/ConsoleKit/database")
+    machine.succeed("grep -F 'is_local=true' /var/run/ConsoleKit/database")
     machine.succeed(f"${pkgs.systemd}/bin/busctl --system introspect org.freedesktop.ConsoleKit {session} org.freedesktop.ConsoleKit.Session")
     machine.succeed(f"${pkgs.systemd}/bin/busctl --system call org.freedesktop.ConsoleKit {session} org.freedesktop.ConsoleKit.Session GetUnixUser")
+    machine.succeed(f"${pkgs.systemd}/bin/busctl --system call org.freedesktop.ConsoleKit {session} org.freedesktop.ConsoleKit.Session GetUser")
     machine.succeed(f"${pkgs.systemd}/bin/busctl --system call org.freedesktop.ConsoleKit {session} org.freedesktop.ConsoleKit.Session IsActive")
     machine.succeed(f"${pkgs.systemd}/bin/busctl --system call org.freedesktop.ConsoleKit {session} org.freedesktop.ConsoleKit.Session IsLocal")
     machine.succeed(f"${pkgs.systemd}/bin/busctl --system call org.freedesktop.ConsoleKit {session} org.freedesktop.ConsoleKit.Session GetSeatId")

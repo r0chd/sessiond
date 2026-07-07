@@ -58,25 +58,6 @@ too, such as `gdm`, `sddm`, `greetd` or `hilsed`
 }
 ```
 
-`sessiond` can also work with polkit through its ConsoleKit
-backend. By default, the polkit package in nixpkgs doesn't
-have ConsoleKit support enabled, so `sessiond` provides its
-own polkit package with it built in.
-
-```nix
-{
-  security.polkit.package = inputs.sessiond.packages.${pkgs.stdenv.hostPlatform.system}.polkit;
-}
-```
-
-or on finix
-
-```nix
-{
-  services.polkit.package = inputs.sessiond.packages.${pkgs.stdenv.hostPlatform.system}.polkit;
-}
-```
-
 ## Other distributions
 
 TODO

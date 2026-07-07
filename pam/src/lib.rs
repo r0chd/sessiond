@@ -85,11 +85,14 @@ impl PamServiceModule for Pam {
             pamh.send_bytes("sessiond", session_id.to_le_bytes().to_vec(), None)
                 .map_err(|_| pamsm::PamError::SESSION_ERR)?;
 
+            pamh.putenv(&format!("XDG_RUNTIME_DIR=/run/user/{uid}"))?;
+            pamh.putenv(&format!(
+                "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus"
+            ))?;
             pamh.putenv(&format!("XDG_SESSION_ID={session_id}"))?;
             if let Some(seat) = session.seat {
                 pamh.putenv(&format!("XDG_SEAT={seat}"))?;
             }
-            pamh.putenv(&format!("XDG_RUNTIME_DIR=/run/user/{uid}"))?;
 
             Ok(())
         }

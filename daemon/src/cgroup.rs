@@ -1,4 +1,4 @@
-use crate::session::SessionId;
+use crate::{session, user};
 use anyhow::Context;
 use calloop::generic;
 use rustix::process;
@@ -25,14 +25,38 @@ impl CgroupManager {
         })
     }
 
+    fn user_cgroup_path(&self, uid: u32) -> path::PathBuf {
+        self.root_path.join(format!("user-{uid}"))
+    }
+
+    pub fn remove_user_cgroup(&self, uid: u32) -> anyhow::Result<()> {
+        match fs::remove_dir(self.user_cgroup_path(uid)) {
+            Ok(()) => {
+                log::info!(uid; "user cgroup destroyed");
+                Ok(())
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn ensure_user_cgroup(&self, uid: u32) -> anyhow::Result<path::PathBuf> {
+        let user_cgroup_path = self.user_cgroup_path(uid);
+        if !user_cgroup_path.exists() {
+            fs::create_dir(&user_cgroup_path)?;
+        }
+
+        Ok(user_cgroup_path)
+    }
+
     pub fn create_session_cgroup(
         &mut self,
-        session_id: SessionId,
+        uid: u32,
+        session_id: session::SessionId,
         leader_pid: i32,
     ) -> anyhow::Result<()> {
-        let session_cgroup_path = self
-            .root_path
-            .join(format!("session-{}", session_id.as_raw()));
+        let user_cgroup_path = self.ensure_user_cgroup(uid)?;
+        let session_cgroup_path = user_cgroup_path.join(format!("session-{}", session_id.as_raw()));
         fs::create_dir(&session_cgroup_path)?;
         fs::write(
             session_cgroup_path.join("cgroup.procs"),
@@ -43,6 +67,7 @@ impl CgroupManager {
 
         let cgroup = Cgroup {
             session_id,
+            uid,
             path: session_cgroup_path,
         };
 
@@ -51,7 +76,7 @@ impl CgroupManager {
         Ok(())
     }
 
-    pub fn poll_destroy(&self, session_id: SessionId) -> anyhow::Result<()> {
+    pub fn poll_destroy(&self, session_id: session::SessionId) -> anyhow::Result<()> {
         let cgroup = self
             .cgroups
             .iter()
@@ -85,6 +110,18 @@ impl CgroupManager {
                     fs::remove_dir(&cgroup.path)?;
                     log::info!(session_id = session_id.as_raw(), path = cgroup.path.to_str(); "cgroup destroyed");
 
+                    let has_other_sessions = state
+                        .cgroup_manager
+                        .cgroups
+                        .iter()
+                        .any(|other| other.uid == cgroup.uid);
+                    if !has_other_sessions
+                        && !user::is_lingering(&state.world, &state.user_entities, cgroup.uid)
+                        && let Err(e) = state.cgroup_manager.remove_user_cgroup(cgroup.uid)
+                    {
+                        log::error!(uid = cgroup.uid, error = e.to_string().as_str(); "failed to remove user cgroup");
+                    }
+
                     if state.shutting_down && state.cgroup_manager.is_empty() {
                         state.loop_signal.stop();
                     }
@@ -95,19 +132,21 @@ impl CgroupManager {
                 Ok(calloop::PostAction::Continue)
             })();
 
-            match result {
-                Ok(action) => Ok(action),
-                Err(e) => {
-                    log::error!(session_id = session_id.as_raw(), error = e.to_string().as_str(); "cgroup poll error");
-                    Ok(calloop::PostAction::Remove)
-                }
-            }
+            result.or_else(|e| {
+                log::error!(
+                    session_id = session_id.as_raw(),
+                    error = e.to_string().as_str();
+                    "cgroup poll error"
+                );
+
+                Ok(calloop::PostAction::Remove)
+            })
         })?;
 
         Ok(())
     }
 
-    pub fn kill_session(&self, session_id: SessionId) -> anyhow::Result<()> {
+    pub fn kill_session(&self, session_id: session::SessionId) -> anyhow::Result<()> {
         let cgroup = self
             .cgroups
             .iter()
@@ -120,7 +159,7 @@ impl CgroupManager {
         Ok(())
     }
 
-    pub fn terminate_session(&self, session_id: SessionId) -> anyhow::Result<()> {
+    pub fn terminate_session(&self, session_id: session::SessionId) -> anyhow::Result<()> {
         let cgroup = self
             .cgroups
             .iter()
@@ -140,7 +179,7 @@ impl CgroupManager {
         Ok(())
     }
 
-    pub fn find_session_by_pid(&self, pid: u32) -> anyhow::Result<Option<SessionId>> {
+    pub fn find_session_by_pid(&self, pid: u32) -> anyhow::Result<Option<session::SessionId>> {
         for cgroup in &self.cgroups {
             let procs = fs::read_to_string(cgroup.path.join("cgroup.procs"))?;
 
@@ -162,6 +201,7 @@ impl CgroupManager {
 }
 
 struct Cgroup {
-    session_id: SessionId,
+    session_id: session::SessionId,
+    uid: u32,
     path: path::PathBuf,
 }

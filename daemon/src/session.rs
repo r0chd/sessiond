@@ -1,4 +1,4 @@
-use crate::{ecs, seat, session_core_session, session_core_v1};
+use crate::{ecs, seat, session_core_session, session_core_v1, user};
 use bevy_ecs::{entity, world};
 use std::time;
 
@@ -57,6 +57,18 @@ pub fn entity_by_uid(
     })
 }
 
+pub fn entities_by_uid<'a>(
+    world: &'a world::World,
+    entities: &'a [entity::Entity],
+    uid: u32,
+) -> impl Iterator<Item = entity::Entity> + 'a {
+    self::entities(world, entities).filter(move |entity| {
+        world
+            .get::<ecs::Uid>(*entity)
+            .is_some_and(|session_uid| session_uid.0 == uid)
+    })
+}
+
 pub fn entity_by_object(
     world: &world::World,
     entities: &[entity::Entity],
@@ -88,7 +100,7 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
         };
 
         if matches!(event, session_core_session::Event::Destroy) {
-            if let Some(mut objects) = self.world.get_mut::<crate::ecs::SessionObjects>(entity) {
+            if let Some(mut objects) = self.world.get_mut::<ecs::SessionObjects>(entity) {
                 objects.0.retain(|session_object| session_object != object);
             }
             return;
@@ -97,10 +109,7 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
         let Some(client) = object.client() else {
             return;
         };
-        let session_uid = self
-            .world
-            .get::<crate::ecs::Uid>(entity)
-            .map_or(0, |uid| uid.0);
+        let session_uid = self.world.get::<ecs::Uid>(entity).map_or(0, |uid| uid.0);
         if !client.creds().uid.is_root() && client.creds().uid.as_raw() != session_uid {
             object.send_error(
                 session_core_v1::ErrorCode::PermissionDenied,
@@ -124,7 +133,7 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
                 #[cfg(feature = "consolekit")]
                 self.sync_consolekit_session(session_id, entity);
                 let _ = self.remove_session(session_id);
-                crate::user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
+                user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
             }
             session_core_session::Event::Kill => {
                 log::info!(session_id = session_id.as_raw(); "kill requested");
@@ -140,11 +149,11 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
                 #[cfg(feature = "consolekit")]
                 self.sync_consolekit_session(session_id, entity);
                 let _ = self.remove_session(session_id);
-                crate::user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
+                user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
             }
             session_core_session::Event::Lock => {
                 log::info!(session_id = session_id.as_raw(); "lock requested");
-                if let Some(objects) = self.world.get::<crate::ecs::SessionObjects>(entity) {
+                if let Some(objects) = self.world.get::<ecs::SessionObjects>(entity) {
                     for object in &objects.0 {
                         object.send_locked();
                         object.send_ok();
@@ -153,7 +162,7 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
             }
             session_core_session::Event::Unlock => {
                 log::info!(session_id = session_id.as_raw(); "unlock requested");
-                if let Some(objects) = self.world.get::<crate::ecs::SessionObjects>(entity) {
+                if let Some(objects) = self.world.get::<ecs::SessionObjects>(entity) {
                     for object in &objects.0 {
                         object.send_unlocked();
                         object.send_ok();
@@ -240,7 +249,7 @@ pub fn sync_vt_session_states(
 ) {
     seat::refresh_current_vts(world, seat_entities);
     seat::sync_states(world, seat_entities, session_entities);
-    crate::user::sync_all(world, user_entities, session_entities);
+    user::sync_all(world, user_entities, session_entities);
 }
 
 pub fn set_state(

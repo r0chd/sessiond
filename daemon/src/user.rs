@@ -2,6 +2,27 @@ use crate::{ecs, session, session_core_user, session_core_v1};
 use bevy_ecs::{entity, world};
 use std::{fs, io, path};
 
+pub fn create_runtime_dir(uid: u32) {
+    let runtime_dir = format!("/run/user/{uid}");
+    if let Err(e) = fs::create_dir_all(&runtime_dir) {
+        log::error!(uid, error = e.to_string().as_str(); "failed to create runtime dir");
+    }
+    if let Err(e) = rustix::fs::chown(&runtime_dir, Some(rustix::fs::Uid::from_raw(uid)), None) {
+        log::error!(uid, error = e.to_string().as_str(); "failed to chown runtime dir");
+    }
+    if let Err(e) = rustix::fs::chmod(&runtime_dir, rustix::fs::Mode::from_bits_truncate(0o700)) {
+        log::error!(uid, error = e.to_string().as_str(); "failed to chmod runtime dir");
+    }
+}
+
+pub fn remove_runtime_dir(uid: u32) -> io::Result<()> {
+    match fs::remove_dir(format!("/run/user/{uid}")) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
 pub fn entity_by_uid(
     world: &world::World,
     entities: &[entity::Entity],
@@ -56,12 +77,7 @@ fn compute_state(
     uid: u32,
     lingering: bool,
 ) -> session_core_v1::UserState {
-    let states = session::entities(world, session_entities)
-        .filter(|entity| {
-            world
-                .get::<ecs::Uid>(*entity)
-                .is_some_and(|entity_uid| entity_uid.0 == uid)
-        })
+    let states = session::entities_by_uid(world, session_entities, uid)
         .filter_map(|entity| world.get::<ecs::ActiveState>(entity).map(|state| state.0))
         .collect::<Vec<_>>();
 
@@ -185,6 +201,30 @@ impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond 
                 return;
             }
 
+            match (
+                lingering != 0,
+                session::entities_by_uid(&self.world, &self.session_entities, uid).count() == 0,
+            ) {
+                // Clean up when lingering was turned off and no sessions are active
+                (false, true) => {
+                    if let Err(e) = self.cgroup_manager.remove_user_cgroup(uid) {
+                        log::error!(uid, error = e.to_string().as_str(); "failed to remove user cgroup");
+                    }
+                    if let Err(e) = remove_runtime_dir(uid) {
+                        log::error!(uid, error = e.to_string().as_str(); "failed to remove runtime dir");
+                    }
+                }
+                // Create runtime dir and cgroup if lingering
+                // was enabled for user with no active sessions
+                (true, true) => {
+                    create_runtime_dir(uid);
+                    if let Err(e) = self.cgroup_manager.ensure_user_cgroup(uid) {
+                        log::error!(uid, error = e.to_string().as_str(); "failed to create user cgroup");
+                    }
+                }
+                _ => {}
+            }
+
             log::info!(uid, lingering; "lingering updated");
             if let Some(mut component) = self.world.get_mut::<ecs::Lingering>(entity) {
                 component.0 = lingering != 0;
@@ -214,4 +254,10 @@ fn set_lingering(uid: u32, lingering: bool) -> io::Result<()> {
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(err),
     }
+}
+
+pub fn is_lingering(world: &world::World, user_entities: &[entity::Entity], uid: u32) -> bool {
+    entity_by_uid(world, user_entities, uid)
+        .and_then(|entity| world.get::<ecs::Lingering>(entity))
+        .is_some_and(|lingering| lingering.0)
 }

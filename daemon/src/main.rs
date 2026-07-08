@@ -182,7 +182,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
 
                 if let Err(e) = self
                     .cgroup_manager
-                    .create_session_cgroup(session_id, leader_id)
+                    .create_session_cgroup(uid, session_id, leader_id)
                 {
                     log::error!(session_id = session_id.as_raw(), error = e.to_string().as_str(); "failed to create session cgroup");
                 }
@@ -198,20 +198,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
                 });
                 let mut active_state = session_core_v1::ActiveState::Online;
 
-                let runtime_dir = format!("/run/user/{uid}");
-                if let Err(e) = fs::create_dir_all(&runtime_dir) {
-                    log::error!(uid, error = e.to_string().as_str(); "failed to create runtime dir");
-                }
-                if let Err(e) =
-                    rustix::fs::chown(&runtime_dir, Some(rustix::fs::Uid::from_raw(uid)), None)
-                {
-                    log::error!(uid, error = e.to_string().as_str(); "failed to chown runtime dir");
-                }
-                if let Err(e) =
-                    rustix::fs::chmod(&runtime_dir, rustix::fs::Mode::from_bits_truncate(0o700))
-                {
-                    log::error!(uid, error = e.to_string().as_str(); "failed to chmod runtime dir");
-                }
+                user::create_runtime_dir(uid);
 
                 if let Some((seat_entity, seat)) =
                     self.seat_entities.iter().copied().find_map(|seat_entity| {
@@ -302,11 +289,11 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
                     log::error!(session_id = session_id.as_raw(), error = e.to_string().as_str(); "failed to poll destroy session cgroup");
                 }
 
-                if !session::entities(&self.world, &self.session_entities).any(|entity| {
-                    self.world
-                        .get::<ecs::Uid>(entity)
-                        .is_some_and(|session_uid| session_uid.0 == uid)
-                }) && let Err(e) = fs::remove_dir(format!("/run/user/{uid}"))
+                if !user::is_lingering(&self.world, &self.user_entities, uid)
+                    && session::entities_by_uid(&self.world, &self.session_entities, uid)
+                        .next()
+                        .is_none()
+                    && let Err(e) = user::remove_runtime_dir(uid)
                 {
                     log::error!(session_id = session_id.as_raw(), uid, error = e.to_string().as_str(); "failed to remove runtime dir");
                 }

@@ -12,6 +12,7 @@ dependencies:
     - cargo-llvm-cov
     - gcc
     - git
+    - llvm
     - linux-pam
     - pkg-config
     - jq
@@ -19,7 +20,9 @@ dependencies:
 steps:
   - name: coverage
     command: |
-      cargo llvm-cov --json --summary-only --output-path coverage.json
+      export LLVM_COV=$(which llvm-cov)
+      export LLVM_PROFDATA=$(which llvm-profdata)
+      cargo llvm-cov --features consolekit --json --summary-only --output-path coverage.json
       pct=$(jq '.data[0].totals.lines.percent' coverage.json)
       printf '{"schemaVersion":1,"label":"coverage","message":"%.1f%%","color":"brightgreen"}' "$pct" > badge.json
 

@@ -388,7 +388,7 @@ fn session_id_for_pid(pid: u32) -> fdo::Result<u32> {
         .ok_or_else(|| fdo::Error::Failed("no ConsoleKit session for pid".to_string()))
 }
 
-fn timestamp_string(timestamp: time::SystemTime) -> String {
+pub(crate) fn timestamp_string(timestamp: time::SystemTime) -> String {
     timestamp
         .duration_since(time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -417,7 +417,7 @@ fn write_database(state: &SharedState) -> io::Result<()> {
     Ok(())
 }
 
-fn append_database(database: &mut String, sessions: &[SessionInfo]) {
+pub(crate) fn append_database(database: &mut String, sessions: &[SessionInfo]) {
     let seats = sessions
         .iter()
         .map(|session| seat_name(session).to_string())
@@ -508,7 +508,7 @@ fn append_user_groups(database: &mut String, sessions: &[SessionInfo]) {
     }
 }
 
-const fn seat_name(session: &SessionInfo) -> &str {
+pub(crate) const fn seat_name(session: &SessionInfo) -> &str {
     if session.seat.is_empty() {
         "seat0"
     } else {
@@ -516,25 +516,25 @@ const fn seat_name(session: &SessionInfo) -> &str {
     }
 }
 
-const fn is_active(session: &SessionInfo) -> bool {
+pub(crate) const fn is_active(session: &SessionInfo) -> bool {
     matches!(
         session.active,
         session_core_v1::ActiveState::Active | session_core_v1::ActiveState::Online
     )
 }
 
-const fn key_file_bool(value: bool) -> &'static str {
+pub(crate) const fn key_file_bool(value: bool) -> &'static str {
     if value { "true" } else { "false" }
 }
 
-fn key_file_list<'a>(values: impl Iterator<Item = &'a String>) -> String {
+pub(crate) fn key_file_list<'a>(values: impl Iterator<Item = &'a String>) -> String {
     values
         .map(|value| key_file_escape(value))
         .collect::<Vec<_>>()
         .join(";")
 }
 
-fn key_file_escape(value: &str) -> String {
+pub(crate) fn key_file_escape(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
     for ch in value.chars() {
         match ch {

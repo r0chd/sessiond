@@ -1,4 +1,5 @@
 use crate::{ecs, session, session_core_v1};
+use bevy_ecs::{entity, world};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::io::Write as _;
@@ -26,8 +27,8 @@ pub struct SessionInfo {
 
 impl SessionInfo {
     pub fn from_world(
-        world: &ecs::World,
-        entity: ecs::Entity,
+        world: &world::World,
+        entity: entity::Entity,
         id: session::SessionId,
     ) -> Option<Self> {
         Some(Self {

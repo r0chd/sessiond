@@ -239,8 +239,18 @@ impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond 
     }
 }
 
+const LINGER_DIR: &str = "/var/lib/sessiond";
+
 fn linger_path(uid: u32) -> path::PathBuf {
-    path::Path::new("/var/lib/sessiond").join(uid.to_string())
+    path::Path::new(LINGER_DIR).join(uid.to_string())
+}
+
+pub fn lingering_uids() -> io::Result<Vec<u32>> {
+    let uids = fs::read_dir(LINGER_DIR)?
+        .filter_map(|entry| entry.ok()?.file_name().to_str()?.parse::<u32>().ok())
+        .collect();
+
+    Ok(uids)
 }
 
 fn set_lingering(uid: u32, lingering: bool) -> io::Result<()> {

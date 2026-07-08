@@ -16,10 +16,6 @@ let
     inherit sessiondTest;
     sessiondModule = import (self + "/nix/finix.nix");
     sessiondPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.sessiond;
-    polkitPackage = pkgs.callPackage ./polkit {
-      useConsoleKit = true;
-      useSystemd = false;
-    };
   };
 
   checks = prefixAttrs "finix" {

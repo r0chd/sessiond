@@ -3,7 +3,6 @@
   sessiondTest,
   sessiondModule,
   sessiondPackage,
-  ...
 }:
 sessiondTest {
   name = "sessiond-basic-finix";

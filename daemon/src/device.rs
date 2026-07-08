@@ -71,10 +71,10 @@ pub fn close_device(
         );
     }
 
-    if let Some(devices) = world.get_mut::<ecs::Devices>(client_entity) {
+    if let Some(mut devices) = world.get_mut::<ecs::Devices>(client_entity) {
         devices.0.remove(idx);
     }
-    world.remove_entity(device_entity);
+    world.despawn(device_entity);
 
     Ok(())
 }
@@ -151,13 +151,13 @@ pub fn activate(world: &mut ecs::World, entity: ecs::Entity) -> anyhow::Result<(
                 .ok_or_else(|| anyhow::anyhow!("device has no fd"))?;
             drm_set_master(&fd.0)
                 .map_err(|err| anyhow::anyhow!("Could not make device fd drm master: {err}"))?;
-            world.insert(entity, ecs::DeviceActive(true));
+            world.entity_mut(entity).insert(ecs::DeviceActive(true));
         }
         DeviceKind::Evdev | DeviceKind::Hidraw => {
             return Err(anyhow::anyhow!("device type cannot be activated"));
         }
         DeviceKind::Wscons => {
-            world.insert(entity, ecs::DeviceActive(true));
+            world.entity_mut(entity).insert(ecs::DeviceActive(true));
         }
     }
 
@@ -204,7 +204,7 @@ pub fn deactivate(world: &mut ecs::World, entity: ecs::Entity) -> anyhow::Result
         DeviceKind::Wscons => {}
     }
 
-    world.insert(entity, ecs::DeviceActive(false));
+    world.entity_mut(entity).insert(ecs::DeviceActive(false));
     Ok(())
 }
 
@@ -215,10 +215,10 @@ pub fn matches_path(world: &ecs::World, entity: ecs::Entity, path: &path::Path) 
 }
 
 pub fn add_object(world: &mut ecs::World, entity: ecs::Entity, object: device::Device) {
-    if let Some(ref_count) = world.get_mut::<ecs::DeviceRefCount>(entity) {
+    if let Some(mut ref_count) = world.get_mut::<ecs::DeviceRefCount>(entity) {
         ref_count.0 += 1;
     }
-    if let Some(objects) = world.get_mut::<ecs::DeviceObjects>(entity) {
+    if let Some(mut objects) = world.get_mut::<ecs::DeviceObjects>(entity) {
         objects.0.push(object);
     }
 }
@@ -269,7 +269,7 @@ pub fn contains_object(world: &ecs::World, entity: ecs::Entity, object: &device:
 }
 
 pub fn remove_object(world: &mut ecs::World, entity: ecs::Entity, object: &device::Device) {
-    if let Some(objects) = world.get_mut::<ecs::DeviceObjects>(entity) {
+    if let Some(mut objects) = world.get_mut::<ecs::DeviceObjects>(entity) {
         objects.0.retain(|candidate| candidate != object);
     }
 }
@@ -283,7 +283,7 @@ pub fn send_revoked(world: &ecs::World, entity: ecs::Entity) {
 }
 
 pub fn decrement_ref(world: &mut ecs::World, entity: ecs::Entity) -> usize {
-    let Some(ref_count) = world.get_mut::<ecs::DeviceRefCount>(entity) else {
+    let Some(mut ref_count) = world.get_mut::<ecs::DeviceRefCount>(entity) else {
         return 0;
     };
     ref_count.0 = ref_count.0.saturating_sub(1);

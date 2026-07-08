@@ -163,7 +163,6 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
         match event {
             session_manager::Event::CreateSession {
                 uid,
-                username,
                 vt,
                 is_local,
                 remote_host,
@@ -171,6 +170,9 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
                 let session_id = self.next_session_id;
                 self.next_session_id = self.next_session_id.next();
                 let is_local = is_local != 0;
+                let username = users::get_user_by_uid(uid)
+                    .map(|user| user.name().to_string_lossy().into_owned())
+                    .unwrap_or_default();
                 log::info!(session_id = session_id.as_raw(), uid, username = username.as_str(), vt, is_local, remote_host = remote_host.as_str(); "session created");
 
                 let leader_id = client.creds().pid.as_raw_pid();
@@ -609,6 +611,8 @@ fn main() -> anyhow::Result<()> {
     let vtbound = env::var("SESSIOND_VTBOUND")
         .ok()
         .is_none_or(|vtbound| vtbound == "1");
+
+    fs::create_dir_all("/var/lib/sessiond")?;
 
     let mut sessiond = Sessiond {
         next_session_id: session::SessionId::from_raw(1),

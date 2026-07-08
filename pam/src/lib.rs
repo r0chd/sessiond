@@ -73,7 +73,7 @@ impl PamServiceModule for Pam {
                 .unwrap_or_default();
             let is_local = u32::from(remote_host.is_empty());
 
-            manager.send_create_session(uid, username, vt, is_local, remote_host);
+            manager.send_create_session(uid, vt, is_local, remote_host);
 
             while session.session_id.is_none() {
                 event_queue

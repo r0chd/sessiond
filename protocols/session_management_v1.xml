@@ -11,7 +11,6 @@
     the assigned session_id. Called at session open time.
    </description>
    <arg name="uid" type="uint" summary="user id"/>
-   <arg name="username" type="varchar" summary="username"/>
    <arg name="vt" type="uint" summary="virtual terminal number"/>
    <arg name="is_local" type="uint" summary="non-zero if local, zero if remote"/>
    <arg name="remote_host" type="varchar" summary="remote host, empty for local sessions"/>

@@ -23,6 +23,9 @@ mod session;
 mod terminal;
 mod user;
 
+#[cfg(test)]
+mod tests;
+
 use bevy_ecs::{entity, world};
 use calloop::{generic, signals};
 use clap::Parser;

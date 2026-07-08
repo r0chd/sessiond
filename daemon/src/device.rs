@@ -115,12 +115,13 @@ impl DeviceKind {
             Some(Self::Evdev)
         } else if path.starts_with("/dev/dri/") || path.starts_with("/dev/drm/") {
             Some(Self::Drm)
-        } else if path.starts_with("/dev/wskbd")
-            || path.starts_with("/dev/wsmouse")
-            || path.starts_with("/dev/wsmux")
-        {
+        } else if path.to_str().is_some_and(|s| {
+            s.starts_with("/dev/wskbd")
+                || s.starts_with("/dev/wsmouse")
+                || s.starts_with("/dev/wsmux")
+        }) {
             Some(Self::Wscons)
-        } else if path.starts_with("/dev/hidraw") {
+        } else if path.to_str().is_some_and(|s| s.starts_with("/dev/hidraw")) {
             Some(Self::Hidraw)
         } else {
             None
@@ -128,7 +129,7 @@ impl DeviceKind {
     }
 }
 
-fn matches_named_device(path: &path::Path, parent: &str, prefix: &str) -> bool {
+pub(crate) fn matches_named_device(path: &path::Path, parent: &str, prefix: &str) -> bool {
     path.parent() == Some(path::Path::new(parent))
         && path
             .file_name()
@@ -311,30 +312,3 @@ pub fn send_opened(world: &world::World, entity: entity::Entity) -> anyhow::Resu
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{DeviceKind, matches_named_device};
-    use std::path::Path;
-
-    #[test]
-    fn recognizes_evdev_event_nodes() {
-        assert_eq!(
-            DeviceKind::from_path(Path::new("/dev/input/event0")),
-            Some(DeviceKind::Evdev)
-        );
-        assert_eq!(
-            DeviceKind::from_path(Path::new("/dev/input/event12")),
-            Some(DeviceKind::Evdev)
-        );
-    }
-
-    #[test]
-    fn does_not_match_partial_parent_paths() {
-        assert!(!matches_named_device(
-            Path::new("/dev/input/by-path/event0"),
-            "/dev/input",
-            "event"
-        ));
-        assert_eq!(DeviceKind::from_path(Path::new("/dev/input")), None);
-    }
-}

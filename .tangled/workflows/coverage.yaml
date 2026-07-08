@@ -11,6 +11,7 @@ dependencies:
     - cargo
     - cargo-llvm-cov
     - gcc
+    - git
     - linux-pam
     - pkg-config
     - jq
@@ -21,4 +22,11 @@ steps:
       cargo llvm-cov --json --summary-only --output-path coverage.json
       pct=$(jq '.data[0].totals.lines.percent' coverage.json)
       printf '{"schemaVersion":1,"label":"coverage","message":"%.1f%%","color":"brightgreen"}' "$pct" > badge.json
-      cat badge.json
+
+  - name: publish badge
+    command: |
+      git config user.email "ci@tangled.org"
+      git config user.name "CI"
+      git add badge.json
+      git diff --cached --quiet || git commit -m "chore(ci): update coverage badge"
+      git push origin HEAD:master

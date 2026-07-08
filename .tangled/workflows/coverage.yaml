@@ -10,6 +10,7 @@ dependencies:
   nixpkgs:
     - cargo
     - cargo-llvm-cov
+    - gcc
     - linux-pam
     - pkg-config
     - jq

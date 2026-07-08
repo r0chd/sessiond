@@ -654,6 +654,24 @@ fn main() -> anyhow::Result<()> {
     );
     sessiond.seat_entities.push(seat_entity);
 
+    match user::lingering_uids() {
+        Ok(uids) => {
+            for uid in uids {
+                user::get_or_create(
+                    &mut sessiond.world,
+                    &mut sessiond.user_entities,
+                    &sessiond.session_entities,
+                    uid,
+                );
+                user::create_runtime_dir(uid);
+                if let Err(e) = sessiond.cgroup_manager.ensure_user_cgroup(uid) {
+                    log::error!(uid, error = e.to_string().as_str(); "failed to create user cgroup");
+                }
+            }
+        }
+        Err(e) => log::error!(error = e.to_string().as_str(); "failed to read lingering users"),
+    }
+
     let path = path::Path::new("/run/sessiond.sock");
     let mut socket = server::Server::bind(&path)?;
     fs::set_permissions(path, fs::Permissions::from_mode(0o777))?;

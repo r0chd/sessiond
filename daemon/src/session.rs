@@ -87,7 +87,7 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
         };
 
         if matches!(event, session_core_session::Event::Destroy) {
-            if let Some(objects) = self.world.get_mut::<crate::ecs::SessionObjects>(entity) {
+            if let Some(mut objects) = self.world.get_mut::<crate::ecs::SessionObjects>(entity) {
                 objects.0.retain(|session_object| session_object != object);
             }
             return;
@@ -206,7 +206,7 @@ pub fn add_session_object(
     }
     object.send_done();
 
-    if let Some(objects) = world.get_mut::<ecs::SessionObjects>(entity) {
+    if let Some(mut objects) = world.get_mut::<ecs::SessionObjects>(entity) {
         objects.0.push(object);
     }
 }
@@ -219,7 +219,7 @@ pub fn set_session_state(
 ) {
     let vt = world.get::<ecs::Vt>(entity).map_or(0, |vt| vt.0);
     log::info!(session_id = session_id.as_raw(), vt; "session state changed");
-    if let Some(active_state) = world.get_mut::<ecs::ActiveState>(entity) {
+    if let Some(mut active_state) = world.get_mut::<ecs::ActiveState>(entity) {
         active_state.0 = state;
     }
     if let Some(objects) = world.get::<ecs::SessionObjects>(entity) {
@@ -246,7 +246,7 @@ pub fn set_state(
 ) {
     let vt = world.get::<ecs::Vt>(entity).map_or(0, |vt| vt.0);
     log::info!(session_id = session_id.as_raw(), vt; "session state changed");
-    if let Some(active_state) = world.get_mut::<ecs::ActiveState>(entity) {
+    if let Some(mut active_state) = world.get_mut::<ecs::ActiveState>(entity) {
         active_state.0 = state;
     }
     if let Some(objects) = world.get::<ecs::SessionObjects>(entity) {

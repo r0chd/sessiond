@@ -1,90 +1,73 @@
 use crate::{device, seat, seat_v1, session, session_core_session, session_core_v1};
+use bevy_ecs::prelude::*;
 use std::os::fd;
 use std::{path, time};
 
-pub trait Component: Sized {
-    fn storage(world: &mut super::World) -> &mut Vec<Option<Self>>;
-    fn storage_ref(world: &super::World) -> &Vec<Option<Self>>;
-}
-
-macro_rules! component {
-    ($name:ident, $field:ident) => {
-        impl Component for $name {
-            fn storage(world: &mut super::World) -> &mut Vec<Option<Self>> {
-                &mut world.$field
-            }
-            fn storage_ref(world: &super::World) -> &Vec<Option<Self>> {
-                &world.$field
-            }
-        }
-    };
-}
-
+#[derive(Component)]
 pub struct Uid(pub u32);
-component!(Uid, uid_components);
 
+#[derive(Component)]
 pub struct Username(pub String);
-component!(Username, username_components);
 
+#[derive(Component)]
 pub struct Vt(pub u32);
-component!(Vt, vt_components);
 
+#[derive(Component)]
 pub struct SeatName(pub String);
-component!(SeatName, seat_name_components);
 
-pub struct SeatEntity(pub super::Entity);
-component!(SeatEntity, seat_entity_components);
+#[derive(Component)]
+pub struct SeatEntity(pub Entity);
 
+#[derive(Component)]
 pub struct Timestamp(pub time::SystemTime);
-component!(Timestamp, timestamp_components);
 
+#[derive(Component)]
 pub struct LeaderId(pub i32);
-component!(LeaderId, leader_id_components);
 
+#[derive(Component)]
 pub struct IsLocal(pub bool);
-component!(IsLocal, is_local_components);
 
+#[derive(Component)]
 pub struct RemoteHost(pub String);
-component!(RemoteHost, remote_host_components);
 
+#[derive(Component)]
 pub struct SessionObjects(pub Vec<session_core_session::SessionCoreSession>);
-component!(SessionObjects, session_objects_components);
 
+#[derive(Component)]
 pub struct ActiveState(pub session_core_v1::ActiveState);
-component!(ActiveState, active_state_components);
 
+#[derive(Component)]
 pub struct Session(pub session::SessionId);
-component!(Session, session_components);
 
+#[derive(Component)]
 pub struct SeatObject(pub seat_v1::seat::Seat);
-component!(SeatObject, seat_object_components);
 
-pub struct Devices(pub Vec<super::Entity>);
-component!(Devices, devices_components);
+#[derive(Component)]
+pub struct Devices(pub Vec<Entity>);
 
+#[derive(Component)]
 pub struct DeviceObjects(pub Vec<seat_v1::device::Device>);
-component!(DeviceObjects, device_objects_components);
 
+#[derive(Component)]
 pub struct DevicePath(pub path::PathBuf);
-component!(DevicePath, device_path_components);
 
+#[derive(Component)]
 pub struct DeviceRefCount(pub usize);
-component!(DeviceRefCount, device_ref_count_components);
 
+#[derive(Component)]
 pub struct DeviceKind(pub device::DeviceKind);
-component!(DeviceKind, device_kind_components);
 
+#[derive(Component)]
 pub struct DeviceId(pub u32);
-component!(DeviceId, device_id_components);
 
+#[derive(Component)]
 pub struct DeviceActive(pub bool);
-component!(DeviceActive, device_active_components);
 
+#[derive(Component)]
 pub struct DeviceFd(pub fd::OwnedFd);
-component!(DeviceFd, device_fd_components);
 
+#[derive(Component)]
 pub struct SeatState(pub seat::SeatState);
-component!(SeatState, seat_state_components);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SeatKind {
@@ -92,17 +75,17 @@ pub enum SeatKind {
     NonVtBound,
 }
 
+#[derive(Component)]
 pub struct SeatMode(pub SeatKind);
-component!(SeatMode, seat_mode_components);
 
+#[derive(Component)]
 pub struct CurrentVt(pub u32);
-component!(CurrentVt, current_vt_components);
 
-pub struct SeatClients(pub Vec<super::Entity>);
-component!(SeatClients, seat_clients_components);
+#[derive(Component)]
+pub struct SeatClients(pub Vec<Entity>);
 
-pub struct ActiveClient(pub super::Entity);
-component!(ActiveClient, active_client_components);
+#[derive(Component)]
+pub struct ActiveClient(pub Entity);
 
-pub struct NextClient(pub super::Entity);
-component!(NextClient, next_client_components);
+#[derive(Component)]
+pub struct NextClient(pub Entity);

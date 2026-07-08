@@ -110,7 +110,7 @@ impl Sessiond {
                 .is_some_and(|session| session.0 == session_id)
         })?;
         let entity = self.session_entities.remove(idx);
-        self.world.remove_entity(entity);
+        self.world.despawn(entity);
         #[cfg(feature = "consolekit")]
         self.consolekit.remove_session(session_id);
         Some(entity)
@@ -226,7 +226,8 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
                     active_state = session_core_v1::ActiveState::Active;
                 }
 
-                let session_entity = self.world.insert_session(
+                let session_entity = ecs::insert_session(
+                    &mut self.world,
                     session_id,
                     uid,
                     username,
@@ -268,7 +269,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
                     .map_or("", |username| username.0.as_str());
                 log::info!(session_id = session_id.as_raw(), uid, username; "session destroyed");
 
-                if let Some(active_state) = self.world.get_mut::<ecs::ActiveState>(entity) {
+                if let Some(mut active_state) = self.world.get_mut::<ecs::ActiveState>(entity) {
                     active_state.0 = session_core_v1::ActiveState::Closing;
                 }
                 #[cfg(feature = "consolekit")]
@@ -623,7 +624,8 @@ fn main() -> anyhow::Result<()> {
         world: ecs::World::new(),
     };
 
-    let seat_entity = sessiond.world.insert_seat(
+    let seat_entity = ecs::insert_seat(
+        &mut sessiond.world,
         "seat0".to_string(),
         if vtbound {
             ecs::SeatKind::VtBound

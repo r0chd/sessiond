@@ -1,4 +1,5 @@
 use crate::{ecs, seat, session_core_session, session_core_v1};
+use bevy_ecs::{entity, world};
 use std::time;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -19,24 +20,24 @@ impl SessionId {
 }
 
 pub fn entities<'a>(
-    world: &'a ecs::World,
-    entities: &'a [ecs::Entity],
-) -> impl Iterator<Item = ecs::Entity> + 'a {
+    world: &'a world::World,
+    entities: &'a [entity::Entity],
+) -> impl Iterator<Item = entity::Entity> + 'a {
     entities
         .iter()
         .copied()
         .filter(|entity| world.get::<ecs::Session>(*entity).is_some())
 }
 
-pub fn id(world: &ecs::World, entity: ecs::Entity) -> Option<SessionId> {
+pub fn id(world: &world::World, entity: entity::Entity) -> Option<SessionId> {
     world.get::<ecs::Session>(entity).map(|session| session.0)
 }
 
 pub fn entity(
-    world: &ecs::World,
-    entities: &[ecs::Entity],
+    world: &world::World,
+    entities: &[entity::Entity],
     session_id: SessionId,
-) -> Option<ecs::Entity> {
+) -> Option<entity::Entity> {
     entities.iter().copied().find(|entity| {
         world
             .get::<ecs::Session>(*entity)
@@ -45,10 +46,10 @@ pub fn entity(
 }
 
 pub fn entity_by_uid(
-    world: &ecs::World,
-    entities: &[ecs::Entity],
+    world: &world::World,
+    entities: &[entity::Entity],
     uid: u32,
-) -> Option<ecs::Entity> {
+) -> Option<entity::Entity> {
     self::entities(world, entities).find(|entity| {
         world
             .get::<ecs::Uid>(*entity)
@@ -57,10 +58,10 @@ pub fn entity_by_uid(
 }
 
 pub fn entity_by_object(
-    world: &ecs::World,
-    entities: &[ecs::Entity],
+    world: &world::World,
+    entities: &[entity::Entity],
     object: &session_core_session::SessionCoreSession,
-) -> Option<ecs::Entity> {
+) -> Option<entity::Entity> {
     self::entities(world, entities).find(|entity| {
         world
             .get::<ecs::SessionObjects>(*entity)
@@ -163,9 +164,9 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
 }
 
 pub fn add_session_object(
-    world: &mut ecs::World,
+    world: &mut world::World,
     session_id: SessionId,
-    entity: ecs::Entity,
+    entity: entity::Entity,
     object: session_core_session::SessionCoreSession,
 ) {
     log::debug!(session_id = session_id.as_raw(), uid = object.client().map_or(0, |c| c.creds().uid.as_raw()); "session info requested");
@@ -212,9 +213,9 @@ pub fn add_session_object(
 }
 
 pub fn set_session_state(
-    world: &mut ecs::World,
+    world: &mut world::World,
     session_id: SessionId,
-    entity: ecs::Entity,
+    entity: entity::Entity,
     state: session_core_v1::ActiveState,
 ) {
     let vt = world.get::<ecs::Vt>(entity).map_or(0, |vt| vt.0);
@@ -230,18 +231,18 @@ pub fn set_session_state(
 }
 
 pub fn sync_vt_session_states(
-    world: &mut ecs::World,
-    seat_entities: &[ecs::Entity],
-    session_entities: &[ecs::Entity],
+    world: &mut world::World,
+    seat_entities: &[entity::Entity],
+    session_entities: &[entity::Entity],
 ) {
     seat::refresh_current_vts(world, seat_entities);
     seat::sync_states(world, seat_entities, session_entities);
 }
 
 pub fn set_state(
-    world: &mut ecs::World,
+    world: &mut world::World,
     session_id: SessionId,
-    entity: ecs::Entity,
+    entity: entity::Entity,
     state: session_core_v1::ActiveState,
 ) {
     let vt = world.get::<ecs::Vt>(entity).map_or(0, |vt| vt.0);

@@ -22,6 +22,7 @@ mod seat;
 mod session;
 mod terminal;
 
+use bevy_ecs::{entity, world};
 use calloop::{generic, signals};
 use clap::Parser;
 use hyprwire::server;
@@ -91,19 +92,19 @@ struct Sessiond {
     next_session_id: session::SessionId,
     info_managers: Vec<session_core_manager::SessionCoreManager>,
     cgroup_manager: cgroup::CgroupManager,
-    session_entities: Vec<ecs::Entity>,
-    seat_entities: Vec<ecs::Entity>,
-    client_entities: Vec<ecs::Entity>,
+    session_entities: Vec<entity::Entity>,
+    seat_entities: Vec<entity::Entity>,
+    client_entities: Vec<entity::Entity>,
     seat_access: SeatAccess,
     #[cfg(feature = "consolekit")]
     consolekit: consolekit::Server,
     shutting_down: bool,
     loop_signal: calloop::LoopSignal,
-    world: ecs::World,
+    world: world::World,
 }
 
 impl Sessiond {
-    fn remove_session(&mut self, session_id: session::SessionId) -> Option<ecs::Entity> {
+    fn remove_session(&mut self, session_id: session::SessionId) -> Option<entity::Entity> {
         let idx = self.session_entities.iter().position(|entity| {
             self.world
                 .get::<ecs::Session>(*entity)
@@ -117,7 +118,7 @@ impl Sessiond {
     }
 
     #[cfg(feature = "consolekit")]
-    fn sync_consolekit_session(&self, session_id: session::SessionId, entity: ecs::Entity) {
+    fn sync_consolekit_session(&self, session_id: session::SessionId, entity: entity::Entity) {
         if let Some(info) = consolekit::SessionInfo::from_world(&self.world, entity, session_id) {
             self.consolekit.upsert_session(info);
         }
@@ -621,7 +622,7 @@ fn main() -> anyhow::Result<()> {
         consolekit: consolekit::Server::start(),
         shutting_down: false,
         loop_signal,
-        world: ecs::World::new(),
+        world: world::World::new(),
     };
 
     let seat_entity = ecs::insert_seat(

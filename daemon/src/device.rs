@@ -1,5 +1,6 @@
 use crate::seat_v1::device;
 use crate::{ecs, seat, seat_v1};
+use bevy_ecs::{entity, world};
 use rustix::{io, ioctl};
 use std::ffi::c_int;
 use std::os::fd;
@@ -27,8 +28,8 @@ impl hyprwire::Dispatch<device::Device> for crate::Sessiond {
 }
 
 pub fn close_device(
-    world: &mut ecs::World,
-    client_entity: ecs::Entity,
+    world: &mut world::World,
+    client_entity: entity::Entity,
     object: &seat_v1::device::Device,
 ) -> anyhow::Result<()> {
     let session_id = world
@@ -135,7 +136,7 @@ fn matches_named_device(path: &path::Path, parent: &str, prefix: &str) -> bool {
             .is_some_and(|name| name.starts_with(prefix))
 }
 
-pub fn activate(world: &mut ecs::World, entity: ecs::Entity) -> anyhow::Result<()> {
+pub fn activate(world: &mut world::World, entity: entity::Entity) -> anyhow::Result<()> {
     if world
         .get::<ecs::DeviceActive>(entity)
         .is_some_and(|active| active.0)
@@ -164,7 +165,7 @@ pub fn activate(world: &mut ecs::World, entity: ecs::Entity) -> anyhow::Result<(
     Ok(())
 }
 
-pub fn deactivate(world: &mut ecs::World, entity: ecs::Entity) -> anyhow::Result<()> {
+pub fn deactivate(world: &mut world::World, entity: entity::Entity) -> anyhow::Result<()> {
     if !world
         .get::<ecs::DeviceActive>(entity)
         .is_some_and(|active| active.0)
@@ -208,13 +209,13 @@ pub fn deactivate(world: &mut ecs::World, entity: ecs::Entity) -> anyhow::Result
     Ok(())
 }
 
-pub fn matches_path(world: &ecs::World, entity: ecs::Entity, path: &path::Path) -> bool {
+pub fn matches_path(world: &world::World, entity: entity::Entity, path: &path::Path) -> bool {
     world
         .get::<ecs::DevicePath>(entity)
         .is_some_and(|device_path| device_path.0 == path)
 }
 
-pub fn add_object(world: &mut ecs::World, entity: ecs::Entity, object: device::Device) {
+pub fn add_object(world: &mut world::World, entity: entity::Entity, object: device::Device) {
     if let Some(mut ref_count) = world.get_mut::<ecs::DeviceRefCount>(entity) {
         ref_count.0 += 1;
     }
@@ -223,32 +224,32 @@ pub fn add_object(world: &mut ecs::World, entity: ecs::Entity, object: device::D
     }
 }
 
-pub fn id(world: &ecs::World, entity: ecs::Entity) -> Option<u32> {
+pub fn id(world: &world::World, entity: entity::Entity) -> Option<u32> {
     world.get::<ecs::DeviceId>(entity).map(|id| id.0)
 }
 
-pub fn device_kind(world: &ecs::World, entity: ecs::Entity) -> anyhow::Result<DeviceKind> {
+pub fn device_kind(world: &world::World, entity: entity::Entity) -> anyhow::Result<DeviceKind> {
     world
         .get::<ecs::DeviceKind>(entity)
         .map(|kind| kind.0)
         .ok_or_else(|| anyhow::anyhow!("device has no kind"))
 }
 
-pub fn device_path(world: &ecs::World, entity: ecs::Entity) -> anyhow::Result<path::PathBuf> {
+pub fn device_path(world: &world::World, entity: entity::Entity) -> anyhow::Result<path::PathBuf> {
     world
         .get::<ecs::DevicePath>(entity)
         .map(|path| path.0.clone())
         .ok_or_else(|| anyhow::anyhow!("device has no path"))
 }
 
-pub fn path_display(world: &ecs::World, entity: ecs::Entity) -> String {
+pub fn path_display(world: &world::World, entity: entity::Entity) -> String {
     device_path(world, entity).map_or_else(
         |_| "<unknown>".to_string(),
         |path| path.display().to_string(),
     )
 }
 
-pub fn absolute_path_string(world: &ecs::World, entity: ecs::Entity) -> anyhow::Result<String> {
+pub fn absolute_path_string(world: &world::World, entity: entity::Entity) -> anyhow::Result<String> {
     let device_path = device_path(world, entity)?;
     Ok(path::absolute(&device_path)
         .unwrap_or(device_path)
@@ -256,25 +257,25 @@ pub fn absolute_path_string(world: &ecs::World, entity: ecs::Entity) -> anyhow::
         .to_string())
 }
 
-pub fn last_object(world: &ecs::World, entity: ecs::Entity) -> Option<&device::Device> {
+pub fn last_object(world: &world::World, entity: entity::Entity) -> Option<&device::Device> {
     world
         .get::<ecs::DeviceObjects>(entity)
         .and_then(|objects| objects.0.last())
 }
 
-pub fn contains_object(world: &ecs::World, entity: ecs::Entity, object: &device::Device) -> bool {
+pub fn contains_object(world: &world::World, entity: entity::Entity, object: &device::Device) -> bool {
     world
         .get::<ecs::DeviceObjects>(entity)
         .is_some_and(|objects| objects.0.iter().any(|candidate| candidate == object))
 }
 
-pub fn remove_object(world: &mut ecs::World, entity: ecs::Entity, object: &device::Device) {
+pub fn remove_object(world: &mut world::World, entity: entity::Entity, object: &device::Device) {
     if let Some(mut objects) = world.get_mut::<ecs::DeviceObjects>(entity) {
         objects.0.retain(|candidate| candidate != object);
     }
 }
 
-pub fn send_revoked(world: &ecs::World, entity: ecs::Entity) {
+pub fn send_revoked(world: &world::World, entity: entity::Entity) {
     if let Some(objects) = world.get::<ecs::DeviceObjects>(entity) {
         for object in &objects.0 {
             object.send_revoked();
@@ -282,7 +283,7 @@ pub fn send_revoked(world: &ecs::World, entity: ecs::Entity) {
     }
 }
 
-pub fn decrement_ref(world: &mut ecs::World, entity: ecs::Entity) -> usize {
+pub fn decrement_ref(world: &mut world::World, entity: entity::Entity) -> usize {
     let Some(mut ref_count) = world.get_mut::<ecs::DeviceRefCount>(entity) else {
         return 0;
     };
@@ -290,7 +291,7 @@ pub fn decrement_ref(world: &mut ecs::World, entity: ecs::Entity) -> usize {
     ref_count.0
 }
 
-pub fn send_opened(world: &ecs::World, entity: ecs::Entity) -> anyhow::Result<()> {
+pub fn send_opened(world: &world::World, entity: entity::Entity) -> anyhow::Result<()> {
     let Some(object) = last_object(world, entity) else {
         return Ok(());
     };

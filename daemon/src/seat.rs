@@ -1,5 +1,6 @@
 use crate::seat_v1::{seat, seat_manager};
 use crate::{device, ecs, seat_v1, session, session_core_v1, terminal};
+use bevy_ecs::{entity, world};
 use calloop::signals;
 use rustix::io;
 use std::fs;
@@ -16,10 +17,10 @@ pub enum SeatState {
 }
 
 pub fn client_entity_by_seat_object(
-    world: &ecs::World,
-    entities: &[ecs::Entity],
+    world: &world::World,
+    entities: &[entity::Entity],
     object: &seat_v1::seat::Seat,
-) -> Option<ecs::Entity> {
+) -> Option<entity::Entity> {
     entities.iter().copied().find(|entity| {
         world
             .get::<ecs::SeatObject>(*entity)
@@ -28,10 +29,10 @@ pub fn client_entity_by_seat_object(
 }
 
 pub fn client_entity_by_device_object(
-    world: &ecs::World,
-    entities: &[ecs::Entity],
+    world: &world::World,
+    entities: &[entity::Entity],
     object: &seat_v1::device::Device,
-) -> Option<ecs::Entity> {
+) -> Option<entity::Entity> {
     entities.iter().copied().find(|entity| {
         world.get::<ecs::Devices>(*entity).is_some_and(|devices| {
             devices
@@ -43,9 +44,9 @@ pub fn client_entity_by_device_object(
 }
 
 pub fn add_client(
-    world: &mut ecs::World,
-    seat_entity: ecs::Entity,
-    client_entity: ecs::Entity,
+    world: &mut world::World,
+    seat_entity: entity::Entity,
+    client_entity: entity::Entity,
 ) -> anyhow::Result<()> {
     if world.get::<ecs::SeatName>(client_entity).is_some() {
         log::error!("Could not add client: client is already a member of a seat");
@@ -145,9 +146,9 @@ pub fn add_client(
 }
 
 pub fn is_active_client(
-    world: &ecs::World,
-    seat_entity: ecs::Entity,
-    client_entity: ecs::Entity,
+    world: &world::World,
+    seat_entity: entity::Entity,
+    client_entity: entity::Entity,
 ) -> bool {
     world
         .get::<ecs::ActiveClient>(seat_entity)
@@ -155,9 +156,9 @@ pub fn is_active_client(
 }
 
 pub fn open_client(
-    world: &mut ecs::World,
-    seat_entity: ecs::Entity,
-    client_entity: ecs::Entity,
+    world: &mut world::World,
+    seat_entity: entity::Entity,
+    client_entity: entity::Entity,
 ) -> anyhow::Result<()> {
     let seat_name = seat_name(world, seat_entity)?;
     let session_id = client_session_id(world, client_entity)?;
@@ -202,9 +203,9 @@ pub fn open_client(
 }
 
 pub fn disable_client(
-    world: &mut ecs::World,
-    seat_entity: ecs::Entity,
-    client_entity: ecs::Entity,
+    world: &mut world::World,
+    seat_entity: entity::Entity,
+    client_entity: entity::Entity,
 ) -> anyhow::Result<()> {
     if seat_state(world, client_entity)? != SeatState::Enabled {
         log::error!("Could not disable client: client is not active");
@@ -257,9 +258,9 @@ pub fn disable_client(
 }
 
 pub fn ack_disable_client(
-    world: &mut ecs::World,
-    seat_entity: ecs::Entity,
-    client_entity: ecs::Entity,
+    world: &mut world::World,
+    seat_entity: entity::Entity,
+    client_entity: entity::Entity,
 ) -> anyhow::Result<()> {
     if seat_state(world, client_entity)? != SeatState::PendingDisabled {
         log::error!("Could not ack disable: client is not pending disable");
@@ -282,9 +283,9 @@ pub fn ack_disable_client(
 }
 
 pub fn set_next_session(
-    world: &mut ecs::World,
-    seat_entity: ecs::Entity,
-    client_entity: ecs::Entity,
+    world: &mut world::World,
+    seat_entity: entity::Entity,
+    client_entity: entity::Entity,
     session: u32,
 ) -> anyhow::Result<()> {
     if seat_state(world, client_entity)? != SeatState::Enabled {
@@ -349,9 +350,9 @@ pub fn set_next_session(
 }
 
 pub fn remove_client(
-    world: &mut ecs::World,
-    seat_entity: ecs::Entity,
-    client_entity: ecs::Entity,
+    world: &mut world::World,
+    seat_entity: entity::Entity,
+    client_entity: entity::Entity,
 ) -> anyhow::Result<()> {
     if world
         .get::<ecs::NextClient>(seat_entity)
@@ -420,9 +421,9 @@ pub fn remove_client(
 }
 
 pub fn open_device(
-    world: &mut ecs::World,
-    seat_entity: ecs::Entity,
-    client_entity: ecs::Entity,
+    world: &mut world::World,
+    seat_entity: entity::Entity,
+    client_entity: entity::Entity,
     device: seat_v1::device::Device,
     path: &str,
 ) {
@@ -564,7 +565,7 @@ pub fn open_device(
     }
 }
 
-pub fn refresh_current_vts(world: &mut ecs::World, seat_entities: &[ecs::Entity]) {
+pub fn refresh_current_vts(world: &mut world::World, seat_entities: &[entity::Entity]) {
     for seat_entity in seat_entities.iter().copied() {
         if !is_vt_bound(world, seat_entity) {
             continue;
@@ -578,8 +579,8 @@ pub fn refresh_current_vts(world: &mut ecs::World, seat_entities: &[ecs::Entity]
 }
 
 pub fn handle_vt_signal(
-    world: &mut ecs::World,
-    seat_entities: &[ecs::Entity],
+    world: &mut world::World,
+    seat_entities: &[entity::Entity],
     signal: signals::Signal,
 ) -> Vec<(u32, session_core_v1::ActiveState)> {
     let mut session_updates = Vec::new();
@@ -616,9 +617,9 @@ pub fn handle_vt_signal(
 }
 
 pub fn sync_states(
-    world: &mut ecs::World,
-    seat_entities: &[ecs::Entity],
-    session_entities: &[ecs::Entity],
+    world: &mut world::World,
+    seat_entities: &[entity::Entity],
+    session_entities: &[entity::Entity],
 ) {
     let active_vts = seat_entities
         .iter()
@@ -667,7 +668,7 @@ pub fn sync_states(
     }
 }
 
-fn activate(world: &mut ecs::World, seat_entity: ecs::Entity) -> anyhow::Result<()> {
+fn activate(world: &mut world::World, seat_entity: entity::Entity) -> anyhow::Result<()> {
     if world.get::<ecs::ActiveClient>(seat_entity).is_some() {
         return Ok(());
     }
@@ -717,7 +718,7 @@ fn activate(world: &mut ecs::World, seat_entity: ecs::Entity) -> anyhow::Result<
     Ok(())
 }
 
-fn release_vt(world: &mut ecs::World, seat_entity: ecs::Entity) -> anyhow::Result<Option<u32>> {
+fn release_vt(world: &mut world::World, seat_entity: entity::Entity) -> anyhow::Result<Option<u32>> {
     refresh_current_vts(world, &[seat_entity]);
     let cur_vt = world
         .get::<ecs::CurrentVt>(seat_entity)
@@ -741,7 +742,7 @@ fn release_vt(world: &mut ecs::World, seat_entity: ecs::Entity) -> anyhow::Resul
     Ok(Some(released_vt))
 }
 
-fn activate_vt(world: &mut ecs::World, seat_entity: ecs::Entity) -> anyhow::Result<Option<u32>> {
+fn activate_vt(world: &mut world::World, seat_entity: entity::Entity) -> anyhow::Result<Option<u32>> {
     let acquired_vt = current_vt()?;
     log::debug!("Activating VT");
     terminal::Terminal::open(acquired_vt)?.ack_acquire()?;
@@ -785,27 +786,27 @@ fn current_vt() -> anyhow::Result<u32> {
     Ok(u32::from(tty0fd.current_vt()?))
 }
 
-fn is_vt_bound(world: &ecs::World, seat_entity: ecs::Entity) -> bool {
+fn is_vt_bound(world: &world::World, seat_entity: entity::Entity) -> bool {
     world
         .get::<ecs::SeatMode>(seat_entity)
         .is_some_and(|mode| mode.0 == ecs::SeatKind::VtBound)
 }
 
-fn seat_name(world: &ecs::World, seat_entity: ecs::Entity) -> anyhow::Result<String> {
+fn seat_name(world: &world::World, seat_entity: entity::Entity) -> anyhow::Result<String> {
     world
         .get::<ecs::SeatName>(seat_entity)
         .map(|seat| seat.0.clone())
         .ok_or_else(|| anyhow::anyhow!("configured seat has no name"))
 }
 
-fn seat_mode(world: &ecs::World, seat_entity: ecs::Entity) -> anyhow::Result<ecs::SeatKind> {
+fn seat_mode(world: &world::World, seat_entity: entity::Entity) -> anyhow::Result<ecs::SeatKind> {
     world
         .get::<ecs::SeatMode>(seat_entity)
         .map(|mode| mode.0)
         .ok_or_else(|| anyhow::anyhow!("configured seat has no mode"))
 }
 
-fn seat_state(world: &ecs::World, client_entity: ecs::Entity) -> anyhow::Result<SeatState> {
+fn seat_state(world: &world::World, client_entity: entity::Entity) -> anyhow::Result<SeatState> {
     world
         .get::<ecs::SeatState>(client_entity)
         .map(|state| state.0)
@@ -813,8 +814,8 @@ fn seat_state(world: &ecs::World, client_entity: ecs::Entity) -> anyhow::Result<
 }
 
 fn client_session_id(
-    world: &ecs::World,
-    client_entity: ecs::Entity,
+    world: &world::World,
+    client_entity: entity::Entity,
 ) -> anyhow::Result<session::SessionId> {
     world
         .get::<ecs::Session>(client_entity)

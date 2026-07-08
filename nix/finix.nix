@@ -6,6 +6,7 @@
 }:
 let
   cfg = config.services.sessiond;
+  lingerUsersScript = import ./linger-users.nix { inherit lib pkgs cfg; };
 in
 {
   imports = [ ./common.nix ];
@@ -28,11 +29,19 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    finit.services.sessiond = {
-      description = "session management daemon";
-      conditions = [ ];
-      command = "${cfg.package}/bin/sessiond --seat-user ${cfg.seat.user} --seat-group ${cfg.seat.group}";
-      log = true;
+    finit = {
+      services.sessiond = {
+        description = "session management daemon";
+        conditions = [ ];
+        command = "${cfg.package}/bin/sessiond --seat-user ${cfg.settings.seat.user} --seat-group ${cfg.settings.seat.group}";
+        log = true;
+      };
+      tasks.sessiond-linger-users = lib.mkIf (cfg.settings.users != { }) {
+        description = "sessiond linger users";
+        conditions = [ ];
+        command = "${lingerUsersScript}";
+        log = true;
+      };
     };
 
     services.polkit.package = pkgs.callPackage ./polkit {

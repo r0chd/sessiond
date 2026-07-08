@@ -6,6 +6,7 @@
 }:
 let
   cfg = config.services.sessiond;
+  lingerUsersScript = import ./linger-users.nix { inherit lib pkgs cfg; };
 in
 {
   imports = [ ./common.nix ];
@@ -33,9 +34,23 @@ in
       wantedBy = [ "default.target" ];
 
       serviceConfig = {
-        ExecStart = "${cfg.package}/bin/sessiond --seat-user ${cfg.seat.user} --seat-group ${cfg.seat.group}";
+        ExecStart = "${cfg.package}/bin/sessiond --seat-user ${cfg.settings.seat.user} --seat-group ${cfg.settings.seat.group}";
         Environment = "LOG_LEVEL=info";
         Delegate = true;
+      };
+    };
+
+    systemd.services.sessiond-linger-users = lib.mkIf (cfg.settings.users != { }) {
+      description = "sessiond linger users";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "sessiond.service" ];
+      requires = [ "sessiond.service" ];
+
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${lingerUsersScript}";
+        StateDirectory = "sessiond";
+        WorkingDirectory = "/var/lib/sessiond";
       };
     };
 

@@ -124,6 +124,7 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
                 #[cfg(feature = "consolekit")]
                 self.sync_consolekit_session(session_id, entity);
                 let _ = self.remove_session(session_id);
+                crate::user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
             }
             session_core_session::Event::Kill => {
                 log::info!(session_id = session_id.as_raw(); "kill requested");
@@ -139,6 +140,7 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
                 #[cfg(feature = "consolekit")]
                 self.sync_consolekit_session(session_id, entity);
                 let _ = self.remove_session(session_id);
+                crate::user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
             }
             session_core_session::Event::Lock => {
                 log::info!(session_id = session_id.as_raw(); "lock requested");
@@ -234,9 +236,11 @@ pub fn sync_vt_session_states(
     world: &mut world::World,
     seat_entities: &[entity::Entity],
     session_entities: &[entity::Entity],
+    user_entities: &[entity::Entity],
 ) {
     seat::refresh_current_vts(world, seat_entities);
     seat::sync_states(world, seat_entities, session_entities);
+    crate::user::sync_all(world, user_entities, session_entities);
 }
 
 pub fn set_state(

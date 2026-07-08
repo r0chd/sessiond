@@ -12,7 +12,7 @@ use hyprwire::client;
 use owo_colors::OwoColorize;
 use rustix::process;
 use serde_json::json;
-use session_core_v1::{session_core_manager, session_core_session};
+use session_core_v1::{session_core_manager, session_core_session, session_core_user};
 
 struct Session {
     id: u32,
@@ -27,8 +27,19 @@ struct Session {
     done: bool,
 }
 
+struct User {
+    uid: u32,
+    object: session_core_user::SessionCoreUser,
+    username: String,
+    lingering: bool,
+    state: session_core_v1::UserState,
+    not_found: bool,
+    done: bool,
+}
+
 struct State {
     sessions: Vec<Session>,
+    users: Vec<User>,
     done: bool,
     error: Option<String>,
 }
@@ -63,6 +74,24 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for State {
 }
 
 impl State {
+    fn add_user(&mut self, manager: &session_core_manager::SessionCoreManager, uid: u32) {
+        let Some(object) = manager.send_get_user::<Self>(uid) else {
+            self.error = Some(format!("failed to create user object for uid {uid}"));
+            self.done = true;
+            return;
+        };
+
+        self.users.push(User {
+            uid,
+            object,
+            username: String::new(),
+            lingering: false,
+            state: session_core_v1::UserState::Offline,
+            not_found: false,
+            done: false,
+        });
+    }
+
     fn add_session(&mut self, manager: &session_core_manager::SessionCoreManager, session_id: u32) {
         let Some(object) = manager.send_get_session::<Self>(session_id) else {
             self.error = Some(format!(
@@ -124,6 +153,36 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for State {
     }
 }
 
+impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for State {
+    fn event(
+        &mut self,
+        object: &session_core_user::SessionCoreUser,
+        event: <session_core_user::SessionCoreUser as hyprwire::Object>::Event<'_>,
+    ) {
+        let Some(user) = self.users.iter_mut().find(|user| user.object == *object) else {
+            return;
+        };
+
+        match event {
+            session_core_user::Event::Uid { uid } => user.uid = uid,
+            session_core_user::Event::Username { username } => user.username = username,
+            session_core_user::Event::Lingering { lingering } => user.lingering = lingering != 0,
+            session_core_user::Event::State { state } => user.state = state,
+            session_core_user::Event::Done | session_core_user::Event::Ok => {
+                user.done = true;
+            }
+            session_core_user::Event::NotFound => {
+                user.not_found = true;
+                user.done = true;
+            }
+            session_core_user::Event::Error { code: _, message } => {
+                self.error = Some(message);
+                user.done = true;
+            }
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum Command {
     #[command(
@@ -132,6 +191,12 @@ enum Command {
         arg_required_else_help = true
     )]
     Session(SessionCommand),
+    #[command(
+        subcommand,
+        about = "inspect and manage users",
+        arg_required_else_help = true
+    )]
+    User(UserCommand),
     #[command(about = "reboot the system")]
     Reboot,
     #[command(about = "power off the system")]
@@ -209,6 +274,28 @@ enum SessionCommand {
     },
 }
 
+#[derive(Subcommand)]
+enum UserCommand {
+    #[command(about = "list users from active sessions")]
+    List {
+        #[arg(long, help = "emit machine-readable JSON output")]
+        json: bool,
+    },
+    #[command(about = "enable or disable lingering for a user")]
+    Linger {
+        #[arg(value_name = "UID", help = "user id to change")]
+        uid: u32,
+        #[arg(value_name = "STATE", help = "on to enable, off to disable")]
+        state: LingerState,
+    },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum LingerState {
+    On,
+    Off,
+}
+
 #[derive(Parser)]
 #[command(
     name = "sessionctl",
@@ -282,6 +369,16 @@ const fn active_state_name(state: session_core_v1::ActiveState) -> &'static str 
     }
 }
 
+const fn user_state_name(state: session_core_v1::UserState) -> &'static str {
+    match state {
+        session_core_v1::UserState::Offline => "offline",
+        session_core_v1::UserState::Lingering => "lingering",
+        session_core_v1::UserState::Online => "online",
+        session_core_v1::UserState::Active => "active",
+        session_core_v1::UserState::Closing => "closing",
+    }
+}
+
 fn print_json(value: &serde_json::Value) -> anyhow::Result<()> {
     println!("{}", serde_json::to_string_pretty(value)?);
     Ok(())
@@ -298,6 +395,7 @@ fn main() -> anyhow::Result<()> {
 
     let mut state = State {
         sessions: Vec::new(),
+        users: Vec::new(),
         done: false,
         error: None,
     };
@@ -523,6 +621,130 @@ fn main() -> anyhow::Result<()> {
                 if let Some(err) = state.error {
                     eprintln!("{} {err}", "error:".red());
                 }
+            }
+        },
+        Command::User(command) => match command {
+            UserCommand::List { json } => {
+                let mut uids = state
+                    .sessions
+                    .iter()
+                    .map(|session| session.uid)
+                    .collect::<Vec<_>>();
+                uids.sort_unstable();
+                uids.dedup();
+
+                for uid in uids {
+                    state.add_user(&manager, uid);
+                }
+
+                while state.users.iter().any(|user| !user.done) {
+                    event_queue.dispatch_events(&mut state, true)?;
+                }
+
+                if let Some(err) = state.error.take() {
+                    anyhow::bail!("{err}");
+                }
+
+                let users = state
+                    .users
+                    .iter()
+                    .filter(|user| !user.not_found)
+                    .collect::<Vec<_>>();
+
+                if json {
+                    return print_json(&json!({
+                        "users": users.iter().map(|user| {
+                            json!({
+                                "uid": user.uid,
+                                "username": user.username,
+                                "lingering": user.lingering,
+                                "state": user_state_name(user.state),
+                            })
+                        }).collect::<Vec<_>>(),
+                    }));
+                }
+
+                if users.is_empty() {
+                    println!("No users found.");
+                    return Ok(());
+                }
+
+                let uid_w = users
+                    .iter()
+                    .map(|user| user.uid.to_string().len())
+                    .max()
+                    .unwrap_or(0)
+                    .max(3);
+                let user_w = users
+                    .iter()
+                    .map(|user| user.username.len())
+                    .max()
+                    .unwrap_or(0)
+                    .max(4);
+                let state_w = users
+                    .iter()
+                    .map(|user| user_state_name(user.state).len())
+                    .max()
+                    .unwrap_or(0)
+                    .max(5);
+
+                println!(
+                    "  {:<uid_w$}  {:<user_w$}  {:<state_w$}  LINGER",
+                    "UID", "USER", "STATE"
+                );
+                println!("  {}", "─".repeat(uid_w + 2 + user_w + 2 + state_w + 2 + 6));
+                for user in users {
+                    println!(
+                        "  {:<uid_w$}  {:<user_w$}  {:<state_w$}  {}",
+                        user.uid,
+                        user.username,
+                        user_state_name(user.state),
+                        if user.lingering { "yes" } else { "no" },
+                    );
+                }
+            }
+            UserCommand::Linger {
+                uid,
+                state: linger_state,
+            } => {
+                state.add_user(&manager, uid);
+
+                while state.users.iter().any(|user| !user.done) {
+                    event_queue.dispatch_events(&mut state, true)?;
+                }
+
+                if let Some(err) = state.error.take() {
+                    anyhow::bail!("{err}");
+                }
+
+                let Some(user) = state.users.iter().find(|user| user.uid == uid) else {
+                    unreachable!();
+                };
+
+                if user.not_found {
+                    anyhow::bail!("no such user: {uid}");
+                }
+
+                let object = user.object.clone();
+                let lingering = matches!(linger_state, LingerState::On);
+
+                if let Some(user) = state.users.iter_mut().find(|user| user.uid == uid) {
+                    user.done = false;
+                }
+                object.send_set_lingering(u32::from(lingering));
+
+                while state.users.iter().any(|user| !user.done) {
+                    event_queue.dispatch_events(&mut state, true)?;
+                }
+
+                if let Some(err) = state.error.take() {
+                    anyhow::bail!("{err}");
+                }
+
+                println!(
+                    "lingering {} for uid {uid}",
+                    if lingering { "enabled" } else { "disabled" }
+                );
             }
         },
         Command::Completions { shell: _ } => unreachable!(),

@@ -1,4 +1,6 @@
-use crate::{device, seat, seat_v1, session, session_core_session, session_core_v1};
+use crate::{
+    device, seat, seat_v1, session, session_core_session, session_core_user, session_core_v1,
+};
 use bevy_ecs::prelude::*;
 use std::os::fd;
 use std::{path, time};
@@ -38,6 +40,24 @@ pub fn insert_session(
         cmd.insert(SeatEntity(entity));
     }
     cmd.id()
+}
+
+pub fn insert_user(
+    world: &mut World,
+    uid: u32,
+    username: String,
+    lingering: bool,
+    state: session_core_v1::UserState,
+) -> Entity {
+    world
+        .spawn((
+            Uid(uid),
+            Username(username),
+            Lingering(lingering),
+            UserState(state),
+            UserObjects(Vec::new()),
+        ))
+        .id()
 }
 
 pub fn insert_client(world: &mut World, object: seat_v1::seat::Seat) -> Entity {
@@ -88,6 +108,15 @@ pub struct Uid(pub u32);
 
 #[derive(Component)]
 pub struct Username(pub String);
+
+#[derive(Component)]
+pub struct Lingering(pub bool);
+
+#[derive(Component)]
+pub struct UserState(pub session_core_v1::UserState);
+
+#[derive(Component)]
+pub struct UserObjects(pub Vec<session_core_user::SessionCoreUser>);
 
 #[derive(Component)]
 pub struct Vt(pub u32);

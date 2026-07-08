@@ -57,6 +57,15 @@
    <arg name="uid" type="uint" summary="user ID of the session to query"/>
    <returns iface="session_core_session"/>
   </c2s>
+  <c2s name="get_user">
+   <description summary="create a per-user info object">
+    Creates a session_core_user object for the given uid. The daemon
+    immediately pushes all fields, followed by done. If uid does not
+    correspond to a known user, not_found is sent instead.
+   </description>
+   <arg name="uid" type="uint" summary="user ID to query"/>
+   <returns iface="session_core_user"/>
+  </c2s>
   <c2s name="reboot">
    <description summary="reboot the system"/>
   </c2s>
@@ -148,6 +157,65 @@
    <description summary="destroy this object"/>
   </c2s>
  </object>
+
+ <object name="session_core_user" version="1">
+  <description summary="per-user information">
+   Provides information about a single user, identified by uid.
+   All fields are pushed immediately on creation, followed by done.
+  </description>
+  <s2c name="uid">
+   <arg name="uid" type="uint" summary="user id"/>
+  </s2c>
+  <s2c name="username">
+   <arg name="username" type="varchar" summary="username"/>
+  </s2c>
+  <s2c name="lingering">
+   <arg name="lingering" type="uint" summary="non-zero if the user has lingering enabled"/>
+  </s2c>
+  <s2c name="state">
+   <description summary="aggregate user state">
+    Reflects whether the user currently has sessions and whether any of
+    them is in the foreground, combined with the lingering flag.
+    Re-sent whenever it changes.
+   </description>
+   <arg name="state" type="enum" interface="user_state" summary="user state"/>
+  </s2c>
+  <s2c name="done">
+   <description summary="initial field dump complete"/>
+  </s2c>
+  <s2c name="not_found">
+   <description summary="no such user">
+    Sent when the uid passed to get_user does not correspond to a known
+    user. The client should release this object.
+   </description>
+  </s2c>
+  <s2c name="ok">
+   <description summary="last operation completed successfully"/>
+  </s2c>
+  <s2c name="error">
+   <description summary="last operation failed"/>
+   <arg name="code" type="enum" interface="error_code" summary="error kind"/>
+   <arg name="message" type="varchar" summary="human-readable error detail"/>
+  </s2c>
+  <c2s name="set_lingering">
+   <description summary="enable or disable lingering for this user">
+    Persists the lingering flag so it survives across sessions. Requires
+    root, or that the caller's uid matches this user's uid.
+   </description>
+   <arg name="lingering" type="uint" summary="non-zero to enable, zero to disable"/>
+  </c2s>
+  <c2s name="destroy" destructor="true">
+   <description summary="destroy this object"/>
+  </c2s>
+ </object>
+
+ <enum name="user_state">
+  <value idx="0" name="offline" summary="no sessions and lingering disabled"/>
+  <value idx="1" name="lingering" summary="no sessions but lingering enabled"/>
+  <value idx="2" name="online" summary="has a session, none in the foreground"/>
+  <value idx="3" name="active" summary="has a session in the foreground"/>
+  <value idx="4" name="closing" summary="has sessions, all of them closing"/>
+ </enum>
 
  <enum name="active_state">
   <value idx="0" name="online" summary="session is logged in but not in the foreground"/>

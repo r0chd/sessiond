@@ -1,0 +1,21 @@
+when:
+  - event: ["push", "pull_request"]
+
+engine: nixery
+
+dependencies:
+  nixpkgs:
+    - nixfmt-rfc-style
+    - taplo
+    - fd
+    - cargo
+    - rustfmt
+
+steps:
+  - name: nix fmt
+    command: |
+      fd -t f -e nix -x nixfmt --check '{}'
+      fd -t f -e toml -x taplo fmt --check '{}'
+
+  - name: cargo fmt
+    command: cargo fmt --check

@@ -1,0 +1,14 @@
+when:
+  - event: ["push", "pull_request"]
+
+engine: nixery
+
+dependencies:
+  nixpkgs:
+    - cargo
+    - linux-pam
+    - pkg-config
+
+steps:
+  - name: cargo check
+    command: cargo check

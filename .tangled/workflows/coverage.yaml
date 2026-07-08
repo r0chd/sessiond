@@ -1,0 +1,20 @@
+when:
+  - event: ["push", "pull_request"]
+
+engine: nixery
+
+dependencies:
+  nixpkgs:
+    - cargo
+    - cargo-llvm-cov
+    - linux-pam
+    - pkg-config
+    - jq
+
+steps:
+  - name: coverage
+    command: |
+      cargo llvm-cov --json --summary-only --output-path coverage.json
+      pct=$(jq '.data[0].totals.lines.percent' coverage.json)
+      printf '{"schemaVersion":1,"label":"coverage","message":"%.1f%%","color":"brightgreen"}' "$pct" > badge.json
+      cat badge.json

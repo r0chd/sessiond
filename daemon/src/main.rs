@@ -21,13 +21,14 @@ mod ecs;
 mod seat;
 mod session;
 mod terminal;
+mod user;
 
 use bevy_ecs::{entity, world};
 use calloop::{generic, signals};
 use clap::Parser;
 use hyprwire::server;
 use rustix::{net, process, system};
-use session_core_v1::{session_core_manager, session_core_session};
+use session_core_v1::{session_core_manager, session_core_session, session_core_user};
 use session_management_v1::session_manager;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
@@ -93,6 +94,7 @@ struct Sessiond {
     info_managers: Vec<session_core_manager::SessionCoreManager>,
     cgroup_manager: cgroup::CgroupManager,
     session_entities: Vec<entity::Entity>,
+    user_entities: Vec<entity::Entity>,
     seat_entities: Vec<entity::Entity>,
     client_entities: Vec<entity::Entity>,
     seat_access: SeatAccess,
@@ -133,6 +135,7 @@ impl session_core_v1::SessionCoreV1Handler for Sessiond {
             &mut self.world,
             &self.seat_entities,
             &self.session_entities,
+            &self.user_entities,
         );
 
         let session_ids = session::entities(&self.world, &self.session_entities)
@@ -247,6 +250,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
                 self.session_entities.push(session_entity);
                 #[cfg(feature = "consolekit")]
                 self.sync_consolekit_session(session_id, session_entity);
+                user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
 
                 object.send_session_created(
                     session_id.as_raw(),
@@ -288,6 +292,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
                     }
                 }
                 let _ = self.remove_session(session_id);
+                user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
 
                 for manager in &self.info_managers {
                     manager.send_session_removed(session_id.as_raw());
@@ -326,6 +331,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
                     &mut self.world,
                     &self.seat_entities,
                     &self.session_entities,
+                    &self.user_entities,
                 );
 
                 let session_id = session::SessionId::from_raw(session_id);
@@ -352,6 +358,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
                     &mut self.world,
                     &self.seat_entities,
                     &self.session_entities,
+                    &self.user_entities,
                 );
 
                 let Ok(Some(session_id)) = self.cgroup_manager.find_session_by_pid(pid) else {
@@ -383,6 +390,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
                     &mut self.world,
                     &self.seat_entities,
                     &self.session_entities,
+                    &self.user_entities,
                 );
 
                 if let Some(entity) =
@@ -400,6 +408,23 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
 
                 log::warn!(uid; "get_session_by_uid requested for unknown session");
                 session_core_session.send_destroyed();
+            }
+            session_core_manager::Event::GetUser {
+                session_core_user,
+                uid,
+            } => {
+                let Some(entity) = user::get_or_create(
+                    &mut self.world,
+                    &mut self.user_entities,
+                    &self.session_entities,
+                    uid,
+                ) else {
+                    log::warn!(uid; "get_user requested for unknown user");
+                    session_core_user.send_not_found();
+                    return;
+                };
+
+                user::add_user_object(&mut self.world, entity, session_core_user);
             }
             session_core_manager::Event::Reboot => {
                 let Some(client) = object.client() else {
@@ -619,6 +644,7 @@ fn main() -> anyhow::Result<()> {
         info_managers: Vec::new(),
         cgroup_manager,
         session_entities: Vec::new(),
+        user_entities: Vec::new(),
         seat_entities: Vec::new(),
         client_entities: Vec::new(),
         seat_access,
@@ -740,6 +766,8 @@ fn main() -> anyhow::Result<()> {
                     state.sync_consolekit_session(session_id, entity);
                 }
             }
+
+            user::sync_all(&mut state.world, &state.user_entities, &state.session_entities);
         })?;
 
     event_loop.run(None, &mut sessiond, |_| {})?;

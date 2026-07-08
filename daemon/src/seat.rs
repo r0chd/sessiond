@@ -135,7 +135,9 @@ pub fn add_client(
     if let Some(mut clients) = world.get_mut::<ecs::SeatClients>(seat_entity) {
         clients.0.push(client_entity);
     }
-    world.entity_mut(seat_entity).insert(ecs::ActiveClient(client_entity));
+    world
+        .entity_mut(seat_entity)
+        .insert(ecs::ActiveClient(client_entity));
 
     if let Some(object) = world.get::<ecs::SeatObject>(client_entity) {
         object.0.send_enabled();
@@ -195,8 +197,12 @@ pub fn open_client(
     if let Some(object) = world.get::<ecs::SeatObject>(client_entity) {
         object.0.send_enabled();
     }
-    world.entity_mut(client_entity).insert(ecs::SeatState(SeatState::Enabled));
-    world.entity_mut(seat_entity).insert(ecs::ActiveClient(client_entity));
+    world
+        .entity_mut(client_entity)
+        .insert(ecs::SeatState(SeatState::Enabled));
+    world
+        .entity_mut(seat_entity)
+        .insert(ecs::ActiveClient(client_entity));
     log::info!("Opened client {} on {}", session_id.as_raw(), seat_name);
 
     Ok(())
@@ -248,7 +254,9 @@ pub fn disable_client(
         }
     }
 
-    world.entity_mut(client_entity).insert(ecs::SeatState(SeatState::PendingDisabled));
+    world
+        .entity_mut(client_entity)
+        .insert(ecs::SeatState(SeatState::PendingDisabled));
     if let Some(object) = world.get::<ecs::SeatObject>(client_entity) {
         object.0.send_disabled();
     }
@@ -269,7 +277,9 @@ pub fn ack_disable_client(
 
     let session_id = client_session_id(world, client_entity)?;
     let seat_name = seat_name(world, seat_entity)?;
-    world.entity_mut(client_entity).insert(ecs::SeatState(SeatState::Disabled));
+    world
+        .entity_mut(client_entity)
+        .insert(ecs::SeatState(SeatState::Disabled));
     log::info!("Disabled client {} on {}", session_id.as_raw(), seat_name);
 
     if !is_active_client(world, seat_entity, client_entity) {
@@ -343,7 +353,9 @@ pub fn set_next_session(
         session.as_raw(),
         seat_name
     );
-    world.entity_mut(seat_entity).insert(ecs::NextClient(target));
+    world
+        .entity_mut(seat_entity)
+        .insert(ecs::NextClient(target));
     disable_client(world, seat_entity, client_entity)?;
 
     Ok(())
@@ -572,7 +584,9 @@ pub fn refresh_current_vts(world: &mut world::World, seat_entities: &[entity::En
         }
 
         match current_vt() {
-            Ok(vt) => { world.entity_mut(seat_entity).insert(ecs::CurrentVt(vt)); }
+            Ok(vt) => {
+                world.entity_mut(seat_entity).insert(ecs::CurrentVt(vt));
+            }
             Err(err) => log::error!("Could not query active VT: {err}"),
         }
     }
@@ -674,42 +688,43 @@ fn activate(world: &mut world::World, seat_entity: entity::Entity) -> anyhow::Re
     }
 
     let seat_name = seat_name(world, seat_entity)?;
-    let next_client = if let Some(next_client) = world.entity_mut(seat_entity).take::<ecs::NextClient>() {
-        log::debug!("Activating next queued client on {seat_name}");
-        Some(next_client.0)
-    } else {
-        let clients = world
-            .get::<ecs::SeatClients>(seat_entity)
-            .map(|clients| clients.0.clone())
-            .unwrap_or_default();
-        if clients.is_empty() {
-            log::info!("No clients on {seat_name} to activate");
-            return Err(anyhow::anyhow!("No clients on {seat_name} to activate"));
-        }
-
-        if is_vt_bound(world, seat_entity) {
-            let cur_vt = world
-                .get::<ecs::CurrentVt>(seat_entity)
-                .map_or(0, |vt| vt.0);
-            let client = clients.iter().copied().find(|client| {
-                world
-                    .get::<ecs::Session>(*client)
-                    .is_some_and(|session| session.0.as_raw() == cur_vt)
-            });
-            if client.is_some() {
-                log::debug!("Activating client belonging to VT {cur_vt}");
-            } else {
-                log::info!("No clients belonging to VT {cur_vt} to activate");
-                return Err(anyhow::anyhow!(
-                    "No clients belonging to VT {cur_vt} to activate"
-                ));
-            }
-            client
+    let next_client =
+        if let Some(next_client) = world.entity_mut(seat_entity).take::<ecs::NextClient>() {
+            log::debug!("Activating next queued client on {seat_name}");
+            Some(next_client.0)
         } else {
-            log::debug!("Activating first client on {seat_name}");
-            clients.first().copied()
-        }
-    };
+            let clients = world
+                .get::<ecs::SeatClients>(seat_entity)
+                .map(|clients| clients.0.clone())
+                .unwrap_or_default();
+            if clients.is_empty() {
+                log::info!("No clients on {seat_name} to activate");
+                return Err(anyhow::anyhow!("No clients on {seat_name} to activate"));
+            }
+
+            if is_vt_bound(world, seat_entity) {
+                let cur_vt = world
+                    .get::<ecs::CurrentVt>(seat_entity)
+                    .map_or(0, |vt| vt.0);
+                let client = clients.iter().copied().find(|client| {
+                    world
+                        .get::<ecs::Session>(*client)
+                        .is_some_and(|session| session.0.as_raw() == cur_vt)
+                });
+                if client.is_some() {
+                    log::debug!("Activating client belonging to VT {cur_vt}");
+                } else {
+                    log::info!("No clients belonging to VT {cur_vt} to activate");
+                    return Err(anyhow::anyhow!(
+                        "No clients belonging to VT {cur_vt} to activate"
+                    ));
+                }
+                client
+            } else {
+                log::debug!("Activating first client on {seat_name}");
+                clients.first().copied()
+            }
+        };
 
     if let Some(client) = next_client {
         open_client(world, seat_entity, client)?;
@@ -718,7 +733,10 @@ fn activate(world: &mut world::World, seat_entity: entity::Entity) -> anyhow::Re
     Ok(())
 }
 
-fn release_vt(world: &mut world::World, seat_entity: entity::Entity) -> anyhow::Result<Option<u32>> {
+fn release_vt(
+    world: &mut world::World,
+    seat_entity: entity::Entity,
+) -> anyhow::Result<Option<u32>> {
     refresh_current_vts(world, &[seat_entity]);
     let cur_vt = world
         .get::<ecs::CurrentVt>(seat_entity)
@@ -742,11 +760,16 @@ fn release_vt(world: &mut world::World, seat_entity: entity::Entity) -> anyhow::
     Ok(Some(released_vt))
 }
 
-fn activate_vt(world: &mut world::World, seat_entity: entity::Entity) -> anyhow::Result<Option<u32>> {
+fn activate_vt(
+    world: &mut world::World,
+    seat_entity: entity::Entity,
+) -> anyhow::Result<Option<u32>> {
     let acquired_vt = current_vt()?;
     log::debug!("Activating VT");
     terminal::Terminal::open(acquired_vt)?.ack_acquire()?;
-    world.entity_mut(seat_entity).insert(ecs::CurrentVt(acquired_vt));
+    world
+        .entity_mut(seat_entity)
+        .insert(ecs::CurrentVt(acquired_vt));
 
     if world.get::<ecs::ActiveClient>(seat_entity).is_none() {
         activate(world, seat_entity)?;

@@ -249,7 +249,10 @@ pub fn path_display(world: &world::World, entity: entity::Entity) -> String {
     )
 }
 
-pub fn absolute_path_string(world: &world::World, entity: entity::Entity) -> anyhow::Result<String> {
+pub fn absolute_path_string(
+    world: &world::World,
+    entity: entity::Entity,
+) -> anyhow::Result<String> {
     let device_path = device_path(world, entity)?;
     Ok(path::absolute(&device_path)
         .unwrap_or(device_path)
@@ -263,7 +266,11 @@ pub fn last_object(world: &world::World, entity: entity::Entity) -> Option<&devi
         .and_then(|objects| objects.0.last())
 }
 
-pub fn contains_object(world: &world::World, entity: entity::Entity, object: &device::Device) -> bool {
+pub fn contains_object(
+    world: &world::World,
+    entity: entity::Entity,
+    object: &device::Device,
+) -> bool {
     world
         .get::<ecs::DeviceObjects>(entity)
         .is_some_and(|objects| objects.0.iter().any(|candidate| candidate == object))

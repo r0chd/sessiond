@@ -58,6 +58,33 @@ too, such as `gdm`, `sddm`, `greetd` or `hilsed`
 }
 ```
 
+## Manual
+
+### Build Dependencies
+
+- Rust
+- Cargo
+- `pkg-config`
+- PAM
+
+### Build
+
+```sh
+cargo build --workspace --release
+```
+
+For polkit support, build with the `consolekit` feature:
+
+```sh
+cargo build --workspace --release --features consolekit
+```
+
+Build outputs can be found in `target/release`:
+
+- `daemon`: the session daemon
+- `ctl`: the control client
+- `libpam.so`: the PAM module
+
 ## Other distributions
 
 TODO

@@ -1,6 +1,7 @@
 {
   pkgs,
   sessiond,
+  seattest,
   ...
 }:
 let
@@ -119,6 +120,7 @@ in
 
   environment.systemPackages = [
     polkitTestAction
+    seattest.packages.default
   ];
 
   users.users = {

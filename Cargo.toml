@@ -1,5 +1,5 @@
 [workspace]
-members = ["ctl", "daemon", "pam"]
+members = ["ctl", "daemon", "seat", "pam"]
 resolver = "3"
 
 [profile.dev]

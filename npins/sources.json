@@ -19,6 +19,18 @@
       "artifact": "nixexprs.tar.xz",
       "url": "https://releases.nixos.org/nixpkgs/nixpkgs-26.11pre1026211.9e92285f211d/nixexprs.tar.xz",
       "hash": "sha256-VGtEDss4T0hPTnlWiiaa29y/lXM9SxuSMVtzPYf3wS0="
+    },
+    "seattest": {
+      "type": "Git",
+      "repository": {
+        "type": "Git",
+        "url": "https://tangled.org/r0chd.pl/seattest"
+      },
+      "branch": "master",
+      "submodules": false,
+      "revision": "81b759ed1550fed377f831d4b370e05988ffd57b",
+      "url": null,
+      "hash": "sha256-D2hIbkCB5hdjil3+soydTqHitEB4nF+TaHJevCFX2GM="
     }
   },
   "version": 8

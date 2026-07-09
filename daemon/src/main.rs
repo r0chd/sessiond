@@ -24,6 +24,17 @@ mod terminal;
 mod user;
 
 #[cfg(test)]
+mod session_management_v1_client {
+    hyprwire::include_protocol!("session_management_v1");
+    pub use client::*;
+}
+#[cfg(test)]
+mod session_core_v1_client {
+    hyprwire::include_protocol!("session_core_v1");
+    pub use client::*;
+}
+
+#[cfg(test)]
 mod tests;
 
 use bevy_ecs::{entity, world};
@@ -161,6 +172,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
             return;
         };
 
+        #[cfg(not(test))]
         if !client.creds().uid.is_root() {
             log::warn!(uid = client.creds().uid.as_raw(); "rejected request from non-root client");
             return;
@@ -599,37 +611,18 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
     }
 }
 
-fn main() -> anyhow::Result<()> {
-    let args = Args::parse();
+struct DaemonConfig {
+    socket_path: path::PathBuf,
+    vtbound: bool,
+    seat_access: SeatAccess,
+    loop_signal_tx: Option<std::sync::mpsc::Sender<calloop::LoopSignal>>,
+}
 
-    let log_level = match env::var("LOG_LEVEL") {
-        Ok(log) if log == "trace" => log::LevelFilter::Trace,
-        Ok(log) if log == "debug" => log::LevelFilter::Debug,
-        Ok(log) if log == "warn" => log::LevelFilter::Warn,
-        Ok(log) if log == "error" => log::LevelFilter::Error,
-        Ok(log) if log == "off" => log::LevelFilter::Off,
-        _ => log::LevelFilter::Info,
-    };
-
-    env_logger::Builder::new()
-        .filter(Some("daemon"), log_level)
-        .init();
-
-    log::info!("sessiond daemon starting");
-
-    let seat_access = SeatAccess::new(
-        resolve_user(&args.seat_user)?,
-        resolve_group(&args.seat_group)?,
-    );
-
+fn run(config: DaemonConfig) -> anyhow::Result<()> {
     let mut event_loop = calloop::EventLoop::try_new()?;
     let loop_signal = event_loop.get_signal();
 
-    let cgroup_manager = cgroup::CgroupManager::new(event_loop.handle())?;
-
-    let vtbound = env::var("SESSIOND_VTBOUND")
-        .ok()
-        .is_none_or(|vtbound| vtbound == "1");
+    let cgroup_manager = cgroup::CgroupManager::new(event_loop.handle());
 
     fs::create_dir_all("/var/lib/sessiond")?;
 
@@ -641,7 +634,7 @@ fn main() -> anyhow::Result<()> {
         user_entities: Vec::new(),
         seat_entities: Vec::new(),
         client_entities: Vec::new(),
-        seat_access,
+        seat_access: config.seat_access,
         #[cfg(feature = "consolekit")]
         consolekit: consolekit::Server::start(),
         shutting_down: false,
@@ -652,7 +645,7 @@ fn main() -> anyhow::Result<()> {
     let seat_entity = ecs::insert_seat(
         &mut sessiond.world,
         "seat0".to_string(),
-        if vtbound {
+        if config.vtbound {
             ecs::SeatKind::VtBound
         } else {
             ecs::SeatKind::NonVtBound
@@ -679,9 +672,13 @@ fn main() -> anyhow::Result<()> {
         Err(e) => log::error!(error = e.to_string().as_str(); "failed to read lingering users"),
     }
 
-    let path = path::Path::new("/run/sessiond.sock");
+    let path = config.socket_path.as_path();
     let mut socket = server::Server::bind(&path)?;
     fs::set_permissions(path, fs::Permissions::from_mode(0o777))?;
+
+    if let Some(tx) = config.loop_signal_tx {
+        let _ = tx.send(event_loop.get_signal());
+    }
 
     socket
         .add_implementation::<session_management_v1::SessionManagementV1Impl, _>(&mut sessiond, 1);
@@ -784,9 +781,42 @@ fn main() -> anyhow::Result<()> {
 
     event_loop.run(None, &mut sessiond, |_| {})?;
 
-    let _ = fs::remove_file("/run/sessiond.sock");
+    let _ = fs::remove_file(&config.socket_path);
 
     Ok(())
+}
+
+fn main() -> anyhow::Result<()> {
+    let args = Args::parse();
+
+    let log_level = match env::var("LOG_LEVEL") {
+        Ok(log) if log == "trace" => log::LevelFilter::Trace,
+        Ok(log) if log == "debug" => log::LevelFilter::Debug,
+        Ok(log) if log == "warn" => log::LevelFilter::Warn,
+        Ok(log) if log == "error" => log::LevelFilter::Error,
+        Ok(log) if log == "off" => log::LevelFilter::Off,
+        _ => log::LevelFilter::Info,
+    };
+
+    env_logger::Builder::new()
+        .filter(Some("daemon"), log_level)
+        .init();
+
+    log::info!("sessiond daemon starting");
+
+    let vtbound = env::var("SESSIOND_VTBOUND")
+        .ok()
+        .is_none_or(|vtbound| vtbound == "1");
+
+    run(DaemonConfig {
+        socket_path: path::PathBuf::from("/run/sessiond.sock"),
+        vtbound,
+        seat_access: SeatAccess::new(
+            resolve_user(&args.seat_user)?,
+            resolve_group(&args.seat_group)?,
+        ),
+        loop_signal_tx: None,
+    })
 }
 
 fn resolve_user(user: &str) -> anyhow::Result<process::Uid> {

@@ -1,0 +1,401 @@
+use crate::session_core_v1_client::{session_core_manager, session_core_session};
+use crate::session_management_v1_client::session_manager;
+use crate::{run, DaemonConfig, SeatAccess};
+use hyprwire::client;
+use rustix::process;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::{path, thread};
+
+static SOCKET_ID: AtomicU32 = AtomicU32::new(0);
+
+fn unique_socket() -> path::PathBuf {
+    let id = SOCKET_ID.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!("sessiond-test-{}-{id}.sock", std::process::id()))
+}
+
+struct DaemonGuard(Option<(thread::JoinHandle<anyhow::Result<()>>, calloop::LoopSignal)>);
+
+impl DaemonGuard {
+    fn stop(mut self) {
+        if let Some((handle, signal)) = self.0.take() {
+            signal.stop();
+            handle.join().unwrap().unwrap();
+        }
+    }
+}
+
+impl Drop for DaemonGuard {
+    fn drop(&mut self) {
+        if let Some((_, signal)) = self.0.take() {
+            signal.stop();
+        }
+    }
+}
+
+fn start_daemon(socket_path: path::PathBuf) -> DaemonGuard {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let handle = thread::spawn(move || {
+        run(DaemonConfig {
+            socket_path,
+            vtbound: false,
+            seat_access: SeatAccess::new(process::Uid::from_raw(0), process::Gid::from_raw(0)),
+            loop_signal_tx: Some(tx),
+        })
+    });
+    let signal = rx.recv().expect("daemon did not start");
+    DaemonGuard(Some((handle, signal)))
+}
+
+struct MgmtState {
+    session_id: Option<u32>,
+}
+
+impl hyprwire::Dispatch<session_manager::SessionManager> for MgmtState {
+    fn event(
+        &mut self,
+        _: &session_manager::SessionManager,
+        event: <session_manager::SessionManager as hyprwire::Object>::Event<'_>,
+    ) {
+        let session_manager::Event::SessionCreated { session_id, .. } = event;
+        self.session_id = Some(session_id);
+    }
+}
+
+fn create_session(socket: &path::Path, uid: u32) -> u32 {
+    let mut state = MgmtState { session_id: None };
+    let mut sock = client::Client::connect(socket).unwrap();
+    let eq = sock.new_event_queue();
+    sock.add_implementation::<crate::session_management_v1_client::SessionManagementV1Impl>();
+    eq.wait_for_handshake(&mut state).unwrap();
+    let manager = sock
+        .bind::<session_manager::SessionManager, _>(&eq, &mut state, 1)
+        .unwrap();
+    manager.send_create_session(uid, "testuser".to_string(), 0, 1, String::new());
+    while state.session_id.is_none() {
+        eq.dispatch_events(&mut state, true).unwrap();
+    }
+    state.session_id.unwrap()
+}
+
+fn destroy_session(socket: &path::Path, session_id: u32) {
+    let mut state = MgmtState { session_id: None };
+    let mut sock = client::Client::connect(socket).unwrap();
+    let eq = sock.new_event_queue();
+    sock.add_implementation::<crate::session_management_v1_client::SessionManagementV1Impl>();
+    eq.wait_for_handshake(&mut state).unwrap();
+    let manager = sock
+        .bind::<session_manager::SessionManager, _>(&eq, &mut state, 1)
+        .unwrap();
+    manager.send_destroy_session(session_id);
+}
+
+struct CoreState {
+    sessions: Vec<u32>,
+    done: bool,
+}
+
+impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for CoreState {
+    fn event(
+        &mut self,
+        _: &session_core_manager::SessionCoreManager,
+        event: <session_core_manager::SessionCoreManager as hyprwire::Object>::Event<'_>,
+    ) {
+        match event {
+            session_core_manager::Event::Sessions { session_ids } => {
+                self.sessions.extend(session_ids);
+            }
+            session_core_manager::Event::Done => {
+                self.done = true;
+            }
+            _ => {}
+        }
+    }
+}
+
+impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for CoreState {
+    fn event(
+        &mut self,
+        _: &session_core_session::SessionCoreSession,
+        _: <session_core_session::SessionCoreSession as hyprwire::Object>::Event<'_>,
+    ) {
+    }
+}
+
+fn list_sessions(socket: &path::Path) -> Vec<u32> {
+    let mut state = CoreState {
+        sessions: Vec::new(),
+        done: false,
+    };
+    let mut sock = client::Client::connect(socket).unwrap();
+    let eq = sock.new_event_queue();
+    sock.add_implementation::<crate::session_core_v1_client::SessionCoreV1Impl>();
+    eq.wait_for_handshake(&mut state).unwrap();
+    let _manager = sock
+        .bind::<session_core_manager::SessionCoreManager, _>(&eq, &mut state, 1)
+        .unwrap();
+    while !state.done {
+        eq.dispatch_events(&mut state, true).unwrap();
+    }
+    state.sessions
+}
+
+#[test]
+fn create_session_returns_id() {
+    let socket = unique_socket();
+    let daemon = start_daemon(socket.clone());
+
+    let id = create_session(&socket, 1000);
+    assert_eq!(id, 1);
+
+    daemon.stop();
+}
+
+#[test]
+fn session_appears_in_core_list() {
+    let socket = unique_socket();
+    let daemon = start_daemon(socket.clone());
+
+    create_session(&socket, 1000);
+    let sessions = list_sessions(&socket);
+    assert!(sessions.contains(&1));
+
+    daemon.stop();
+}
+
+#[test]
+fn sequential_sessions_get_incrementing_ids() {
+    let socket = unique_socket();
+    let daemon = start_daemon(socket.clone());
+
+    let id1 = create_session(&socket, 1000);
+    let id2 = create_session(&socket, 1001);
+    assert_eq!(id1, 1);
+    assert_eq!(id2, 2);
+
+    daemon.stop();
+}
+
+// --- session-info helpers ---
+
+struct SessionInfoState {
+    uid: Option<u32>,
+    username: Option<String>,
+    session_id_field: Option<u32>,
+    session_done: bool,
+    session_destroyed: bool,
+    locked: bool,
+    unlocked: bool,
+    ok: bool,
+}
+
+impl SessionInfoState {
+    fn new() -> Self {
+        Self {
+            uid: None,
+            username: None,
+            session_id_field: None,
+            session_done: false,
+            session_destroyed: false,
+            locked: false,
+            unlocked: false,
+            ok: false,
+        }
+    }
+}
+
+impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for SessionInfoState {
+    fn event(
+        &mut self,
+        _: &session_core_manager::SessionCoreManager,
+        _: <session_core_manager::SessionCoreManager as hyprwire::Object>::Event<'_>,
+    ) {
+    }
+}
+
+impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for SessionInfoState {
+    fn event(
+        &mut self,
+        _: &session_core_session::SessionCoreSession,
+        event: <session_core_session::SessionCoreSession as hyprwire::Object>::Event<'_>,
+    ) {
+        match event {
+            session_core_session::Event::Uid { uid } => self.uid = Some(uid),
+            session_core_session::Event::Username { username } => {
+                self.username = Some(username);
+            }
+            session_core_session::Event::SessionId { session_id } => {
+                self.session_id_field = Some(session_id);
+            }
+            session_core_session::Event::Done => self.session_done = true,
+            session_core_session::Event::Destroyed => self.session_destroyed = true,
+            session_core_session::Event::Locked => self.locked = true,
+            session_core_session::Event::Unlocked => self.unlocked = true,
+            session_core_session::Event::Ok => self.ok = true,
+            _ => {}
+        }
+    }
+}
+
+fn connect_core(socket: &path::Path) -> (client::Client, hyprwire::EventQueue, SessionInfoState) {
+    let mut state = SessionInfoState::new();
+    let mut sock = client::Client::connect(socket).unwrap();
+    let eq = sock.new_event_queue();
+    sock.add_implementation::<crate::session_core_v1_client::SessionCoreV1Impl>();
+    eq.wait_for_handshake(&mut state).unwrap();
+    (sock, eq, state)
+}
+
+#[test]
+fn get_session_returns_fields() {
+    let socket = unique_socket();
+    let daemon = start_daemon(socket.clone());
+    let id = create_session(&socket, 1000);
+
+    let state = {
+        let (sock, eq, mut state) = connect_core(&socket);
+        let _manager = sock
+            .bind::<session_core_manager::SessionCoreManager, _>(&eq, &mut state, 1)
+            .unwrap();
+        let _session = _manager.send_get_session::<SessionInfoState>(id).unwrap();
+        while !state.session_done && !state.session_destroyed {
+            eq.dispatch_events(&mut state, false).unwrap();
+            if !state.session_done && !state.session_destroyed {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+        state
+    };
+
+    assert!(state.session_done);
+    assert_eq!(state.uid, Some(1000));
+    assert_eq!(state.username, Some("testuser".to_string()));
+    assert_eq!(state.session_id_field, Some(id));
+
+    daemon.stop();
+}
+
+#[test]
+fn get_session_unknown_returns_destroyed() {
+    let socket = unique_socket();
+    let daemon = start_daemon(socket.clone());
+
+    let state = {
+        let (sock, eq, mut state) = connect_core(&socket);
+        let _manager = sock
+            .bind::<session_core_manager::SessionCoreManager, _>(&eq, &mut state, 1)
+            .unwrap();
+        let _session = _manager.send_get_session::<SessionInfoState>(999).unwrap();
+        while !state.session_done && !state.session_destroyed {
+            eq.dispatch_events(&mut state, false).unwrap();
+            if !state.session_done && !state.session_destroyed {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+        state
+    };
+
+    assert!(state.session_destroyed);
+
+    daemon.stop();
+}
+
+#[test]
+fn get_session_by_uid_returns_session() {
+    let socket = unique_socket();
+    let daemon = start_daemon(socket.clone());
+    create_session(&socket, 1000);
+
+    let state = {
+        let (sock, eq, mut state) = connect_core(&socket);
+        let _manager = sock
+            .bind::<session_core_manager::SessionCoreManager, _>(&eq, &mut state, 1)
+            .unwrap();
+        let _session = _manager
+            .send_get_session_by_uid::<SessionInfoState>(1000)
+            .unwrap();
+        while !state.session_done && !state.session_destroyed {
+            eq.dispatch_events(&mut state, false).unwrap();
+            if !state.session_done && !state.session_destroyed {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+        state
+    };
+
+    assert!(state.session_done);
+    assert_eq!(state.uid, Some(1000));
+
+    daemon.stop();
+}
+
+#[test]
+fn lock_unlock_session() {
+    let socket = unique_socket();
+    let daemon = start_daemon(socket.clone());
+    let id = create_session(&socket, 1000);
+
+    let (sock, eq, mut state) = connect_core(&socket);
+    let _manager = sock
+        .bind::<session_core_manager::SessionCoreManager, _>(&eq, &mut state, 1)
+        .unwrap();
+    let session = _manager.send_get_session::<SessionInfoState>(id).unwrap();
+    while !state.session_done && !state.session_destroyed {
+        eq.dispatch_events(&mut state, false).unwrap();
+        if !state.session_done && !state.session_destroyed {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+    assert!(state.session_done);
+
+    session.send_lock();
+    while !state.locked {
+        eq.dispatch_events(&mut state, false).unwrap();
+        if !state.locked {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+    assert!(state.ok);
+
+    state.unlocked = false;
+    state.ok = false;
+    session.send_unlock();
+    while !state.unlocked {
+        eq.dispatch_events(&mut state, false).unwrap();
+        if !state.unlocked {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+    assert!(state.ok);
+
+    drop((sock, eq, session, _manager));
+    daemon.stop();
+}
+
+// --- destroy test ---
+
+#[test]
+fn destroy_session_removes_from_list() {
+    let socket = unique_socket();
+    let daemon = start_daemon(socket.clone());
+
+    let id = create_session(&socket, 1000);
+    destroy_session(&socket, id);
+
+    // Poll until the daemon has processed the destroy — fire-and-forget means
+    // the message may not be processed before our next list_sessions connect.
+    let mut attempts = 0u32;
+    loop {
+        let sessions = list_sessions(&socket);
+        if !sessions.contains(&id) {
+            break;
+        }
+        attempts += 1;
+        assert!(
+            attempts < 50,
+            "session {id} not removed after {attempts} polls"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    daemon.stop();
+}

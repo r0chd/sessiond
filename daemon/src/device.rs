@@ -311,4 +311,3 @@ pub fn send_opened(world: &world::World, entity: entity::Entity) -> anyhow::Resu
     object.send_opened(id, fd.0.as_fd(), path);
     Ok(())
 }
-

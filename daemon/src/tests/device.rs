@@ -1,4 +1,4 @@
-use crate::device::{matches_named_device, DeviceKind};
+use crate::device::{DeviceKind, matches_named_device};
 use std::path::Path;
 
 #[test]

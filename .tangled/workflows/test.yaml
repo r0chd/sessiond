@@ -1,0 +1,20 @@
+when:
+  - event: ["push", "manual"]
+    branch: ["*"]
+  - event: ["pull_request"]
+    branch: ["master"]
+
+engine: nixery
+
+dependencies:
+  nixpkgs:
+    - cargo
+    - gcc
+    - linux-pam
+    - pkg-config
+
+steps:
+  - name: cargo test
+    command: |
+      cargo build --package daemon
+      cargo test

@@ -7,7 +7,7 @@ use std::fs;
 
 const MAX_SEAT_DEVICES: u8 = 128;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SeatState {
     New,
     Enabled,

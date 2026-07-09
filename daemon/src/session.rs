@@ -2,7 +2,7 @@ use crate::{ecs, seat, session_core_session, session_core_v1, user};
 use bevy_ecs::{entity, world};
 use std::time;
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct SessionId(u32);
 
 impl SessionId {

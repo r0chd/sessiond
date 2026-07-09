@@ -13,16 +13,19 @@ pub struct CgroupManager {
 }
 
 impl CgroupManager {
-    pub fn new(loop_handle: calloop::LoopHandle<'static, crate::Sessiond>) -> anyhow::Result<Self> {
+    pub fn new(loop_handle: calloop::LoopHandle<'static, crate::Sessiond>) -> Self {
         let root_path = path::Path::new("/sys/fs/cgroup/sessiond");
-        fs::create_dir_all(root_path)?;
-        log::info!(root = root_path.to_str(); "cgroup manager init");
+        if let Err(e) = fs::create_dir_all(root_path) {
+            log::warn!(root = root_path.to_str(), error = e.to_string().as_str(); "cgroup root init failed");
+        } else {
+            log::info!(root = root_path.to_str(); "cgroup manager init");
+        }
 
-        Ok(Self {
+        Self {
             root_path,
             cgroups: Vec::new(),
             loop_handle,
-        })
+        }
     }
 
     fn user_cgroup_path(&self, uid: u32) -> path::PathBuf {

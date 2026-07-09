@@ -6,7 +6,7 @@ mod session_core_v1 {
 
 use anyhow::Context;
 use clap::{ArgGroup, CommandFactory, Parser, Subcommand, ValueEnum};
-use clap_complete::{Shell, generate};
+use clap_complete::{generate, Shell};
 use clap_complete_nushell::Nushell;
 use hyprwire::client;
 use owo_colors::OwoColorize;

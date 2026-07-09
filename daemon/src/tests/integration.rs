@@ -12,13 +12,27 @@ fn unique_socket() -> path::PathBuf {
 }
 
 fn daemon_binary() -> path::PathBuf {
-    let mut path = std::env::current_exe().unwrap();
-    path.pop();
-    if path.file_name().is_some_and(|n| n == "deps") {
-        path.pop();
+    let exe = std::env::current_exe().unwrap();
+    let mut dir = exe.parent().unwrap().to_path_buf();
+    if dir.file_name().is_some_and(|n| n == "deps") {
+        dir = dir.parent().unwrap().to_path_buf();
     }
-    path.push("daemon");
-    path
+    let candidate = dir.join("daemon");
+    if candidate.exists() {
+        return candidate;
+    }
+    // Under cargo-llvm-cov, tests run from target/llvm-cov-target/debug/.
+    // The regular daemon binary lives in the sibling target/debug/ dir.
+    if let Some(fallback) = dir
+        .parent()
+        .and_then(|p| p.parent())
+        .map(|p| p.join("debug/daemon"))
+    {
+        if fallback.exists() {
+            return fallback;
+        }
+    }
+    candidate
 }
 
 struct DaemonGuard(Option<(process::Child, path::PathBuf)>);

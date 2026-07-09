@@ -1,49 +1,67 @@
 use crate::session_core_v1_client::{session_core_manager, session_core_session};
 use crate::session_management_v1_client::session_manager;
-use crate::{run, DaemonConfig, SeatAccess};
 use hyprwire::client;
-use rustix::process;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::{path, thread};
+use std::{path, process};
 
 static SOCKET_ID: AtomicU32 = AtomicU32::new(0);
 
 fn unique_socket() -> path::PathBuf {
     let id = SOCKET_ID.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("sessiond-test-{}-{id}.sock", std::process::id()))
+    std::env::temp_dir().join(format!("sessiond-test-{}-{id}.sock", process::id()))
 }
 
-struct DaemonGuard(Option<(thread::JoinHandle<anyhow::Result<()>>, calloop::LoopSignal)>);
+fn daemon_binary() -> path::PathBuf {
+    let mut path = std::env::current_exe().unwrap();
+    path.pop();
+    if path.file_name().is_some_and(|n| n == "deps") {
+        path.pop();
+    }
+    path.push("daemon");
+    path
+}
+
+struct DaemonGuard(Option<(process::Child, path::PathBuf)>);
 
 impl DaemonGuard {
     fn stop(mut self) {
-        if let Some((handle, signal)) = self.0.take() {
-            signal.stop();
-            handle.join().unwrap().unwrap();
+        if let Some((mut child, socket_path)) = self.0.take() {
+            let pid = rustix::process::Pid::from_raw(child.id() as i32).unwrap();
+            let _ = rustix::process::kill_process(pid, rustix::process::Signal::TERM);
+            let _ = child.wait();
+            let _ = std::fs::remove_file(&socket_path);
         }
     }
 }
 
 impl Drop for DaemonGuard {
     fn drop(&mut self) {
-        if let Some((_, signal)) = self.0.take() {
-            signal.stop();
+        if let Some((mut child, socket_path)) = self.0.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = std::fs::remove_file(&socket_path);
         }
     }
 }
 
 fn start_daemon(socket_path: path::PathBuf) -> DaemonGuard {
-    let (tx, rx) = std::sync::mpsc::channel();
-    let handle = thread::spawn(move || {
-        run(DaemonConfig {
-            socket_path,
-            vtbound: false,
-            seat_access: SeatAccess::new(process::Uid::from_raw(0), process::Gid::from_raw(0)),
-            loop_signal_tx: Some(tx),
-        })
-    });
-    let signal = rx.recv().expect("daemon did not start");
-    DaemonGuard(Some((handle, signal)))
+    let uid = rustix::process::getuid().as_raw().to_string();
+    let child = process::Command::new(daemon_binary())
+        .arg("--socket-path")
+        .arg(&socket_path)
+        .arg("--management-user")
+        .arg(&uid)
+        .env("LOG_LEVEL", "off")
+        .spawn()
+        .expect("failed to spawn daemon");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !socket_path.exists() {
+        assert!(std::time::Instant::now() < deadline, "daemon did not start");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+
+    DaemonGuard(Some((child, socket_path)))
 }
 
 struct MgmtState {

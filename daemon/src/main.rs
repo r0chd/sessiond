@@ -64,6 +64,15 @@ struct Args {
         help = "Allow members of GROUP to bind seat_v1"
     )]
     seat_group: String,
+    #[arg(long, default_value = "/run/sessiond.sock")]
+    socket_path: path::PathBuf,
+    #[arg(
+        long,
+        value_name = "USER",
+        default_value = "root",
+        help = "Allow USER to create and destroy sessions"
+    )]
+    management_user: String,
 }
 
 struct SeatAccess {
@@ -112,6 +121,7 @@ struct Sessiond {
     seat_entities: Vec<entity::Entity>,
     client_entities: Vec<entity::Entity>,
     seat_access: SeatAccess,
+    management_uid: process::Uid,
     #[cfg(feature = "consolekit")]
     consolekit: consolekit::Server,
     shutting_down: bool,
@@ -172,8 +182,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
             return;
         };
 
-        #[cfg(not(test))]
-        if !client.creds().uid.is_root() {
+        if client.creds().uid != self.management_uid {
             log::warn!(uid = client.creds().uid.as_raw(); "rejected request from non-root client");
             return;
         }
@@ -615,7 +624,7 @@ struct DaemonConfig {
     socket_path: path::PathBuf,
     vtbound: bool,
     seat_access: SeatAccess,
-    loop_signal_tx: Option<std::sync::mpsc::Sender<calloop::LoopSignal>>,
+    management_uid: process::Uid,
 }
 
 fn run(config: DaemonConfig) -> anyhow::Result<()> {
@@ -635,6 +644,7 @@ fn run(config: DaemonConfig) -> anyhow::Result<()> {
         seat_entities: Vec::new(),
         client_entities: Vec::new(),
         seat_access: config.seat_access,
+        management_uid: config.management_uid,
         #[cfg(feature = "consolekit")]
         consolekit: consolekit::Server::start(),
         shutting_down: false,
@@ -675,10 +685,6 @@ fn run(config: DaemonConfig) -> anyhow::Result<()> {
     let path = config.socket_path.as_path();
     let mut socket = server::Server::bind(&path)?;
     fs::set_permissions(path, fs::Permissions::from_mode(0o777))?;
-
-    if let Some(tx) = config.loop_signal_tx {
-        let _ = tx.send(event_loop.get_signal());
-    }
 
     socket
         .add_implementation::<session_management_v1::SessionManagementV1Impl, _>(&mut sessiond, 1);
@@ -809,13 +815,13 @@ fn main() -> anyhow::Result<()> {
         .is_none_or(|vtbound| vtbound == "1");
 
     run(DaemonConfig {
-        socket_path: path::PathBuf::from("/run/sessiond.sock"),
+        socket_path: args.socket_path,
         vtbound,
         seat_access: SeatAccess::new(
             resolve_user(&args.seat_user)?,
             resolve_group(&args.seat_group)?,
         ),
-        loop_signal_tx: None,
+        management_uid: resolve_user(&args.management_user)?,
     })
 }
 

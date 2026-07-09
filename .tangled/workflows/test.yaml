@@ -16,4 +16,5 @@ dependencies:
 steps:
   - name: cargo test
     command: |
+      cargo build --package daemon
       cargo test --package daemon

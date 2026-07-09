@@ -1,6 +1,6 @@
 { pkgs, rustToolchain }:
 pkgs.mkShell {
-  name = "moxidle-devshell";
+  name = "sessiond-devshell";
   packages = builtins.attrValues {
     inherit
       rustToolchain
@@ -10,6 +10,10 @@ pkgs.mkShell {
       nixd
       npins
       linux-pam
+
+      seatd
+      pkg-config
+      libabigail
       ;
   };
 

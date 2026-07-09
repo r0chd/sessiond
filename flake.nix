@@ -133,7 +133,10 @@
           finix-vm = finix.lib.finixSystem {
             inherit (pkgs) lib;
             specialArgs = {
-              inherit (self.packages.${system}) sessiond polkit;
+              inherit (self.packages.${system}) sessiond;
+              seattest = (import sources.seattest.outPath { inherit pkgs; }) // {
+                inherit (sources.seattest) outPath;
+              };
             };
             modules = [
               { nixpkgs = { inherit pkgs; }; }

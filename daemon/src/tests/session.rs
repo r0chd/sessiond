@@ -63,7 +63,10 @@ fn entity_finds_by_session_id() {
     let mut world = ecs::World::new();
     let e = make_session_entity(&mut world, 7, 1000);
     let all = vec![e];
-    assert_eq!(session::entity(&world, &all, SessionId::from_raw(7)), Some(e));
+    assert_eq!(
+        session::entity(&world, &all, SessionId::from_raw(7)),
+        Some(e)
+    );
 }
 
 #[test]

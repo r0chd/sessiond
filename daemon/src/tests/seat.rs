@@ -19,7 +19,10 @@ fn add_client_assigns_session_id_1() {
     let seat = make_seat(&mut world);
     let client = make_client(&mut world);
     seat::add_client(&mut world, seat, client).unwrap();
-    assert_eq!(world.get::<ecs::Session>(client).map(|s| s.0.as_raw()), Some(1));
+    assert_eq!(
+        world.get::<ecs::Session>(client).map(|s| s.0.as_raw()),
+        Some(1)
+    );
 }
 
 #[test]
@@ -52,7 +55,10 @@ fn add_client_sets_active_client() {
     let seat = make_seat(&mut world);
     let client = make_client(&mut world);
     seat::add_client(&mut world, seat, client).unwrap();
-    assert_eq!(world.get::<ecs::ActiveClient>(seat).map(|a| a.0), Some(client));
+    assert_eq!(
+        world.get::<ecs::ActiveClient>(seat).map(|a| a.0),
+        Some(client)
+    );
 }
 
 #[test]
@@ -195,5 +201,9 @@ fn remove_client_cleans_up() {
     seat::add_client(&mut world, seat, client).unwrap();
     seat::remove_client(&mut world, seat, client).unwrap();
     assert!(world.get::<ecs::ActiveClient>(seat).is_none());
-    assert!(world.get::<ecs::SeatClients>(seat).is_some_and(|c| c.0.is_empty()));
+    assert!(
+        world
+            .get::<ecs::SeatClients>(seat)
+            .is_some_and(|c| c.0.is_empty())
+    );
 }

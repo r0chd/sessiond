@@ -60,11 +60,16 @@ impl Drop for DaemonGuard {
 
 fn start_daemon(socket_path: path::PathBuf) -> DaemonGuard {
     let uid = rustix::process::getuid().as_raw().to_string();
+    let gid = rustix::process::getgid().as_raw().to_string();
     let child = process::Command::new(daemon_binary())
         .arg("--socket-path")
         .arg(&socket_path)
         .arg("--management-user")
         .arg(&uid)
+        .arg("--seat-user")
+        .arg(&uid)
+        .arg("--seat-group")
+        .arg(&gid)
         .env("LOG_LEVEL", "off")
         .spawn()
         .expect("failed to spawn daemon");

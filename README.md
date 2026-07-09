@@ -24,31 +24,6 @@ planned.
 - Partial ConsoleKit D-Bus interface for polkit
 - Seat and device tracking (work in progress)
 
-## Build Dependencies
-
-- Rust
-- Cargo
-- `pkg-config`
-- PAM
-
-## Build
-
-```sh
-cargo build --workspace --release
-```
-
-For polkit support, build with the `consolekit` feature:
-
-```sh
-cargo build --workspace --release --features consolekit
-```
-
-Build outputs can be found in `target/release`:
-
-- `daemon`: the session daemon
-- `ctl`: the control client
-- `libpam.so`: the PAM module
-
 ## Installation
 
 See [docs/INSTALL.md](docs/INSTALL.md).

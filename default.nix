@@ -32,15 +32,22 @@ in
 
   formatter = import ./nix/formatter.nix { inherit pkgs rustToolchain; };
 
-  packages = rec {
-    default = pkgs.callPackage ./nix/package.nix {
+  packages =
+    let
       rustPlatform = pkgs.makeRustPlatform {
         cargo = rustToolchain;
         rustc = rustToolchain;
       };
+    in
+    rec {
+      default = pkgs.callPackage ./nix/package.nix {
+        inherit rustPlatform;
+      };
+      libseat = pkgs.callPackage ./nix/libseat.nix {
+        inherit rustPlatform;
+      };
+      sessiond = default;
     };
-    sessiond = default;
-  };
 
   checks = import ./internal/finix-checks.nix { inherit finix pkgs; };
 }

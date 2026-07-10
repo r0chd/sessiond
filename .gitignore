@@ -1,4 +1,5 @@
 /target
+/seat/target
 .direnv
 result*
 nixos.qcow2

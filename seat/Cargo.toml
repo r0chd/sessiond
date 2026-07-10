@@ -1,19 +1,14 @@
+[workspace]
+
 [package]
 name = "seat"
-keywords.workspace = true
-categories.workspace = true
-edition.workspace = true
-license.workspace = true
-repository.workspace = true
-version.workspace = true
-description.workspace = true
-readme.workspace = true
+edition = "2024"
+version = "0.1.0"
+license = "GPLv3"
+repository = "https://tangled.org/r0chd.pl/sessiond"
 
 [lib]
 crate-type = ["cdylib"]
-
-[lints]
-workspace = true
 
 [dependencies]
 hyprwire = "0.4.3"

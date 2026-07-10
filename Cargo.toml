@@ -1,5 +1,5 @@
 [workspace]
-members = ["ctl", "daemon", "seat", "pam"]
+members = ["ctl", "daemon", "pam"]
 resolver = "3"
 
 [profile.dev]
@@ -18,7 +18,7 @@ keywords = []
 categories = []
 edition = "2024"
 license = "GPLv3"
-repository = "https://github.com/mox-desktop/sessiond"
+repository = "https://tangled.org/r0chd.pl/sessiond"
 version = "0.1.0"
 description = ""
 readme = "README.md"

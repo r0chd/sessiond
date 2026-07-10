@@ -1,0 +1,2 @@
+cargo::rustc-link-arg-cdylib=-Wl,-soname,libseat.so.1
+cargo::rerun-if-changed=/home/r0chd/Projects/sessiond/seat/../protocols/seat_v1.xml

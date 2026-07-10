@@ -1,7 +1,5 @@
 when:
   - event: ["push", "manual"]
-    branch: ["*"]
-  - event: ["pull_request"]
     branch: ["master"]
 
 engine: nixery
@@ -10,13 +8,12 @@ dependencies:
   nixpkgs:
     - cargo
     - cargo-llvm-cov
-    - cargo-nextest
     - gcc
-    - git
     - llvm
     - linux-pam
     - pkg-config
     - jq
+    - python3
     - which
 
 steps:
@@ -24,14 +21,39 @@ steps:
     command: |
       export LLVM_COV=$(which llvm-cov)
       export LLVM_PROFDATA=$(which llvm-profdata)
-      cargo llvm-cov nextest --package daemon --features consolekit --json --summary-only --output-path coverage.json
+      cargo build --package daemon --features consolekit
+      cargo llvm-cov --package daemon --features consolekit --json --summary-only --output-path coverage.json
       pct=$(jq '.data[0].totals.lines.percent' coverage.json)
-      printf '{"schemaVersion":1,"label":"coverage","message":"%.1f%%","color":"brightgreen"}' "$pct" > badge.json
-
-  - name: publish badge
-    command: |
-      git config user.email "ci@tangled.org"
-      git config user.name "CI"
-      git add badge.json
-      git diff --cached --quiet || git commit -m "chore(ci): update coverage badge"
-      git push origin HEAD:master
+      pct_str=$(printf "%.1f%%" "$pct")
+      python3 - "$pct_str" <<'PYEOF' > badge.svg
+      import sys
+      label, value = "coverage", sys.argv[1]
+      cw = dict(f=5.6, i=2.8, l=2.8, t=4.4, r=3.9, j=2.8)
+      def w(s): return int(sum(cw.get(c, 6.2) for c in s) + 10.5)
+      lw, rw = w(label), w(value)
+      tw, lx, rx = lw + rw, lw // 2, lw + rw // 2
+      print(
+          f'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"'
+          f' width="{tw}" height="20" role="img" aria-label="{label}: {value}">'
+          f'<title>{label}: {value}</title>'
+          f'<linearGradient id="s" x2="0" y2="100%">'
+          f'<stop offset="0" stop-color="#bbb" stop-opacity=".1"/>'
+          f'<stop offset="1" stop-opacity=".1"/></linearGradient>'
+          f'<clipPath id="r"><rect width="{tw}" height="20" rx="3" fill="#fff"/></clipPath>'
+          f'<g clip-path="url(#r)">'
+          f'<rect width="{lw}" height="20" fill="#555"/>'
+          f'<rect x="{lw}" width="{rw}" height="20" fill="#4c1"/>'
+          f'<rect width="{tw}" height="20" fill="url(#s)"/></g>'
+          f'<g fill="#fff" text-anchor="middle"'
+          f' font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="110">'
+          f'<text x="{lx*10}" y="150" fill="#010101" fill-opacity=".3"'
+          f' transform="scale(.1)" textLength="{(lw-10)*10}" lengthAdjust="spacing">{label}</text>'
+          f'<text x="{lx*10}" y="140" transform="scale(.1)"'
+          f' textLength="{(lw-10)*10}" lengthAdjust="spacing">{label}</text>'
+          f'<text x="{rx*10}" y="150" fill="#010101" fill-opacity=".3"'
+          f' transform="scale(.1)" textLength="{(rw-10)*10}" lengthAdjust="spacing">{value}</text>'
+          f'<text x="{rx*10}" y="140" transform="scale(.1)"'
+          f' textLength="{(rw-10)*10}" lengthAdjust="spacing">{value}</text>'
+          f'</g></svg>'
+      )
+      PYEOF

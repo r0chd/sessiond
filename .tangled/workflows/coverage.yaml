@@ -10,6 +10,7 @@ dependencies:
   nixpkgs:
     - cargo
     - cargo-llvm-cov
+    - cargo-nextest
     - gcc
     - git
     - llvm
@@ -23,8 +24,7 @@ steps:
     command: |
       export LLVM_COV=$(which llvm-cov)
       export LLVM_PROFDATA=$(which llvm-profdata)
-      cargo build --package daemon --features consolekit
-      cargo llvm-cov --package daemon --features consolekit --json --summary-only --output-path coverage.json
+      cargo llvm-cov nextest --package daemon --features consolekit --json --summary-only --output-path coverage.json
       pct=$(jq '.data[0].totals.lines.percent' coverage.json)
       printf '{"schemaVersion":1,"label":"coverage","message":"%.1f%%","color":"brightgreen"}' "$pct" > badge.json
 

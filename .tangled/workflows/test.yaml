@@ -9,12 +9,12 @@ engine: nixery
 dependencies:
   nixpkgs:
     - cargo
+    - cargo-nextest
     - gcc
     - linux-pam
     - pkg-config
 
 steps:
-  - name: cargo test
+  - name: cargo nextest
     command: |
-      cargo build --package daemon
-      cargo test --package daemon
+      cargo nextest run --package daemon

@@ -62,7 +62,7 @@ steps:
   - name: upload badge
     command: |
       AWS_ACCESS_KEY_ID="$ACCESS_KEY_ID" \
-      AWS_SECRET_ACCESS_KEY="$SECRETS_ACCESS_KEY" \
+      AWS_SECRET_ACCESS_KEY="$SECRET_ACCESS_KEY" \
       AWS_DEFAULT_REGION=garage \
       aws s3 cp badge.svg s3://coverage-badge/coverage.svg \
         --endpoint-url https://s3.garage.r0chd.pl \

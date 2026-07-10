@@ -633,7 +633,9 @@ fn run(config: DaemonConfig) -> anyhow::Result<()> {
 
     let cgroup_manager = cgroup::CgroupManager::new(event_loop.handle());
 
-    fs::create_dir_all("/var/lib/sessiond")?;
+    if let Err(e) = fs::create_dir_all("/var/lib/sessiond") {
+        log::warn!(error = e.to_string().as_str(); "failed to create linger dir, linger feature unavailable");
+    }
 
     let mut sessiond = Sessiond {
         next_session_id: session::SessionId::from_raw(1),

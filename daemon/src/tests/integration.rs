@@ -107,7 +107,7 @@ fn create_session(socket: &path::Path, uid: u32) -> u32 {
     let manager = sock
         .bind::<session_manager::SessionManager, _>(&eq, &mut state, 1)
         .unwrap();
-    manager.send_create_session(uid, "testuser".to_string(), 0, 1, String::new());
+    manager.send_create_session(uid, 0, 1, "");
     while state.session_id.is_none() {
         eq.dispatch_events(&mut state, true).unwrap();
     }
@@ -286,7 +286,8 @@ fn connect_core(socket: &path::Path) -> (client::Client, hyprwire::EventQueue, S
 fn get_session_returns_fields() {
     let socket = unique_socket();
     let daemon = start_daemon(socket.clone());
-    let id = create_session(&socket, 1000);
+    let uid = rustix::process::getuid().as_raw();
+    let id = create_session(&socket, uid);
 
     let state = {
         let (sock, eq, mut state) = connect_core(&socket);
@@ -304,8 +305,8 @@ fn get_session_returns_fields() {
     };
 
     assert!(state.session_done);
-    assert_eq!(state.uid, Some(1000));
-    assert_eq!(state.username, Some("testuser".to_string()));
+    assert_eq!(state.uid, Some(uid));
+    assert!(state.username.is_some());
     assert_eq!(state.session_id_field, Some(id));
 
     daemon.stop();

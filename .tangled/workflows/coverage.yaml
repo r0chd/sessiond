@@ -6,8 +6,7 @@ engine: nixery
 
 dependencies:
   nixpkgs:
-    - cargo
-    - cargo-llvm-cov
+    - rustup
     - awscli2
     - gcc
     - llvm
@@ -20,6 +19,10 @@ dependencies:
 steps:
   - name: coverage
     command: |
+      rustup toolchain install stable
+      rustup default stable
+      rustup component add llvm-tools-preview
+      cargo install cargo-llvm-cov --locked
       export LLVM_COV=$(which llvm-cov)
       export LLVM_PROFDATA=$(which llvm-profdata)
       cargo build --package daemon --features consolekit

@@ -11,8 +11,7 @@ dependencies:
     - nixfmt-rfc-style
     - taplo
     - fd
-    - cargo
-    - rustfmt
+    - rustup
 
 steps:
   - name: nix fmt
@@ -21,4 +20,8 @@ steps:
       fd -t f -e toml -x taplo fmt --check '{}'
 
   - name: cargo fmt
-    command: cargo fmt --check
+    command: |
+      rustup toolchain install stable
+      rustup default stable
+      rustup component add rustfmt
+      cargo fmt --check

@@ -73,6 +73,11 @@ struct Args {
         help = "Allow USER to create and destroy sessions"
     )]
     management_user: String,
+    #[arg(
+        long,
+        help = "Disable cgroup management (useful for running without root)"
+    )]
+    no_cgroup: bool,
 }
 
 struct SeatAccess {
@@ -115,7 +120,7 @@ impl SeatAccess {
 struct Sessiond {
     next_session_id: session::SessionId,
     info_managers: Vec<session_core_manager::SessionCoreManager>,
-    cgroup_manager: cgroup::CgroupManager,
+    cgroup_manager: Box<dyn cgroup::CgroupManager>,
     session_entities: Vec<entity::Entity>,
     user_entities: Vec<entity::Entity>,
     seat_entities: Vec<entity::Entity>,
@@ -182,7 +187,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
             return;
         };
 
-        if client.creds().uid != self.management_uid {
+        if client.creds().uid != self.management_uid && !client.creds().uid.is_root() {
             log::warn!(uid = client.creds().uid.as_raw(); "rejected request from non-root client");
             return;
         }
@@ -452,7 +457,10 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
                     .filter(|session| session.0 != client.creds().uid.as_raw())
                     .count();
 
-                if !client.creds().uid.is_root() && foreign_session_count > 0 {
+                if client.creds().uid != self.management_uid
+                    && !client.creds().uid.is_root()
+                    && foreign_session_count > 0
+                {
                     log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "reboot denied: multiple sessions active");
                     object.send_error(
                         session_core_v1::ErrorCode::ActiveSessions,
@@ -503,7 +511,10 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
                     .filter(|session| session.0 != client.creds().uid.as_raw())
                     .count();
 
-                if !client.creds().uid.is_root() && foreign_session_count > 0 {
+                if client.creds().uid != self.management_uid
+                    && !client.creds().uid.is_root()
+                    && foreign_session_count > 0
+                {
                     log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "poweroff denied: multiple sessions active");
                     object.send_error(
                         session_core_v1::ErrorCode::ActiveSessions,
@@ -554,7 +565,10 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
                     .filter(|session| session.0 != client.creds().uid.as_raw())
                     .count();
 
-                if !client.creds().uid.is_root() && foreign_session_count > 0 {
+                if client.creds().uid != self.management_uid
+                    && !client.creds().uid.is_root()
+                    && foreign_session_count > 0
+                {
                     log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "suspend denied: multiple sessions active");
                     object.send_error(
                         session_core_v1::ErrorCode::ActiveSessions,
@@ -589,7 +603,10 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
                     .filter(|session| session.0 != client.creds().uid.as_raw())
                     .count();
 
-                if !client.creds().uid.is_root() && foreign_session_count > 0 {
+                if client.creds().uid != self.management_uid
+                    && !client.creds().uid.is_root()
+                    && foreign_session_count > 0
+                {
                     log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "hibernate denied: multiple sessions active");
                     object.send_error(
                         session_core_v1::ErrorCode::ActiveSessions,
@@ -625,13 +642,18 @@ struct DaemonConfig {
     vtbound: bool,
     seat_access: SeatAccess,
     management_uid: process::Uid,
+    no_cgroup: bool,
 }
 
 fn run(config: DaemonConfig) -> anyhow::Result<()> {
     let mut event_loop = calloop::EventLoop::try_new()?;
     let loop_signal = event_loop.get_signal();
 
-    let cgroup_manager = cgroup::CgroupManager::new(event_loop.handle());
+    let cgroup_manager: Box<dyn cgroup::CgroupManager> = if config.no_cgroup {
+        Box::new(cgroup::DummyCgroupManager)
+    } else {
+        Box::new(cgroup::SystemCgroupManager::new(event_loop.handle())?)
+    };
 
     if let Err(e) = fs::create_dir_all("/var/lib/sessiond") {
         log::warn!(error = e.to_string().as_str(); "failed to create linger dir, linger feature unavailable");
@@ -824,6 +846,7 @@ fn main() -> anyhow::Result<()> {
             resolve_group(&args.seat_group)?,
         ),
         management_uid: resolve_user(&args.management_user)?,
+        no_cgroup: args.no_cgroup,
     })
 }
 

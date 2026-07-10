@@ -65,22 +65,40 @@
         };
 
       packages = forAllSystems (pkgs: {
-        sessiond = pkgs.callPackage ./nix/package.nix {
-          rustPlatform =
-            let
-              rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-                extensions = [
-                  "rust-analyzer"
-                  "rust-src"
-                  "llvm-tools"
-                ];
-              };
-            in
-            pkgs.makeRustPlatform {
+        sessiond =
+          let
+            rustToolchain = pkgs.rust-bin.stable.latest.default.override {
+              extensions = [
+                "rust-analyzer"
+                "rust-src"
+                "llvm-tools"
+              ];
+            };
+            rustPlatform = pkgs.makeRustPlatform {
               cargo = rustToolchain;
               rustc = rustToolchain;
             };
-        };
+          in
+          pkgs.callPackage ./nix/package.nix {
+            inherit rustPlatform;
+          };
+        libseat =
+          let
+            rustToolchain = pkgs.rust-bin.stable.latest.default.override {
+              extensions = [
+                "rust-analyzer"
+                "rust-src"
+                "llvm-tools"
+              ];
+            };
+            rustPlatform = pkgs.makeRustPlatform {
+              cargo = rustToolchain;
+              rustc = rustToolchain;
+            };
+          in
+          pkgs.callPackage ./nix/libseat.nix {
+            inherit rustPlatform;
+          };
         default = self.packages.${pkgs.stdenv.hostPlatform.system}.sessiond;
       });
 

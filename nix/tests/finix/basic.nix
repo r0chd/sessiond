@@ -64,7 +64,7 @@ sessiondTest {
 
     machine.wait_until_succeeds("test -S /run/sessiond.sock")
     machine.succeed("test -x ${sessiondPackage}/bin/sessiond")
-    machine.succeed("grep -q pam_sessiond.so /etc/pam.d/login")
+    machine.succeed("pam_path=$(awk '/pam_sessiond.so/ {print $3}' /etc/pam.d/login); test -e \"$pam_path\"")
 
     machine.wait_for_console_text("__SESSIOND_TEST_LOGIN_READY__:user_1")
     machine.succeed("sessionctl session list --json > /tmp/sessions.json")

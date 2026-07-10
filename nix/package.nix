@@ -30,7 +30,6 @@ rustPlatform.buildRustPackage {
       lib.any (p: lib.hasPrefix p relPath) [
         "ctl"
         "pam"
-        "seat"
         "daemon"
         "protocols"
         "Cargo.toml"
@@ -54,8 +53,6 @@ rustPlatform.buildRustPackage {
 
   postInstall = ''
     mkdir -p $out/lib/security
-    mv $out/lib/libseat.so $out/lib/libseat.so.1
-    ln -s libseat.so.1 $out/lib/libseat.so
     mv $out/lib/libpam.so $out/lib/security/pam_sessiond.so
     mv $out/bin/daemon $out/bin/sessiond
     mv $out/bin/ctl $out/bin/sessionctl

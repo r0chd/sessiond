@@ -1,0 +1,1 @@
+/home/r0chd/Projects/sessiond/seat/target/debug/libseat.so: /home/r0chd/Projects/sessiond/seat/../protocols/seat_v1.xml /home/r0chd/Projects/sessiond/seat/build.rs /home/r0chd/Projects/sessiond/seat/src/lib.rs

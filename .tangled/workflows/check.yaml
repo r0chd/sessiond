@@ -8,11 +8,14 @@ engine: nixery
 
 dependencies:
   nixpkgs:
-    - cargo
+    - rustup
     - gcc
     - linux-pam
     - pkg-config
 
 steps:
   - name: cargo check
-    command: cargo check
+    command: |
+      rustup toolchain install stable
+      rustup default stable
+      cargo check

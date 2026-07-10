@@ -151,12 +151,7 @@ fn entity_finds_correct_among_multiple() {
 #[test]
 fn set_session_state_updates_active_state() {
     let mut world = ecs::World::new();
-    let e = make_active_session_entity(
-        &mut world,
-        1,
-        1000,
-        session_core_v1::ActiveState::Online,
-    );
+    let e = make_active_session_entity(&mut world, 1, 1000, session_core_v1::ActiveState::Online);
     session::set_session_state(
         &mut world,
         SessionId::from_raw(1),
@@ -172,12 +167,7 @@ fn set_session_state_updates_active_state() {
 #[test]
 fn set_session_state_to_closing() {
     let mut world = ecs::World::new();
-    let e = make_active_session_entity(
-        &mut world,
-        1,
-        1000,
-        session_core_v1::ActiveState::Active,
-    );
+    let e = make_active_session_entity(&mut world, 1, 1000, session_core_v1::ActiveState::Active);
     session::set_session_state(
         &mut world,
         SessionId::from_raw(1),
@@ -206,12 +196,7 @@ fn set_session_state_without_active_state_component() {
 #[test]
 fn set_session_state_with_vt_component() {
     let mut world = ecs::World::new();
-    let e = make_active_session_entity(
-        &mut world,
-        1,
-        1000,
-        session_core_v1::ActiveState::Online,
-    );
+    let e = make_active_session_entity(&mut world, 1, 1000, session_core_v1::ActiveState::Online);
     world.insert(e, ecs::Vt(3));
     session::set_session_state(
         &mut world,
@@ -228,12 +213,7 @@ fn set_session_state_with_vt_component() {
 #[test]
 fn set_state_updates_active_state() {
     let mut world = ecs::World::new();
-    let e = make_active_session_entity(
-        &mut world,
-        1,
-        1000,
-        session_core_v1::ActiveState::Online,
-    );
+    let e = make_active_session_entity(&mut world, 1, 1000, session_core_v1::ActiveState::Online);
     session::set_state(
         &mut world,
         SessionId::from_raw(1),
@@ -261,12 +241,7 @@ fn set_state_without_active_state_component() {
 #[test]
 fn set_state_with_vt_component() {
     let mut world = ecs::World::new();
-    let e = make_active_session_entity(
-        &mut world,
-        2,
-        2000,
-        session_core_v1::ActiveState::Opening,
-    );
+    let e = make_active_session_entity(&mut world, 2, 2000, session_core_v1::ActiveState::Opening);
     world.insert(e, ecs::Vt(7));
     session::set_state(
         &mut world,

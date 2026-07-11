@@ -657,6 +657,12 @@ fn run<C: cgroup::CgroupManager + 'static>(
 ) -> anyhow::Result<()> {
     let mut event_loop = calloop::EventLoop::try_new()?;
     let loop_signal = event_loop.get_signal();
+    let signals = signals::Signals::new(&[
+        signals::Signal::SIGUSR1,
+        signals::Signal::SIGUSR2,
+        signals::Signal::SIGTERM,
+        signals::Signal::SIGINT,
+    ])?;
 
     let cgroup_manager = make_cgroup(event_loop.handle())?;
 
@@ -740,12 +746,6 @@ fn run<C: cgroup::CgroupManager + 'static>(
             Ok(calloop::PostAction::Continue)
         })?;
 
-    let signals = signals::Signals::new(&[
-        signals::Signal::SIGUSR1,
-        signals::Signal::SIGUSR2,
-        signals::Signal::SIGTERM,
-        signals::Signal::SIGINT,
-    ])?;
     event_loop
         .handle()
         .insert_source(signals, move |event, (), state| {

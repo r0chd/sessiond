@@ -12,6 +12,18 @@ in
   options.services.sessiond = {
     enable = lib.mkEnableOption "sessiond";
     package = lib.mkPackageOption pkgs "sessiond" { };
+    logLevel = lib.mkOption {
+      type = types.enum [
+        "trace"
+        "debug"
+        "info"
+        "warn"
+        "error"
+        "off"
+      ];
+      default = "info";
+      description = "Maximum verbosity of sessiond log messages.";
+    };
     settings = {
       seat = {
         user = lib.mkOption {

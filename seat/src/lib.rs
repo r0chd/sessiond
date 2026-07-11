@@ -4,9 +4,8 @@ mod seat_v1 {
 }
 
 use seat_v1::{device, seat, seat_manager};
-use std::collections::HashMap;
-use std::os::fd::{AsRawFd, OwnedFd};
-use std::sync::atomic;
+use std::collections::{HashMap, VecDeque};
+use std::os::fd::{AsRawFd, IntoRawFd, OwnedFd};
 use std::{ffi, ptr};
 
 const SESSIOND_SOCKET: &str = "/run/sessiond.sock";
@@ -27,6 +26,7 @@ pub struct Libseat {
     seat: seat::Seat,
     initialized: bool,
     enabled: bool,
+    pending_seat_events: VecDeque<SeatEvent>,
     devices: HashMap<libc::c_int, DeviceHandle>,
     pending_open: Option<PendingOpen>,
 }
@@ -34,11 +34,13 @@ pub struct Libseat {
 type LibseatLogFunc =
     Option<unsafe extern "C" fn(libc::c_int, *const libc::c_char, *mut libc::c_void)>;
 
-static LOG_LEVEL: atomic::AtomicI32 = atomic::AtomicI32::new(1);
-
 struct DeviceHandle {
-    object: device::Device,
-    _fd: OwnedFd,
+    _object: device::Device,
+}
+
+enum SeatEvent {
+    Enabled,
+    Disabled,
 }
 
 enum PendingOpen {
@@ -53,7 +55,6 @@ enum PendingOpen {
     Failed {
         errno: libc::c_int,
     },
-    Revoked,
 }
 
 fn set_errno(errno: libc::c_int) {
@@ -86,11 +87,29 @@ fn errno_from_io(error: &hyprwire::Error) -> libc::c_int {
 fn dispatch_once(seat: &mut Libseat, block: bool) -> libc::c_int {
     let queue = seat.queue.clone();
     match queue.dispatch_events(seat, block) {
-        Ok(()) => 1,
+        Ok(()) => {
+            dispatch_pending_seat_events(seat);
+            1
+        }
         Err(hyprwire::Error::ConnectionClosed) if !block => 0,
         Err(err) => {
             set_errno(errno_from_io(&err));
             -1
+        }
+    }
+}
+
+fn dispatch_pending_seat_events(seat: &mut Libseat) {
+    while let Some(event) = seat.pending_seat_events.pop_front() {
+        let callback = match event {
+            SeatEvent::Enabled => seat.listener.enable_seat,
+            SeatEvent::Disabled => seat.listener.disable_seat,
+        };
+        if let Some(callback) = callback {
+            let seat_ptr = ptr::from_mut::<Libseat>(seat);
+            unsafe {
+                callback(seat_ptr, seat.userdata);
+            }
         }
     }
 }
@@ -146,29 +165,14 @@ impl hyprwire::Dispatch<seat::Seat> for Libseat {
             seat::Event::Enabled => {
                 self.initialized = true;
                 self.enabled = true;
-                if let Some(enable_seat) = self.listener.enable_seat {
-                    let seat = ptr::from_mut::<Self>(self);
-                    // SAFETY: listener function pointers are provided by the C
-                    // caller at open time and are invoked with the live opaque
-                    // seat pointer plus its original userdata.
-                    unsafe {
-                        enable_seat(seat, self.userdata);
-                    }
-                }
+                self.pending_seat_events.push_back(SeatEvent::Enabled);
             }
             seat::Event::Disabled => {
                 self.initialized = true;
                 self.enabled = false;
-                if let Some(disable_seat) = self.listener.disable_seat {
-                    let seat = ptr::from_mut::<Self>(self);
-                    // SAFETY: see the matching enable callback above.
-                    unsafe {
-                        disable_seat(seat, self.userdata);
-                    }
-                }
+                self.pending_seat_events.push_back(SeatEvent::Disabled);
             }
-            seat::Event::SessionSwitched { .. } => {}
-            seat::Event::SeatError { .. } => {}
+            _ => {}
         }
     }
 }
@@ -197,19 +201,6 @@ impl hyprwire::Dispatch<device::Device> for Libseat {
                 self.pending_open = Some(PendingOpen::Failed {
                     errno: errno_from_u32(errno),
                 });
-            }
-            device::Event::Revoked => {
-                if matches!(self.pending_open, Some(PendingOpen::Waiting { .. })) {
-                    self.pending_open = Some(PendingOpen::Revoked);
-                    return;
-                }
-
-                let revoked = self.devices.iter().find_map(|(device_id, handle)| {
-                    (handle.object == *object).then_some(*device_id)
-                });
-                if let Some(device_id) = revoked {
-                    self.devices.remove(&device_id);
-                }
             }
         }
     }
@@ -285,6 +276,7 @@ pub unsafe extern "C" fn libseat_open_seat(
         seat: seat_object,
         initialized: false,
         enabled: false,
+        pending_seat_events: VecDeque::new(),
         devices: HashMap::new(),
         pending_open: None,
     });
@@ -334,7 +326,7 @@ pub unsafe extern "C" fn libseat_close_seat(seat: *mut Libseat) -> libc::c_int {
     }
 
     // SAFETY: the pointer must have been returned by libseat_open_seat and is
-    // consumed exactly once by libseat_close_seat, matching libseat ownership.
+    // consumed exactly once by libseat_close_seat.
     drop(unsafe { Box::from_raw(seat) });
     0
 }
@@ -390,22 +382,17 @@ pub unsafe extern "C" fn libseat_open_device(
         }) => {
             // SAFETY: fd was checked for null above.
             unsafe {
-                *fd = device_fd.as_raw_fd();
+                *fd = device_fd.into_raw_fd();
             }
-            seat.devices.insert(
-                device_id,
-                DeviceHandle {
-                    object,
-                    _fd: device_fd,
-                },
-            );
+            seat.devices
+                .insert(device_id, DeviceHandle { _object: object });
             device_id
         }
         Some(PendingOpen::Failed { errno }) => {
             set_errno(errno);
             -1
         }
-        Some(PendingOpen::Revoked | PendingOpen::Waiting { .. }) | None => {
+        Some(PendingOpen::Waiting { .. }) | None => {
             set_errno(libc::EIO);
             -1
         }
@@ -520,11 +507,7 @@ pub unsafe extern "C" fn libseat_dispatch(seat: *mut Libseat, timeout: libc::c_i
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn libseat_set_log_handler(handler: LibseatLogFunc) {
-    let _ = handler;
-}
+pub extern "C" fn libseat_set_log_handler(_handler: LibseatLogFunc) {}
 
 #[unsafe(no_mangle)]
-pub extern "C" fn libseat_set_log_level(level: libc::c_int) {
-    LOG_LEVEL.store(level, atomic::Ordering::Relaxed);
-}
+pub const extern "C" fn libseat_set_log_level(_level: libc::c_int) {}

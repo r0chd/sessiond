@@ -93,11 +93,6 @@
    <arg name="errno" type="uint" summary="system errno value"/>
    <arg name="message" type="varchar" summary="human-readable error detail"/>
   </s2c>
-  <s2c name="revoked">
-   <description summary="device revoked">
-    The fd and object must not be used again after this event.
-   </description>
-  </s2c>
   <c2s name="destroy" destructor="true">
    <description summary="close the device handle"/>
   </c2s>

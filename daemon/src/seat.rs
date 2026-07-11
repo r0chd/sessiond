@@ -13,7 +13,6 @@ pub enum SeatState {
     Enabled,
     PendingDisabled,
     Disabled,
-    Closed,
 }
 
 pub fn client_entity_by_seat_object(
@@ -225,34 +224,8 @@ pub fn disable_client(
 
     let session_id = client_session_id(world, client_entity)?;
     let seat_name = seat_name(world, seat_entity)?;
-    if let Some(devices) = world.get::<ecs::Devices>(client_entity) {
-        let mut retained_devices = Vec::new();
-        for device_entity in devices.0.clone() {
-            if let Err(err) = device::deactivate(world, device_entity) {
-                let path = device::path_display(world, device_entity);
-                log::error!("Could not deactivate {path}: {err}");
-                retained_devices.push(device_entity);
-                continue;
-            }
 
-            match device::device_kind(world, device_entity) {
-                Ok(device::DeviceKind::Drm | device::DeviceKind::Wscons) => {
-                    retained_devices.push(device_entity);
-                }
-                Ok(device::DeviceKind::Evdev | device::DeviceKind::Hidraw) => {
-                    device::send_revoked(world, device_entity);
-                    world.despawn(device_entity);
-                }
-                Err(err) => {
-                    log::error!("Could not determine device kind: {err}");
-                    retained_devices.push(device_entity);
-                }
-            }
-        }
-        if let Some(mut devices) = world.get_mut::<ecs::Devices>(client_entity) {
-            devices.0 = retained_devices;
-        }
-    }
+    deactivate_client_devices(world, client_entity);
 
     world
         .entity_mut(client_entity)
@@ -290,6 +263,42 @@ pub fn ack_disable_client(
     let _ = activate(world, seat_entity);
 
     Ok(())
+}
+
+fn deactivate_client_devices(world: &mut world::World, client_entity: entity::Entity) {
+    let Some(devices) = world
+        .get::<ecs::Devices>(client_entity)
+        .map(|devices| devices.0.clone())
+    else {
+        return;
+    };
+
+    let mut retained_devices = Vec::new();
+    for device_entity in devices {
+        if let Err(err) = device::deactivate(world, device_entity) {
+            let path = device::path_display(world, device_entity);
+            log::error!("Could not deactivate {path}: {err}");
+            retained_devices.push(device_entity);
+            continue;
+        }
+
+        match device::device_kind(world, device_entity) {
+            Ok(device::DeviceKind::Drm | device::DeviceKind::Wscons) => {
+                retained_devices.push(device_entity);
+            }
+            Ok(device::DeviceKind::Evdev | device::DeviceKind::Hidraw) => {
+                world.despawn(device_entity);
+            }
+            Err(err) => {
+                log::error!("Could not determine device kind: {err}");
+                retained_devices.push(device_entity);
+            }
+        }
+    }
+
+    if let Some(mut devices) = world.get_mut::<ecs::Devices>(client_entity) {
+        devices.0 = retained_devices;
+    }
 }
 
 pub fn set_next_session(
@@ -376,9 +385,6 @@ pub fn remove_client(
     let session_id = world
         .get::<ecs::Session>(client_entity)
         .map(|session| session.0);
-    let client_state = world
-        .get::<ecs::SeatState>(client_entity)
-        .map_or(SeatState::Closed, |state| state.0);
     let seat_name = seat_name(world, seat_entity)?;
 
     if let Some(mut clients) = world.get_mut::<ecs::SeatClients>(seat_entity) {
@@ -408,13 +414,19 @@ pub fn remove_client(
         let has_active_client = world.get::<ecs::ActiveClient>(seat_entity).is_some();
         if was_current && !has_active_client {
             log::debug!("Closing active VT");
-            let cur_vt = world
-                .get::<ecs::CurrentVt>(seat_entity)
-                .map_or(0, |vt| vt.0);
-            vt_close(cur_vt)?;
+            let vt = session_id.map(session::SessionId::as_raw).or_else(|| {
+                world
+                    .get::<ecs::CurrentVt>(seat_entity)
+                    .map(|current| current.0)
+                    .filter(|current| *current != 0)
+            });
+            if let Some(vt) = vt {
+                vt_close(vt)?;
+            } else {
+                log::warn!("Could not determine VT for removed active client");
+            }
         } else if let Some(session_id) = session_id
             && !was_current
-            && client_state != SeatState::Closed
         {
             log::debug!("Closing inactive VT");
             vt_close(session_id.as_raw())?;
@@ -491,19 +503,11 @@ pub fn open_device(
         return;
     };
 
-    if let Some(old_device) = device_entities
+    let open_handle_count = device_entities
         .iter()
-        .find(|device_entity| device::matches_path(world, **device_entity, &sanitized_path))
-        .copied()
-    {
-        device::add_object(world, old_device, device);
-        if let Err(err) = device::send_opened(world, old_device) {
-            log::error!("Could not send opened device event: {err}");
-        }
-        return;
-    }
-
-    if device_entities.len() >= usize::from(MAX_SEAT_DEVICES) {
+        .map(|device_entity| device::object_count(world, *device_entity))
+        .sum::<usize>();
+    if open_handle_count >= usize::from(MAX_SEAT_DEVICES) {
         log::error!("Client exceeded max seat devices");
         device.send_failed(
             seat_v1::DeviceError::OpenFailed,
@@ -515,9 +519,33 @@ pub fn open_device(
 
     let device_id = device_entities
         .iter()
-        .filter_map(|device_entity| device::id(world, *device_entity))
+        .filter_map(|device_entity| device::max_id(world, *device_entity))
         .max()
         .map_or(1, |id| id + 1);
+
+    if let Some(old_device) = device_entities
+        .iter()
+        .find(|device_entity| device::matches_path(world, **device_entity, &sanitized_path))
+        .copied()
+    {
+        device::add_object(world, old_device, device, device_id);
+        if let Err(err) = device::send_opened(world, old_device) {
+            log::error!("Could not send opened device event: {err}");
+        }
+        return;
+    }
+
+    let session_id = client_session_id(world, client_entity)
+        .map(super::session::SessionId::as_raw)
+        .unwrap_or_default();
+    let seat_name = seat_name(world, seat_entity).unwrap_or_else(|_| "<unknown>".to_string());
+
+    log::debug!(
+        "Opening device {} for client {} on {}",
+        sanitized_path.display(),
+        session_id,
+        seat_name
+    );
 
     let fd = match rustix::fs::open(
         &sanitized_path,
@@ -682,6 +710,18 @@ pub fn sync_states(
     }
 }
 
+fn send_session_switched(world: &world::World, seat_entity: entity::Entity, session: u32) {
+    let Some(clients) = world.get::<ecs::SeatClients>(seat_entity) else {
+        return;
+    };
+
+    for client in &clients.0 {
+        if let Some(object) = world.get::<ecs::SeatObject>(*client) {
+            object.0.send_session_switched(session);
+        }
+    }
+}
+
 fn activate(world: &mut world::World, seat_entity: entity::Entity) -> anyhow::Result<()> {
     if world.get::<ecs::ActiveClient>(seat_entity).is_some() {
         return Ok(());
@@ -754,10 +794,23 @@ fn release_vt(
         disable_client(world, seat_entity, active_client)?;
     }
 
+    ack_vt_release(world, seat_entity)?;
+
+    Ok(Some(released_vt))
+}
+
+fn ack_vt_release(world: &mut world::World, seat_entity: entity::Entity) -> anyhow::Result<()> {
+    let cur_vt = world
+        .get::<ecs::CurrentVt>(seat_entity)
+        .map_or(0, |vt| vt.0);
+    if cur_vt == 0 {
+        return Ok(());
+    }
+
     terminal::Terminal::open(cur_vt)?.ack_release()?;
     world.entity_mut(seat_entity).insert(ecs::CurrentVt(0));
 
-    Ok(Some(released_vt))
+    Ok(())
 }
 
 fn activate_vt(
@@ -772,8 +825,18 @@ fn activate_vt(
         .insert(ecs::CurrentVt(acquired_vt));
 
     if world.get::<ecs::ActiveClient>(seat_entity).is_none() {
-        activate(world, seat_entity)?;
+        let has_clients = world
+            .get::<ecs::SeatClients>(seat_entity)
+            .is_some_and(|clients| !clients.0.is_empty());
+        if has_clients {
+            activate(world, seat_entity)?;
+        } else {
+            let seat_name = seat_name(world, seat_entity)?;
+            log::debug!("No clients on {seat_name} while acquiring VT {acquired_vt}");
+        }
     }
+
+    send_session_switched(world, seat_entity, acquired_vt);
 
     Ok(Some(acquired_vt))
 }

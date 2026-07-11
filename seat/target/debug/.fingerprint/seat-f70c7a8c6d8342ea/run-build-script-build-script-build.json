@@ -1,1 +1,0 @@
-{"rustc":9777074978655410247,"features":"","declared_features":"","target":0,"profile":0,"path":0,"deps":[[13920472699846388806,"build_script_build",false,17431045748738415879]],"local":[{"RerunIfChanged":{"output":"debug/build/seat-f70c7a8c6d8342ea/output","paths":["../protocols/seat_v1.xml"]}}],"rustflags":[],"config":0,"compile_kind":0}

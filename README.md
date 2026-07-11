@@ -5,31 +5,23 @@
 `sessiond` is a session management daemon for systems that do not want to
 depend on `(e)logind`.
 
-Session information is exposed over the Hyprwire protocol, letting clients
-determine which session belongs to which user and inspect session state.
-The protocol is split across three specifications:
+It exposes session and seat management over the Hyprwire protocol:
 
 - [protocols/session_management_v1.xml](protocols/session_management_v1.xml): creating and destroying sessions
 - [protocols/session_core_v1.xml](protocols/session_core_v1.xml): querying session information
 - [protocols/seat_v1.xml](protocols/seat_v1.xml): acquiring seats
 
-`sessiond` implements parts of the `org.freedesktop.ConsoleKit` D-Bus
-interface for drop in polkit support.
+## What is it?
 
-Seat tracking is currently a work in progress; full multi-seat support is
-planned.
+`sessiond` provides:
 
-## Features
+- A session manager for registering, tracking, and querying user sessions
+- Public API over hyprwire protocol
+- A seat manager for acquiring seats and managing seat devices
+- A partial `org.freedesktop.ConsoleKit` D-Bus interface for polkit integration
 
-- Session registration and tracking via a PAM module
-- Session state (active/inactive, local/remote, owning uid) exposed over Hyprwire
-- Partial ConsoleKit D-Bus interface for polkit
-- Seat and device tracking (work in progress)
+## Documentation
 
-## Installation
-
-See [docs/INSTALL.md](docs/INSTALL.md).
-
-## Known Issues
-
-See [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).
+- [Installation](docs/INSTALL.md)
+- [Seat manager](docs/SEAT_MANAGER.md)
+- [Known issues](docs/KNOWN_ISSUES.md).

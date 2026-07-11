@@ -92,11 +92,10 @@ pub fn insert_device(
 ) -> Entity {
     world
         .spawn((
-            DeviceObjects(vec![object]),
+            DeviceObjects(vec![DeviceObject { object, id }]),
             DevicePath(path),
             DeviceRefCount(1),
             DeviceKind(kind),
-            DeviceId(id),
             DeviceActive(active),
             DeviceFd(fd),
         ))
@@ -155,7 +154,12 @@ pub struct SeatObject(pub seat_v1::seat::Seat);
 pub struct Devices(pub Vec<Entity>);
 
 #[derive(Component)]
-pub struct DeviceObjects(pub Vec<seat_v1::device::Device>);
+pub struct DeviceObjects(pub Vec<DeviceObject>);
+
+pub struct DeviceObject {
+    pub object: seat_v1::device::Device,
+    pub id: u32,
+}
 
 #[derive(Component)]
 pub struct DevicePath(pub path::PathBuf);
@@ -165,9 +169,6 @@ pub struct DeviceRefCount(pub usize);
 
 #[derive(Component)]
 pub struct DeviceKind(pub device::DeviceKind);
-
-#[derive(Component)]
-pub struct DeviceId(pub u32);
 
 #[derive(Component)]
 pub struct DeviceActive(pub bool);

@@ -34,6 +34,7 @@ in
         description = "session management daemon";
         conditions = [ ];
         command = "${cfg.package}/bin/sessiond --seat-user ${cfg.settings.seat.user} --seat-group ${cfg.settings.seat.group}";
+        environment.LOG_LEVEL = cfg.logLevel;
         log = true;
       };
       tasks.sessiond-linger-users = lib.mkIf (cfg.settings.users != { }) {

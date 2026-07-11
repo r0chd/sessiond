@@ -35,7 +35,7 @@ in
 
       serviceConfig = {
         ExecStart = "${cfg.package}/bin/sessiond --seat-user ${cfg.settings.seat.user} --seat-group ${cfg.settings.seat.group}";
-        Environment = "LOG_LEVEL=info";
+        Environment = "LOG_LEVEL=${cfg.logLevel}";
         Delegate = true;
       };
     };

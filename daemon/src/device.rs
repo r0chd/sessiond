@@ -218,17 +218,30 @@ pub fn matches_path(world: &world::World, entity: entity::Entity, path: &path::P
         .is_some_and(|device_path| device_path.0 == path)
 }
 
-pub fn add_object(world: &mut world::World, entity: entity::Entity, object: device::Device) {
+pub fn add_object(
+    world: &mut world::World,
+    entity: entity::Entity,
+    object: device::Device,
+    id: u32,
+) {
     if let Some(mut ref_count) = world.get_mut::<ecs::DeviceRefCount>(entity) {
         ref_count.0 += 1;
     }
     if let Some(mut objects) = world.get_mut::<ecs::DeviceObjects>(entity) {
-        objects.0.push(object);
+        objects.0.push(ecs::DeviceObject { object, id });
     }
 }
 
-pub fn id(world: &world::World, entity: entity::Entity) -> Option<u32> {
-    world.get::<ecs::DeviceId>(entity).map(|id| id.0)
+pub fn max_id(world: &world::World, entity: entity::Entity) -> Option<u32> {
+    world
+        .get::<ecs::DeviceObjects>(entity)
+        .and_then(|objects| objects.0.iter().map(|handle| handle.id).max())
+}
+
+pub fn object_count(world: &world::World, entity: entity::Entity) -> usize {
+    world
+        .get::<ecs::DeviceObjects>(entity)
+        .map_or(0, |objects| objects.0.len())
 }
 
 pub fn device_kind(world: &world::World, entity: entity::Entity) -> anyhow::Result<DeviceKind> {
@@ -267,6 +280,7 @@ pub fn last_object(world: &world::World, entity: entity::Entity) -> Option<&devi
     world
         .get::<ecs::DeviceObjects>(entity)
         .and_then(|objects| objects.0.last())
+        .map(|handle| &handle.object)
 }
 
 pub fn contains_object(
@@ -276,20 +290,17 @@ pub fn contains_object(
 ) -> bool {
     world
         .get::<ecs::DeviceObjects>(entity)
-        .is_some_and(|objects| objects.0.iter().any(|candidate| candidate == object))
+        .is_some_and(|objects| {
+            objects
+                .0
+                .iter()
+                .any(|candidate| candidate.object == *object)
+        })
 }
 
 pub fn remove_object(world: &mut world::World, entity: entity::Entity, object: &device::Device) {
     if let Some(mut objects) = world.get_mut::<ecs::DeviceObjects>(entity) {
-        objects.0.retain(|candidate| candidate != object);
-    }
-}
-
-pub fn send_revoked(world: &world::World, entity: entity::Entity) {
-    if let Some(objects) = world.get::<ecs::DeviceObjects>(entity) {
-        for object in &objects.0 {
-            object.send_revoked();
-        }
+        objects.0.retain(|candidate| candidate.object != *object);
     }
 }
 
@@ -302,14 +313,16 @@ pub fn decrement_ref(world: &mut world::World, entity: entity::Entity) -> usize 
 }
 
 pub fn send_opened(world: &world::World, entity: entity::Entity) -> anyhow::Result<()> {
-    let Some(object) = last_object(world, entity) else {
+    let Some(handle) = world
+        .get::<ecs::DeviceObjects>(entity)
+        .and_then(|objects| objects.0.last())
+    else {
         return Ok(());
     };
-    let id = id(world, entity).ok_or_else(|| anyhow::anyhow!("device has no id"))?;
     let path = absolute_path_string(world, entity)?;
     let fd = world
         .get::<ecs::DeviceFd>(entity)
         .ok_or_else(|| anyhow::anyhow!("device has no fd"))?;
-    object.send_opened(id, fd.0.as_fd(), path);
+    handle.object.send_opened(handle.id, fd.0.as_fd(), path);
     Ok(())
 }

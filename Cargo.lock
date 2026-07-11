@@ -984,7 +984,6 @@ version = "0.1.0"
 dependencies = [
  "hyprwire",
  "hyprwire-scanner",
- "libc",
  "pamsm",
  "users",
 ]

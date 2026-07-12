@@ -131,7 +131,7 @@ impl DeviceKind {
     }
 }
 
-pub(crate) fn matches_named_device(path: &path::Path, parent: &str, prefix: &str) -> bool {
+pub fn matches_named_device(path: &path::Path, parent: &str, prefix: &str) -> bool {
     path.parent() == Some(path::Path::new(parent))
         && path
             .file_name()

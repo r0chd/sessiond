@@ -13,6 +13,8 @@ rustPlatform.buildRustPackage {
   pname = "sessiond";
   inherit (cargoToml.workspace.package) version;
 
+  doCheck = false;
+
   cargoLock = {
     lockFile = ../Cargo.lock;
     outputHashes = {

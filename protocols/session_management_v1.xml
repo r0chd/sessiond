@@ -6,9 +6,23 @@
    Only accessible to root clients.
   </description>
   <c2s name="create_session">
-   <description summary="register a new session">
-    Registers a new session. The daemon responds with session_created carrying
-    the assigned session_id. Called at session open time.
+   <description summary="start registering a new session, returning an owning session object">
+    Returns a session_management_session object bound to the calling
+    connection. The session is not created yet: the client may send vt
+    and remote_host on the returned object to stage optional fields, then
+    must send done to commit. The daemon then pushes session_id and seat,
+    followed by done, or error if creation failed.
+   </description>
+   <arg name="uid" type="uint" summary="user id"/>
+   <returns iface="session_management_session"/>
+  </c2s>
+  <c2s name="create_session_unsafe">
+   <description summary="[unsafe: can leak the session] register a session without an owning object">
+    Registers a session like create_session, but returns no object, so
+    nothing tears the session down if the caller dies. The daemon replies
+    with session_created carrying the assigned session_id, and the caller
+    must pair it with destroy_session_unsafe or the session's resources
+    (cgroup, runtime directory) leak.
    </description>
    <arg name="uid" type="uint" summary="user id"/>
    <arg name="vt" type="uint" summary="virtual terminal number, 0 if the session is not bound to a VT"/>
@@ -16,16 +30,16 @@
    <arg name="remote_host" type="varchar" summary="remote host, empty for local sessions"/>
   </c2s>
   <s2c name="session_created">
-   <description summary="session ID assigned to the new session">
-    Sent only to the manager that called create_session.
+   <description summary="session ID assigned by create_session_unsafe">
+    Sent only to the manager that called create_session_unsafe.
    </description>
    <arg name="session_id" type="uint" summary="unique session identifier"/>
    <arg name="seat" type="varchar" summary="seat name assigned to the session"/>
   </s2c>
-  <c2s name="destroy_session">
-   <description summary="deregister a session">
-    Deregisters the session identified by session_id.
-    Called at session close time.
+  <c2s name="destroy_session_unsafe">
+   <description summary="[unsafe: paired with create_session_unsafe] deregister a session by id">
+    Deregisters the session identified by session_id. An unpaired
+    create_session_unsafe leaks the session's resources.
    </description>
    <arg name="session_id" type="uint" summary="session identifier from session_created"/>
   </c2s>
@@ -33,4 +47,57 @@
    <description summary="destroy this object"/>
   </c2s>
  </object>
+
+ <object name="session_management_session" version="1">
+  <description summary="owning handle for a session created via create_session">
+   Bound to the connection that created the session. Before done is
+   sent, the session is only staged: vt and remote_host may be sent to
+   set optional fields. is_local is not a field; the session is treated
+   as remote if remote_host was set, local otherwise. Once created,
+   destroying this object, explicitly or by disconnecting, tears the
+   session down if it has not already been destroyed.
+  </description>
+  <c2s name="vt">
+   <description summary="stage the virtual terminal number">
+    Optional. Must be sent before done. Defaults to 0 (not bound to a VT).
+   </description>
+   <arg name="vt" type="uint" summary="virtual terminal number"/>
+  </c2s>
+  <c2s name="remote_host">
+   <description summary="stage the remote host and mark the session as remote">
+    Optional. Must be sent before done. Its presence marks the session as
+    remote; if never sent, the session is local.
+   </description>
+   <arg name="remote_host" type="varchar" summary="remote host name"/>
+  </c2s>
+  <c2s name="done">
+   <description summary="commit staged fields and create the session">
+    Creates the session using uid and any staged vt/remote_host. The
+    daemon responds with session_id and seat, followed by done, or with
+    error if creation failed.
+   </description>
+  </c2s>
+  <s2c name="session_id">
+   <arg name="session_id" type="uint" summary="unique session identifier"/>
+  </s2c>
+  <s2c name="seat">
+   <arg name="seat" type="varchar" summary="seat name assigned to the session"/>
+  </s2c>
+  <s2c name="done">
+   <description summary="session created, initial field dump complete"/>
+  </s2c>
+  <s2c name="error">
+   <description summary="session creation failed"/>
+   <arg name="code" type="enum" interface="error_code" summary="error kind"/>
+   <arg name="message" type="varchar" summary="human-readable error detail"/>
+  </s2c>
+  <c2s name="destroy" destructor="true">
+   <description summary="destroy this object and tear down the session"/>
+  </c2s>
+ </object>
+
+ <enum name="error_code">
+  <value idx="0" name="not_found" summary="session or cgroup not found"/>
+  <value idx="1" name="io" summary="generic I/O error"/>
+ </enum>
 </protocol>

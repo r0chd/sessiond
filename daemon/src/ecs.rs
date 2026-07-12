@@ -1,3 +1,4 @@
+use crate::session_management_v1::session_management_session;
 use crate::{
     device, seat, seat_v1, session, session_core_session, session_core_user, session_core_v1,
 };
@@ -11,26 +12,24 @@ pub fn insert_session(
     session_id: session::SessionId,
     uid: u32,
     username: String,
-    vt: u32,
+    vt: Option<u32>,
     seat: Option<String>,
     seat_entity: Option<Entity>,
-    timestamp: time::SystemTime,
     leader_id: i32,
-    is_local: bool,
-    remote_host: String,
-    objects: Vec<session_core_session::SessionCoreSession>,
+    remote_host: Option<String>,
     active_state: session_core_v1::ActiveState,
+    session_object: Option<session_management_session::SessionManagementSession>,
 ) -> Entity {
     let mut cmd = world.spawn((
         Session(session_id),
         Uid(uid),
         Username(username),
         Vt(vt),
-        Timestamp(timestamp),
+        Timestamp(time::SystemTime::now()),
         LeaderId(leader_id),
-        IsLocal(is_local),
+        IsLocal(remote_host.is_none()),
         RemoteHost(remote_host),
-        SessionObjects(objects),
+        SessionObjects(Vec::new()),
         ActiveState(active_state),
     ));
     if let Some(name) = seat {
@@ -38,6 +37,9 @@ pub fn insert_session(
     }
     if let Some(entity) = seat_entity {
         cmd.insert(SeatEntity(entity));
+    }
+    if let Some(session_object) = session_object {
+        cmd.insert(SessionObject(session_object));
     }
     cmd.id()
 }
@@ -118,7 +120,7 @@ pub struct UserState(pub session_core_v1::UserState);
 pub struct UserObjects(pub Vec<session_core_user::SessionCoreUser>);
 
 #[derive(Component)]
-pub struct Vt(pub u32);
+pub struct Vt(pub Option<u32>);
 
 #[derive(Component)]
 pub struct SeatName(pub String);
@@ -136,7 +138,7 @@ pub struct LeaderId(pub i32);
 pub struct IsLocal(pub bool);
 
 #[derive(Component)]
-pub struct RemoteHost(pub String);
+pub struct RemoteHost(pub Option<String>);
 
 #[derive(Component)]
 pub struct SessionObjects(pub Vec<session_core_session::SessionCoreSession>);
@@ -199,3 +201,6 @@ pub struct ActiveClient(pub Entity);
 
 #[derive(Component)]
 pub struct NextClient(pub Entity);
+
+#[derive(Component)]
+pub struct SessionObject(pub session_management_session::SessionManagementSession);

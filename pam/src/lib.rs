@@ -73,7 +73,7 @@ impl PamServiceModule for Pam {
                 .unwrap_or_default();
             let is_local = u32::from(remote_host.is_empty());
 
-            manager.send_create_session(uid, vt, is_local, remote_host);
+            manager.send_create_session_unsafe(uid, vt, is_local, remote_host);
 
             while session.session_id.is_none() {
                 event_queue
@@ -90,7 +90,9 @@ impl PamServiceModule for Pam {
                 "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus"
             ))?;
             pamh.putenv(&format!("XDG_SESSION_ID={session_id}"))?;
-            if let Some(seat) = session.seat {
+            if let Some(seat) = session.seat
+                && !seat.is_empty()
+            {
                 pamh.putenv(&format!("XDG_SEAT={seat}"))?;
             }
 
@@ -134,7 +136,7 @@ impl PamServiceModule for Pam {
                 .bind::<session_manager::SessionManager, _>(&event_queue, &mut session, 1)
                 .map_err(|_| pamsm::PamError::SESSION_ERR)?;
 
-            manager.send_destroy_session(session_id);
+            manager.send_destroy_session_unsafe(session_id);
 
             Ok(())
         }

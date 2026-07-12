@@ -138,11 +138,11 @@ impl session_core_v1::SessionCoreV1Handler for Sessiond {
             &self.user_entities,
         );
 
-        let session_ids = session::entities(&self.world, &self.session_entities)
+        session::entities(&self.world, &self.session_entities)
             .filter_map(|entity| session::id(&self.world, entity))
-            .map(session::SessionId::as_raw)
-            .collect::<Vec<_>>();
-        object.send_sessions(&session_ids);
+            .for_each(|session_id| {
+                object.send_session_added(session_id.as_raw());
+            });
         object.send_done();
         self.info_managers.push(object);
     }

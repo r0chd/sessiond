@@ -189,7 +189,9 @@ pub fn add_session_object(
     if let Some(username) = world.get::<ecs::Username>(entity) {
         object.send_username(&username.0);
     }
-    if let Some(vt) = world.get::<ecs::Vt>(entity) {
+    if let Some(vt) = world.get::<ecs::Vt>(entity)
+        && vt.0 != 0
+    {
         object.send_vt(vt.0);
     }
     if let Some(active_state) = world.get::<ecs::ActiveState>(entity) {

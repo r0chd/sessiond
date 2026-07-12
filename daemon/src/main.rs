@@ -189,7 +189,11 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
 
                 seat::refresh_current_vts(&mut self.world, &self.seat_entities);
 
-                let mut session_seat_entity = self.seat_entities.first().copied();
+                let mut session_seat_entity = if vt != 0 {
+                    self.seat_entities.first().copied()
+                } else {
+                    None
+                };
                 let mut session_seat = session_seat_entity.and_then(|seat_entity| {
                     self.world
                         .get::<ecs::SeatName>(seat_entity)

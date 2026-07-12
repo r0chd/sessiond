@@ -27,3 +27,7 @@ planned.
 ## Installation
 
 See [docs/INSTALL.md](docs/INSTALL.md).
+
+## Known Issues
+
+See [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).

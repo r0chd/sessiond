@@ -691,7 +691,7 @@ pub fn sync_states(
                 return None;
             }
 
-            let vt = world.get::<ecs::Vt>(entity)?.0;
+            let vt = world.get::<ecs::Vt>(entity)?.0?;
             let state = if active_vts.contains(&vt) {
                 session_core_v1::ActiveState::Active
             } else {

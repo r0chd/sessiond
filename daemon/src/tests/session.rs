@@ -199,7 +199,7 @@ fn set_session_state_without_active_state_component() {
 fn set_session_state_with_vt_component() {
     let mut world = World::new();
     let e = make_active_session_entity(&mut world, 1, 1000, session_core_v1::ActiveState::Online);
-    world.entity_mut(e).insert(ecs::Vt(3));
+    world.entity_mut(e).insert(ecs::Vt(Some(3)));
     session::set_session_state(
         &mut world,
         SessionId::from_raw(1),
@@ -244,7 +244,7 @@ fn set_state_without_active_state_component() {
 fn set_state_with_vt_component() {
     let mut world = World::new();
     let e = make_active_session_entity(&mut world, 2, 2000, session_core_v1::ActiveState::Opening);
-    world.entity_mut(e).insert(ecs::Vt(7));
+    world.entity_mut(e).insert(ecs::Vt(Some(7)));
     session::set_state(
         &mut world,
         SessionId::from_raw(2),

@@ -1,5 +1,5 @@
 use crate::session_core_v1_client::{session_core_manager, session_core_session};
-use crate::session_management_v1_client::session_manager;
+use crate::session_management_v1_client::{session_management_session, session_manager};
 use hyprwire::client;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::{path, process};
@@ -86,6 +86,8 @@ fn start_daemon(socket_path: path::PathBuf) -> DaemonGuard {
 
 struct MgmtState {
     session_id: Option<u32>,
+    seat: Option<String>,
+    done: bool,
 }
 
 impl hyprwire::Dispatch<session_manager::SessionManager> for MgmtState {
@@ -94,13 +96,44 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for MgmtState {
         _: &session_manager::SessionManager,
         event: <session_manager::SessionManager as hyprwire::Object>::Event<'_>,
     ) {
-        let session_manager::Event::SessionCreated { session_id, .. } = event;
+        let session_manager::Event::SessionCreated { session_id, seat } = event;
         self.session_id = Some(session_id);
+        self.seat = Some(seat);
+        self.done = true;
+    }
+}
+
+impl hyprwire::Dispatch<session_management_session::SessionManagementSession> for MgmtState {
+    fn event(
+        &mut self,
+        _: &session_management_session::SessionManagementSession,
+        event: <session_management_session::SessionManagementSession as hyprwire::Object>::Event<
+            '_,
+        >,
+    ) {
+        match event {
+            session_management_session::Event::SessionId { session_id } => {
+                self.session_id = Some(session_id);
+            }
+            session_management_session::Event::Seat { seat } => {
+                self.seat = Some(seat);
+            }
+            session_management_session::Event::Done => {
+                self.done = true;
+            }
+            session_management_session::Event::Error { code, message } => {
+                panic!("owned session creation failed: {code:?}: {message}");
+            }
+        }
     }
 }
 
 fn create_session(socket: &path::Path, uid: u32) -> u32 {
-    let mut state = MgmtState { session_id: None };
+    let mut state = MgmtState {
+        session_id: None,
+        seat: None,
+        done: false,
+    };
     let mut sock = client::Client::connect(socket).unwrap();
     let eq = sock.new_event_queue();
     sock.add_implementation::<crate::session_management_v1_client::SessionManagementV1Impl>();
@@ -108,15 +141,19 @@ fn create_session(socket: &path::Path, uid: u32) -> u32 {
     let manager = sock
         .bind::<session_manager::SessionManager, _>(&eq, &mut state, 1)
         .unwrap();
-    manager.send_create_session(uid, 0, 1, "");
-    while state.session_id.is_none() {
+    manager.send_create_session_unsafe(uid, 0, 1, "");
+    while !state.done {
         eq.dispatch_events(&mut state, true).unwrap();
     }
     state.session_id.unwrap()
 }
 
 fn destroy_session(socket: &path::Path, session_id: u32) {
-    let mut state = MgmtState { session_id: None };
+    let mut state = MgmtState {
+        session_id: None,
+        seat: None,
+        done: false,
+    };
     let mut sock = client::Client::connect(socket).unwrap();
     let eq = sock.new_event_queue();
     sock.add_implementation::<crate::session_management_v1_client::SessionManagementV1Impl>();
@@ -124,7 +161,7 @@ fn destroy_session(socket: &path::Path, session_id: u32) {
     let manager = sock
         .bind::<session_manager::SessionManager, _>(&eq, &mut state, 1)
         .unwrap();
-    manager.send_destroy_session(session_id);
+    manager.send_destroy_session_unsafe(session_id);
 }
 
 struct CoreState {
@@ -184,6 +221,77 @@ fn create_session_returns_id() {
 
     let id = create_session(&socket, 1000);
     assert_eq!(id, 1);
+
+    daemon.stop();
+}
+
+#[test]
+fn create_owned_session_returns_id() {
+    let socket = unique_socket();
+    let daemon = start_daemon(socket.clone());
+    let uid = rustix::process::getuid().as_raw();
+    let mut state = MgmtState {
+        session_id: None,
+        seat: None,
+        done: false,
+    };
+    let mut sock = client::Client::connect(&socket).unwrap();
+    let eq = sock.new_event_queue();
+    sock.add_implementation::<crate::session_management_v1_client::SessionManagementV1Impl>();
+    eq.wait_for_handshake(&mut state).unwrap();
+    let manager = sock
+        .bind::<session_manager::SessionManager, _>(&eq, &mut state, 1)
+        .unwrap();
+    let session = manager.send_create_session::<MgmtState>(uid).unwrap();
+
+    session.send_done();
+    while !state.done {
+        eq.dispatch_events(&mut state, true).unwrap();
+    }
+
+    assert_eq!(state.session_id, Some(1));
+    assert_eq!(state.seat.as_deref(), Some("seat0"));
+    assert!(list_sessions(&socket).contains(&1));
+
+    daemon.stop();
+}
+
+#[test]
+fn owned_session_is_destroyed_when_owner_disconnects() {
+    let socket = unique_socket();
+    let daemon = start_daemon(socket.clone());
+    let uid = rustix::process::getuid().as_raw();
+
+    {
+        let mut state = MgmtState {
+            session_id: None,
+            seat: None,
+            done: false,
+        };
+        let mut sock = client::Client::connect(&socket).unwrap();
+        let eq = sock.new_event_queue();
+        sock.add_implementation::<crate::session_management_v1_client::SessionManagementV1Impl>();
+        eq.wait_for_handshake(&mut state).unwrap();
+        let manager = sock
+            .bind::<session_manager::SessionManager, _>(&eq, &mut state, 1)
+            .unwrap();
+        let session = manager.send_create_session::<MgmtState>(uid).unwrap();
+
+        session.send_done();
+        while !state.done {
+            eq.dispatch_events(&mut state, true).unwrap();
+        }
+        assert!(list_sessions(&socket).contains(&1));
+    }
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while list_sessions(&socket).contains(&1) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "owned session was not destroyed"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
 
     daemon.stop();
 }

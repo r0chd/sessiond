@@ -41,12 +41,11 @@ use bevy_ecs::{entity, world};
 use calloop::{generic, signals};
 use clap::Parser;
 use hyprwire::server;
-use rustix::{net, process, system};
+use rustix::{net, process};
 use session_core_v1::{session_core_manager, session_core_session, session_core_user};
-use session_management_v1::session_manager;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
-use std::{env, fs, path, time};
+use std::{env, fs, path};
 
 #[derive(Parser)]
 struct Args {
@@ -156,494 +155,6 @@ impl<C: cgroup::CgroupManager + 'static> Sessiond<C> {
     }
 }
 
-impl<C: cgroup::CgroupManager + 'static> session_management_v1::SessionManagementV1Handler
-    for Sessiond<C>
-{
-}
-
-impl<C: cgroup::CgroupManager + 'static> session_core_v1::SessionCoreV1Handler for Sessiond<C> {
-    fn bind(&mut self, object: session_core_manager::SessionCoreManager) {
-        session::sync_vt_session_states(
-            &mut self.world,
-            &self.seat_entities,
-            &self.session_entities,
-            &self.user_entities,
-        );
-
-        session::entities(&self.world, &self.session_entities)
-            .filter_map(|entity| session::id(&self.world, entity))
-            .for_each(|session_id| {
-                object.send_session_added(session_id.as_raw());
-            });
-        object.send_done();
-        self.info_managers.push(object);
-    }
-}
-
-impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager::SessionManager>
-    for Sessiond<C>
-{
-    fn event(
-        &mut self,
-        object: &session_manager::SessionManager,
-        event: <session_manager::SessionManager as hyprwire::Object>::Event<'_>,
-    ) {
-        let Some(client) = object.client() else {
-            return;
-        };
-
-        if client.creds().uid != self.management_uid && !client.creds().uid.is_root() {
-            log::warn!(uid = client.creds().uid.as_raw(); "rejected request from non-root client");
-            return;
-        }
-
-        match event {
-            session_manager::Event::CreateSession {
-                uid,
-                vt,
-                is_local,
-                remote_host,
-            } => {
-                let session_id = self.next_session_id;
-                self.next_session_id = self.next_session_id.next();
-                let is_local = is_local != 0;
-                let username = users::get_user_by_uid(uid)
-                    .map(|user| user.name().to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                log::info!(session_id = session_id.as_raw(), uid, username = username.as_str(), vt, is_local, remote_host = remote_host.as_str(); "session created");
-
-                let leader_id = client.creds().pid.as_raw_pid();
-
-                if let Err(e) = self
-                    .cgroup_manager
-                    .create_session_cgroup(uid, session_id, leader_id)
-                {
-                    log::error!(session_id = session_id.as_raw(), error = e.to_string().as_str(); "failed to create session cgroup");
-                }
-
-                seat::refresh_current_vts(&mut self.world, &self.seat_entities);
-
-                let mut session_seat_entity = if vt != 0 {
-                    self.seat_entities.first().copied()
-                } else {
-                    None
-                };
-                let mut session_seat = session_seat_entity.and_then(|seat_entity| {
-                    self.world
-                        .get::<ecs::SeatName>(seat_entity)
-                        .map(|seat| seat.0.clone())
-                        .filter(|seat| !seat.is_empty())
-                });
-                let mut active_state = session_core_v1::ActiveState::Online;
-
-                user::create_runtime_dir(uid);
-
-                if let Some((seat_entity, seat)) =
-                    self.seat_entities.iter().copied().find_map(|seat_entity| {
-                        let mode = self.world.get::<ecs::SeatMode>(seat_entity)?;
-                        if mode.0 != ecs::SeatKind::VtBound {
-                            return None;
-                        }
-                        let current_vt = self.world.get::<ecs::CurrentVt>(seat_entity)?.0;
-                        (current_vt == vt).then(|| {
-                            self.world
-                                .get::<ecs::SeatName>(seat_entity)
-                                .map(|seat| (seat_entity, seat.0.clone()))
-                        })?
-                    })
-                {
-                    session_seat_entity = Some(seat_entity);
-                    session_seat = Some(seat);
-                    active_state = session_core_v1::ActiveState::Active;
-                }
-
-                let session_entity = ecs::insert_session(
-                    &mut self.world,
-                    session_id,
-                    uid,
-                    username,
-                    vt,
-                    session_seat.clone(),
-                    session_seat_entity,
-                    time::SystemTime::now(),
-                    leader_id,
-                    is_local,
-                    remote_host,
-                    Vec::new(),
-                    active_state,
-                );
-                self.session_entities.push(session_entity);
-                #[cfg(feature = "consolekit")]
-                self.sync_consolekit_session(session_id, session_entity);
-                user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
-
-                object.send_session_created(
-                    session_id.as_raw(),
-                    session_seat.as_deref().unwrap_or_default(),
-                );
-
-                for manager in &self.info_managers {
-                    manager.send_session_added(session_id.as_raw());
-                }
-            }
-            session_manager::Event::DestroySession { session_id } => {
-                let session_id = session::SessionId::from_raw(session_id);
-                let Some(entity) = session::entity(&self.world, &self.session_entities, session_id)
-                else {
-                    log::warn!(session_id = session_id.as_raw(); "destroy requested for unknown session");
-                    return;
-                };
-
-                let uid = self.world.get::<ecs::Uid>(entity).map_or(0, |uid| uid.0);
-                let username = self
-                    .world
-                    .get::<ecs::Username>(entity)
-                    .map_or("", |username| username.0.as_str());
-                log::info!(session_id = session_id.as_raw(), uid, username; "session destroyed");
-
-                if let Some(mut active_state) = self.world.get_mut::<ecs::ActiveState>(entity) {
-                    active_state.0 = session_core_v1::ActiveState::Closing;
-                }
-                #[cfg(feature = "consolekit")]
-                self.sync_consolekit_session(session_id, entity);
-                if let Some(objects) = self.world.get::<ecs::SessionObjects>(entity) {
-                    for object in &objects.0 {
-                        object.send_active(session_core_v1::ActiveState::Closing);
-                    }
-                }
-                if let Some(objects) = self.world.get::<ecs::SessionObjects>(entity) {
-                    for object in &objects.0 {
-                        object.send_destroyed();
-                    }
-                }
-                let _ = self.remove_session(session_id);
-                user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
-
-                for manager in &self.info_managers {
-                    manager.send_session_removed(session_id.as_raw());
-                }
-
-                if let Err(e) = self.cgroup_manager.poll_destroy(session_id) {
-                    log::error!(session_id = session_id.as_raw(), error = e.to_string().as_str(); "failed to poll destroy session cgroup");
-                }
-
-                if !user::is_lingering(&self.world, &self.user_entities, uid)
-                    && session::entities_by_uid(&self.world, &self.session_entities, uid)
-                        .next()
-                        .is_none()
-                    && let Err(e) = user::remove_runtime_dir(uid)
-                {
-                    log::error!(session_id = session_id.as_raw(), uid, error = e.to_string().as_str(); "failed to remove runtime dir");
-                }
-            }
-            session_manager::Event::Destroy => {}
-        }
-    }
-}
-
-impl<C: cgroup::CgroupManager + 'static>
-    hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond<C>
-{
-    fn event(
-        &mut self,
-        object: &session_core_manager::SessionCoreManager,
-        event: <session_core_manager::SessionCoreManager as hyprwire::Object>::Event<'_>,
-    ) {
-        match event {
-            session_core_manager::Event::GetSession {
-                session_core_session,
-                session_id,
-            } => {
-                session::sync_vt_session_states(
-                    &mut self.world,
-                    &self.seat_entities,
-                    &self.session_entities,
-                    &self.user_entities,
-                );
-
-                let session_id = session::SessionId::from_raw(session_id);
-                if let Some(entity) =
-                    session::entity(&self.world, &self.session_entities, session_id)
-                {
-                    session::add_session_object(
-                        &mut self.world,
-                        session_id,
-                        entity,
-                        session_core_session,
-                    );
-                    return;
-                }
-
-                log::warn!(session_id = session_id.as_raw(); "get_session requested for unknown session");
-                session_core_session.send_destroyed();
-            }
-            session_core_manager::Event::GetSessionByPid {
-                session_core_session,
-                pid,
-            } => {
-                session::sync_vt_session_states(
-                    &mut self.world,
-                    &self.seat_entities,
-                    &self.session_entities,
-                    &self.user_entities,
-                );
-
-                let Ok(Some(session_id)) = self.cgroup_manager.find_session_by_pid(pid) else {
-                    log::warn!(pid; "get_session_by_pid: no session found for pid");
-                    session_core_session.send_destroyed();
-                    return;
-                };
-
-                if let Some(entity) =
-                    session::entity(&self.world, &self.session_entities, session_id)
-                {
-                    session::add_session_object(
-                        &mut self.world,
-                        session_id,
-                        entity,
-                        session_core_session,
-                    );
-                    return;
-                }
-
-                log::warn!(session_id = session_id.as_raw(); "get_session_by_pid requested for unknown session");
-                session_core_session.send_destroyed();
-            }
-            session_core_manager::Event::GetSessionByUid {
-                session_core_session,
-                uid,
-            } => {
-                session::sync_vt_session_states(
-                    &mut self.world,
-                    &self.seat_entities,
-                    &self.session_entities,
-                    &self.user_entities,
-                );
-
-                if let Some(entity) =
-                    session::entity_by_uid(&self.world, &self.session_entities, uid)
-                    && let Some(session_id) = session::id(&self.world, entity)
-                {
-                    session::add_session_object(
-                        &mut self.world,
-                        session_id,
-                        entity,
-                        session_core_session,
-                    );
-                    return;
-                }
-
-                log::warn!(uid; "get_session_by_uid requested for unknown session");
-                session_core_session.send_destroyed();
-            }
-            session_core_manager::Event::GetUser {
-                session_core_user,
-                uid,
-            } => {
-                let Some(entity) = user::get_or_create(
-                    &mut self.world,
-                    &mut self.user_entities,
-                    &self.session_entities,
-                    uid,
-                ) else {
-                    log::warn!(uid; "get_user requested for unknown user");
-                    session_core_user.send_not_found();
-                    return;
-                };
-
-                user::add_user_object(&mut self.world, entity, session_core_user);
-            }
-            session_core_manager::Event::Reboot => {
-                let Some(client) = object.client() else {
-                    return;
-                };
-
-                // let user reboot only if there are no other user sessions active
-                let foreign_session_count = session::entities(&self.world, &self.session_entities)
-                    .filter_map(|entity| self.world.get::<ecs::Uid>(entity))
-                    .filter(|session| session.0 != client.creds().uid.as_raw())
-                    .count();
-
-                if client.creds().uid != self.management_uid
-                    && !client.creds().uid.is_root()
-                    && foreign_session_count > 0
-                {
-                    log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "reboot denied: multiple sessions active");
-                    object.send_error(
-                        session_core_v1::ErrorCode::ActiveSessions,
-                        "cannot reboot while multiple sessions are active (root privileges required)",
-                    );
-                    return;
-                }
-
-                log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "reboot accepted");
-
-                for session_id in session::entities(&self.world, &self.session_entities)
-                    .filter_map(|entity| self.world.get::<ecs::Session>(entity))
-                {
-                    if let Err(err) = self.cgroup_manager.terminate_session(session_id.0) {
-                        log::error!(session_id = session_id.0.as_raw(), error = err.to_string().as_str(); "failed to terminate session before reboot");
-                        object.send_error(
-                            session_core_v1::ErrorCode::Io,
-                            format!(
-                                "failed to terminate session {}: {err}",
-                                session_id.0.as_raw()
-                            ),
-                        );
-                        return;
-                    }
-                }
-
-                rustix::fs::sync();
-
-                if let Err(err) = system::reboot(system::RebootCommand::Restart) {
-                    log::error!(error = err.to_string().as_str(); "reboot syscall failed");
-                    object.send_error(
-                        session_core_v1::ErrorCode::Io,
-                        format!("failed to reboot: {err}"),
-                    );
-                    return;
-                }
-
-                object.send_done();
-            }
-            session_core_manager::Event::Poweroff => {
-                let Some(client) = object.client() else {
-                    return;
-                };
-
-                // let user poweroff only if there are no other user sessions active
-                let foreign_session_count = session::entities(&self.world, &self.session_entities)
-                    .filter_map(|entity| self.world.get::<ecs::Uid>(entity))
-                    .filter(|session| session.0 != client.creds().uid.as_raw())
-                    .count();
-
-                if client.creds().uid != self.management_uid
-                    && !client.creds().uid.is_root()
-                    && foreign_session_count > 0
-                {
-                    log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "poweroff denied: multiple sessions active");
-                    object.send_error(
-                        session_core_v1::ErrorCode::ActiveSessions,
-                        "cannot power off while multiple sessions are active (root privileges required)",
-                    );
-                    return;
-                }
-
-                log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "poweroff accepted");
-
-                for session_id in session::entities(&self.world, &self.session_entities)
-                    .filter_map(|entity| self.world.get::<ecs::Session>(entity))
-                {
-                    if let Err(err) = self.cgroup_manager.terminate_session(session_id.0) {
-                        log::error!(session_id = session_id.0.as_raw(), error = err.to_string().as_str(); "failed to terminate session before poweroff");
-                        object.send_error(
-                            session_core_v1::ErrorCode::Io,
-                            format!(
-                                "failed to terminate session {}: {err}",
-                                session_id.0.as_raw()
-                            ),
-                        );
-                        return;
-                    }
-                }
-
-                rustix::fs::sync();
-
-                if let Err(err) = system::reboot(system::RebootCommand::PowerOff) {
-                    log::error!(error = err.to_string().as_str(); "poweroff syscall failed");
-                    object.send_error(
-                        session_core_v1::ErrorCode::Io,
-                        format!("failed to power off: {err}"),
-                    );
-                    return;
-                }
-
-                object.send_done();
-            }
-            session_core_manager::Event::Suspend => {
-                let Some(client) = object.client() else {
-                    return;
-                };
-
-                // let user suspend only if there are no other user sessions active
-                let foreign_session_count = session::entities(&self.world, &self.session_entities)
-                    .filter_map(|entity| self.world.get::<ecs::Uid>(entity))
-                    .filter(|session| session.0 != client.creds().uid.as_raw())
-                    .count();
-
-                if client.creds().uid != self.management_uid
-                    && !client.creds().uid.is_root()
-                    && foreign_session_count > 0
-                {
-                    log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "suspend denied: multiple sessions active");
-                    object.send_error(
-                        session_core_v1::ErrorCode::ActiveSessions,
-                        "cannot suspend while multiple sessions are active (root privileges required)",
-                    );
-                    return;
-                }
-
-                log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "suspend accepted");
-
-                rustix::fs::sync();
-
-                if let Err(err) = fs::write("/sys/power/state", "mem") {
-                    log::error!(error = err.to_string().as_str(); "suspend failed");
-                    object.send_error(
-                        session_core_v1::ErrorCode::Io,
-                        format!("failed to suspend: {err}"),
-                    );
-                    return;
-                }
-
-                object.send_done();
-            }
-            session_core_manager::Event::Hibernate => {
-                let Some(client) = object.client() else {
-                    return;
-                };
-
-                // let user hibernate only if there are no other user sessions active
-                let foreign_session_count = session::entities(&self.world, &self.session_entities)
-                    .filter_map(|entity| self.world.get::<ecs::Uid>(entity))
-                    .filter(|session| session.0 != client.creds().uid.as_raw())
-                    .count();
-
-                if client.creds().uid != self.management_uid
-                    && !client.creds().uid.is_root()
-                    && foreign_session_count > 0
-                {
-                    log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "hibernate denied: multiple sessions active");
-                    object.send_error(
-                        session_core_v1::ErrorCode::ActiveSessions,
-                        "cannot hibernate while multiple sessions are active (root privileges required)",
-                    );
-                    return;
-                }
-
-                log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "hibernate accepted");
-
-                rustix::fs::sync();
-
-                if let Err(err) = fs::write("/sys/power/state", "disk") {
-                    log::error!(error = err.to_string().as_str(); "hibernate failed");
-                    object.send_error(
-                        session_core_v1::ErrorCode::Io,
-                        format!("failed to hibernate: {err}"),
-                    );
-                    return;
-                }
-
-                object.send_done();
-            }
-            session_core_manager::Event::Destroy => {
-                self.info_managers.retain(|m| m != object);
-            }
-        }
-    }
-}
-
 struct DaemonConfig {
     socket_path: path::PathBuf,
     vtbound: bool,
@@ -667,7 +178,10 @@ fn run<C: cgroup::CgroupManager + 'static>(
     let cgroup_manager = make_cgroup(event_loop.handle())?;
 
     if let Err(e) = fs::create_dir_all("/var/lib/sessiond") {
-        log::warn!(error = e.to_string().as_str(); "failed to create linger dir, linger feature unavailable");
+        log::warn!(
+            error = e.to_string().as_str();
+            "failed to create linger dir, linger feature unavailable"
+        );
     }
 
     let mut sessiond = Sessiond {
@@ -710,7 +224,11 @@ fn run<C: cgroup::CgroupManager + 'static>(
                 );
                 user::create_runtime_dir(uid);
                 if let Err(e) = sessiond.cgroup_manager.ensure_user_cgroup(uid) {
-                    log::error!(uid, error = e.to_string().as_str(); "failed to create user cgroup");
+                    log::error!(
+                        uid,
+                        error = e.to_string().as_str();
+                        "failed to create user cgroup"
+                    );
                 }
             }
         }
@@ -764,7 +282,11 @@ fn run<C: cgroup::CgroupManager + 'static>(
                         .filter_map(|entity| state.world.get::<ecs::Session>(entity))
                     {
                         if let Err(err) = state.cgroup_manager.terminate_session(session_id.0) {
-                            log::error!(session_id = session_id.0.as_raw(), error = err.to_string().as_str(); "failed to terminate session during shutdown");
+                            log::error!(
+                                session_id = session_id.0.as_raw(),
+                                error = err.to_string().as_str();
+                                "failed to terminate session during shutdown"
+                            );
                         }
                     }
 
@@ -786,9 +308,18 @@ fn run<C: cgroup::CgroupManager + 'static>(
                             |entity| {
                                 let session_vt = state.world.get::<ecs::Vt>(entity)?.0;
                                 let session_state = state.world.get::<ecs::ActiveState>(entity)?.0;
-                                (session_vt != vt
-                                    && session_state == session_core_v1::ActiveState::Active)
-                                    .then_some((entity, session_core_v1::ActiveState::Online))
+
+                                match session_vt {
+                                    Some(session_vt)
+                                        if session_vt != vt
+                                            && session_state
+                                                == session_core_v1::ActiveState::Active =>
+                                    {
+                                        Some((entity, session_core_v1::ActiveState::Online))
+                                    }
+                                    None => Some((entity, session_core_v1::ActiveState::Active)),
+                                    _ => None,
+                                }
                             },
                         ),
                     );
@@ -797,7 +328,9 @@ fn run<C: cgroup::CgroupManager + 'static>(
                 state_updates.extend(
                     session::entities(&state.world, &state.session_entities).filter_map(|entity| {
                         let session_vt = state.world.get::<ecs::Vt>(entity)?.0;
-                        (session_vt == vt).then_some((entity, active_state))
+                        session_vt
+                            .is_some_and(|session_vt| session_vt == vt)
+                            .then_some((entity, active_state))
                     }),
                 );
 
@@ -811,7 +344,11 @@ fn run<C: cgroup::CgroupManager + 'static>(
                 }
             }
 
-            user::sync_all(&mut state.world, &state.user_entities, &state.session_entities);
+            user::sync_all(
+                &mut state.world,
+                &state.user_entities,
+                &state.session_entities,
+            );
         })?;
 
     event_loop.run(None, &mut sessiond, |_| {})?;

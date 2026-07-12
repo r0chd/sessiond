@@ -4,7 +4,6 @@ use crate::ecs::{
 use crate::session::SessionId;
 use crate::session_core_v1;
 use bevy_ecs::prelude::World;
-use std::time;
 
 #[test]
 fn insert_seat_sets_expected_components() {
@@ -26,25 +25,22 @@ fn insert_seat_sets_expected_components() {
 fn insert_session_sets_expected_components() {
     let mut world = World::new();
     let id = SessionId::from_raw(1);
-    let ts = time::UNIX_EPOCH;
     let entity = ecs::insert_session(
         &mut world,
         id,
         1000,
         "alice".to_string(),
-        2,
+        Some(2),
         Some("seat0".to_string()),
         None,
-        ts,
         1234,
-        true,
-        String::new(),
-        vec![],
+        None,
         session_core_v1::ActiveState::Active,
+        None,
     );
     assert_eq!(world.get::<Session>(entity).map(|s| s.0.as_raw()), Some(1));
     assert_eq!(world.get::<Uid>(entity).map(|u| u.0), Some(1000));
-    assert_eq!(world.get::<ecs::Vt>(entity).map(|v| v.0), Some(2));
+    assert_eq!(world.get::<ecs::Vt>(entity).and_then(|v| v.0), Some(2));
     assert_eq!(
         world.get::<ActiveState>(entity).map(|a| a.0),
         Some(session_core_v1::ActiveState::Active)

@@ -139,8 +139,8 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for CoreState 
         event: <session_core_manager::SessionCoreManager as hyprwire::Object>::Event<'_>,
     ) {
         match event {
-            session_core_manager::Event::Sessions { session_ids } => {
-                self.sessions.extend(session_ids);
+            session_core_manager::Event::SessionAdded { session_id } => {
+                self.sessions.push(session_id);
             }
             session_core_manager::Event::Done => {
                 self.done = true;

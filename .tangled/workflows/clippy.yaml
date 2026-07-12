@@ -1,0 +1,22 @@
+when:
+  - event: ["push", "manual"]
+    branch: ["*"]
+  - event: ["pull_request"]
+    branch: ["master"]
+
+engine: nixery
+
+dependencies:
+  nixpkgs:
+    - rustup
+    - gcc
+    - linux-pam
+    - pkg-config
+
+steps:
+  - name: cargo clippy
+    command: |
+      rustup toolchain install stable
+      rustup default stable
+      rustup component add clippy
+      cargo clippy -- -D warnings

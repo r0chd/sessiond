@@ -163,7 +163,9 @@ pub fn add_user_object(
     }
 }
 
-impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond {
+impl<C: crate::cgroup::CgroupManager + 'static>
+    hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond<C>
+{
     fn event(
         &mut self,
         object: &session_core_user::SessionCoreUser,

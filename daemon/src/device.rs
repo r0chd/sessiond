@@ -7,7 +7,9 @@ use std::os::fd;
 use std::os::fd::AsFd;
 use std::path;
 
-impl hyprwire::Dispatch<device::Device> for crate::Sessiond {
+impl<C: crate::cgroup::CgroupManager + 'static> hyprwire::Dispatch<device::Device>
+    for crate::Sessiond<C>
+{
     fn event(
         &mut self,
         object: &device::Device,

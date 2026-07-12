@@ -4,15 +4,10 @@
   <description summary="session observer">
    Unprivileged read-only interface for observing active sessions.
   </description>
-  <s2c name="sessions">
-   <description summary="all active session IDs">
-    Sent once when the manager is first created. May be an empty array.
-   </description>
-   <arg name="session_ids" type="array uint" summary="active session IDs"/>
-  </s2c>
   <s2c name="session_added">
    <description summary="a new session was created">
-    Broadcast to all connected clients when any session is created.
+    Broadcast to all connected clients when any session is created. Sent
+    once for each already-active session when the manager is first created.
    </description>
    <arg name="session_id" type="uint" summary="new session identifier"/>
   </s2c>

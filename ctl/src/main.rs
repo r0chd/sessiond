@@ -51,11 +51,6 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for State {
         event: <session_core_manager::SessionCoreManager as hyprwire::Object>::Event<'_>,
     ) {
         match event {
-            session_core_manager::Event::Sessions { session_ids } => {
-                for session_id in session_ids {
-                    self.add_session(object, session_id);
-                }
-            }
             session_core_manager::Event::SessionAdded { session_id } => {
                 self.add_session(object, session_id);
             }

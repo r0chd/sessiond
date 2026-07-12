@@ -418,20 +418,32 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         Command::Session(command) => match command {
             SessionCommand::List { json } => {
+                let fmt_tty = |vt: u32| -> String {
+                    if vt == 0 {
+                        String::from("-")
+                    } else {
+                        format!("tty{vt}")
+                    }
+                };
+
                 if json {
                     return print_json(&json!({
                         "sessions": state.sessions.iter().map(|session| {
-                            json!({
-                                "id": session.id,
-                                "uid": session.uid,
-                                "username": session.username,
-                                "vt": session.vt,
-                                "tty": format!("tty{}", session.vt),
-                                "seat": session.seat,
-                                "leader": session.leader,
-                                "timestamp": session.timestamp,
-                                "active": active_state_name(session.active),
-                            })
+                            let mut obj = serde_json::Map::new();
+                            obj.insert("id".into(), json!(session.id));
+                            obj.insert("uid".into(), json!(session.uid));
+                            obj.insert("username".into(), json!(session.username));
+                            if session.vt != 0 {
+                                obj.insert("vt".into(), json!(session.vt));
+                                obj.insert("tty".into(), json!(fmt_tty(session.vt)));
+                            }
+                            if let Some(seat) = &session.seat {
+                                obj.insert("seat".into(), json!(seat));
+                            }
+                            obj.insert("leader".into(), json!(session.leader));
+                            obj.insert("timestamp".into(), json!(session.timestamp));
+                            obj.insert("active".into(), json!(active_state_name(session.active)));
+                            serde_json::Value::Object(obj)
                         }).collect::<Vec<_>>(),
                     }));
                 }
@@ -486,7 +498,7 @@ fn main() -> anyhow::Result<()> {
                 let vt_w = state
                     .sessions
                     .iter()
-                    .map(|s| format!("tty{}", s.vt).len())
+                    .map(|s| fmt_tty(s.vt).len())
                     .max()
                     .unwrap_or(0)
                     .max(3);
@@ -548,7 +560,7 @@ fn main() -> anyhow::Result<()> {
                         session.id,
                         session.uid,
                         session.username,
-                        format!("tty{}", session.vt),
+                        fmt_tty(session.vt),
                         session.seat.as_deref().unwrap_or("-"),
                         session.leader,
                         fmt_ts(session.timestamp),

@@ -846,7 +846,7 @@ fn client_session_id(
         .ok_or_else(|| anyhow::anyhow!("client has no session id"))
 }
 
-impl seat_v1::SeatV1Handler for crate::Sessiond {
+impl<C: crate::cgroup::CgroupManager + 'static> seat_v1::SeatV1Handler for crate::Sessiond<C> {
     fn bind(&mut self, object: seat_manager::SeatManager) {
         let Some(client) = object.client() else {
             object.error(
@@ -874,7 +874,9 @@ impl seat_v1::SeatV1Handler for crate::Sessiond {
     }
 }
 
-impl hyprwire::Dispatch<seat_manager::SeatManager> for crate::Sessiond {
+impl<C: crate::cgroup::CgroupManager + 'static> hyprwire::Dispatch<seat_manager::SeatManager>
+    for crate::Sessiond<C>
+{
     fn event(
         &mut self,
         object: &seat_manager::SeatManager,
@@ -973,7 +975,9 @@ impl hyprwire::Dispatch<seat_manager::SeatManager> for crate::Sessiond {
     }
 }
 
-impl hyprwire::Dispatch<seat::Seat> for crate::Sessiond {
+impl<C: crate::cgroup::CgroupManager + 'static> hyprwire::Dispatch<seat::Seat>
+    for crate::Sessiond<C>
+{
     fn event(&mut self, object: &seat::Seat, event: <seat::Seat as hyprwire::Object>::Event<'_>) {
         let Some(client_entity) =
             client_entity_by_seat_object(&self.world, &self.client_entities, object)

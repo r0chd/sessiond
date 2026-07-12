@@ -86,7 +86,9 @@ pub fn entity_by_object(
     })
 }
 
-impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Sessiond {
+impl<C: crate::cgroup::CgroupManager + 'static>
+    hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Sessiond<C>
+{
     fn event(
         &mut self,
         object: &session_core_session::SessionCoreSession,

@@ -27,11 +27,13 @@ pub trait CgroupManager {
 pub struct SystemCgroupManager {
     root_path: &'static path::Path,
     cgroups: Vec<Cgroup>,
-    loop_handle: calloop::LoopHandle<'static, crate::Sessiond>,
+    loop_handle: calloop::LoopHandle<'static, crate::Sessiond<SystemCgroupManager>>,
 }
 
 impl SystemCgroupManager {
-    pub fn new(loop_handle: calloop::LoopHandle<'static, crate::Sessiond>) -> anyhow::Result<Self> {
+    pub fn new(
+        loop_handle: calloop::LoopHandle<'static, crate::Sessiond<SystemCgroupManager>>,
+    ) -> anyhow::Result<Self> {
         let root_path = path::Path::new("/sys/fs/cgroup/sessiond");
         fs::create_dir_all(root_path)
             .with_context(|| format!("failed to create cgroup root at {}", root_path.display()))?;

@@ -117,10 +117,10 @@ impl SeatAccess {
     }
 }
 
-struct Sessiond {
+struct Sessiond<C: cgroup::CgroupManager + 'static> {
     next_session_id: session::SessionId,
     info_managers: Vec<session_core_manager::SessionCoreManager>,
-    cgroup_manager: Box<dyn cgroup::CgroupManager>,
+    cgroup_manager: C,
     session_entities: Vec<entity::Entity>,
     user_entities: Vec<entity::Entity>,
     seat_entities: Vec<entity::Entity>,
@@ -134,7 +134,7 @@ struct Sessiond {
     world: world::World,
 }
 
-impl Sessiond {
+impl<C: cgroup::CgroupManager + 'static> Sessiond<C> {
     fn remove_session(&mut self, session_id: session::SessionId) -> Option<entity::Entity> {
         let idx = self.session_entities.iter().position(|entity| {
             self.world
@@ -156,9 +156,12 @@ impl Sessiond {
     }
 }
 
-impl session_management_v1::SessionManagementV1Handler for Sessiond {}
+impl<C: cgroup::CgroupManager + 'static> session_management_v1::SessionManagementV1Handler
+    for Sessiond<C>
+{
+}
 
-impl session_core_v1::SessionCoreV1Handler for Sessiond {
+impl<C: cgroup::CgroupManager + 'static> session_core_v1::SessionCoreV1Handler for Sessiond<C> {
     fn bind(&mut self, object: session_core_manager::SessionCoreManager) {
         session::sync_vt_session_states(
             &mut self.world,
@@ -177,7 +180,9 @@ impl session_core_v1::SessionCoreV1Handler for Sessiond {
     }
 }
 
-impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
+impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager::SessionManager>
+    for Sessiond<C>
+{
     fn event(
         &mut self,
         object: &session_manager::SessionManager,
@@ -336,7 +341,9 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Sessiond {
     }
 }
 
-impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
+impl<C: cgroup::CgroupManager + 'static>
+    hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond<C>
+{
     fn event(
         &mut self,
         object: &session_core_manager::SessionCoreManager,
@@ -642,18 +649,16 @@ struct DaemonConfig {
     vtbound: bool,
     seat_access: SeatAccess,
     management_uid: process::Uid,
-    no_cgroup: bool,
 }
 
-fn run(config: DaemonConfig) -> anyhow::Result<()> {
+fn run<C: cgroup::CgroupManager + 'static>(
+    config: DaemonConfig,
+    make_cgroup: impl FnOnce(calloop::LoopHandle<'static, Sessiond<C>>) -> anyhow::Result<C>,
+) -> anyhow::Result<()> {
     let mut event_loop = calloop::EventLoop::try_new()?;
     let loop_signal = event_loop.get_signal();
 
-    let cgroup_manager: Box<dyn cgroup::CgroupManager> = if config.no_cgroup {
-        Box::new(cgroup::DummyCgroupManager)
-    } else {
-        Box::new(cgroup::SystemCgroupManager::new(event_loop.handle())?)
-    };
+    let cgroup_manager = make_cgroup(event_loop.handle())?;
 
     if let Err(e) = fs::create_dir_all("/var/lib/sessiond") {
         log::warn!(error = e.to_string().as_str(); "failed to create linger dir, linger feature unavailable");
@@ -838,7 +843,7 @@ fn main() -> anyhow::Result<()> {
         .ok()
         .is_none_or(|vtbound| vtbound == "1");
 
-    run(DaemonConfig {
+    let config = DaemonConfig {
         socket_path: args.socket_path,
         vtbound,
         seat_access: SeatAccess::new(
@@ -846,8 +851,13 @@ fn main() -> anyhow::Result<()> {
             resolve_group(&args.seat_group)?,
         ),
         management_uid: resolve_user(&args.management_user)?,
-        no_cgroup: args.no_cgroup,
-    })
+    };
+
+    if args.no_cgroup {
+        run(config, |_| Ok(cgroup::DummyCgroupManager))
+    } else {
+        run(config, cgroup::SystemCgroupManager::new)
+    }
 }
 
 fn resolve_user(user: &str) -> anyhow::Result<process::Uid> {

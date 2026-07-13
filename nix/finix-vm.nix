@@ -105,7 +105,7 @@ in
         "-serial"
         "stdio"
       ];
-      package = pkgs.qemu_full;
+      package = pkgs.qemu;
       nics.default.args = [
         "user"
         "model=virtio-net-pci"

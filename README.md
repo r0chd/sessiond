@@ -20,8 +20,16 @@ It exposes session and seat management over the Hyprwire protocol:
 - A seat manager for acquiring seats and managing seat devices
 - A partial `org.freedesktop.ConsoleKit` D-Bus interface for polkit integration
 
+## What is it not?
+
+`sessiond` is not responsible for starting user service managers. Starting and
+integrating a user service manager should be handled by a `sessiond` client.
+
+See [Clients](docs/CLIENTS.md) for known `sessiond` clients.
+
 ## Documentation
 
 - [Installation](docs/INSTALL.md)
 - [Seat manager](docs/SEAT_MANAGER.md)
+- [Clients](docs/CLIENTS.md)
 - [Known issues](docs/KNOWN_ISSUES.md).

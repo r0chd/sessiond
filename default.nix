@@ -43,9 +43,6 @@ in
       default = pkgs.callPackage ./nix/package.nix {
         inherit rustPlatform;
       };
-      libseat = pkgs.callPackage ./nix/libseat.nix {
-        inherit rustPlatform;
-      };
       sessiond = default;
     };
 

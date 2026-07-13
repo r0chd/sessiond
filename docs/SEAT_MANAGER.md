@@ -9,6 +9,12 @@ To bridge that gap, this project provides a `libseat` implementation that is
 ABI-compatible with upstream `libseat`. Programs linked against `libseat` can
 use this library to acquire seats through `sessiond`.
 
+The `libseat` implementation lives in the separate
+[`sessiond-libseat`](https://tangled.org/r0chd.pl/sessiond-libseat) repository
+so it can be used as an independent input. Compositor packages such
+as Hyprland and Aquamarine only need to rebuild when that implementation
+changes, not when the main `sessiond` repository is updated.
+
 `sessiond` can run alongside `seatd` when it is only used for session
 management. In that setup, `seatd` remains the seat manager and compositors keep
 using the system `libseat`, so no compositor packages need to be rebuilt.
@@ -17,29 +23,64 @@ using the system `libseat`, so no compositor packages need to be rebuilt.
 
 ### NixOS / finix
 
+With flakes, add `sessiond-libseat` as a separate input:
+
+```nix
+{
+  inputs.sessiond-libseat.url = "git+https://tangled.org/r0chd.pl/sessiond-libseat";
+}
+```
+
+Then use the pinned `libseat` package in compositor overrides:
+
 ```nix
 { pkgs, inputs, ... }:
 {
-
   # For Hyprland, `libseat` is pulled in through Aquamarine:
   programs.hyprland.package = pkgs.hyprland.override {
     aquamarine = pkgs.aquamarine.override {
-      seatd = inputs.sessiond.packages.${pkgs.stdenv.hostPlatform.system}.libseat;
+      seatd = inputs.sessiond-libseat.packages.${pkgs.stdenv.hostPlatform.system}.libseat;
     };
   };
 
   programs.niri.package = pkgs.niri.override {
-    seatd = inputs.sessiond.packages.${pkgs.stdenv.hostPlatform.system}.libseat;
+    seatd = inputs.sessiond-libseat.packages.${pkgs.stdenv.hostPlatform.system}.libseat;
+  };
+}
+```
+
+With npins, pin the separate source:
+
+```sh
+npins add git --name sessiond-libseat https://tangled.org/r0chd.pl/sessiond-libseat --branch master
+```
+
+Import it from `./npins` and use the pinned `libseat` package the same way:
+
+```nix
+{ pkgs, ... }:
+let
+  sources = import ./npins;
+  sessiondLibseat = import sources."sessiond-libseat".outPath { };
+  libseat = sessiondLibseat.packages.${pkgs.stdenv.hostPlatform.system}.libseat;
+in
+{
+  # For Hyprland, `libseat` is pulled in through Aquamarine:
+  programs.hyprland.package = pkgs.hyprland.override {
+    aquamarine = pkgs.aquamarine.override {
+      seatd = libseat;
+    };
+  };
+
+  programs.niri.package = pkgs.niri.override {
+    seatd = libseat;
   };
 }
 ```
 
 This makes the compositor stack build against the `libseat` implementation
-provided by `sessiond`, so seat acquisition and device access go through
-`sessiond`.
-
-> These overrides cause cache misses for the affected packages, so they need to
-> be built locally.
+provided by `sessiond-libseat`, so seat acquisition and device access go
+through `sessiond`.
 
 ### Other distributions
 

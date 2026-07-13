@@ -2,9 +2,7 @@
 
 ## NixOS / finix
 
-### Sources
-
-With flakes:
+With flakes, add `sessiond` as an input:
 
 ```nix
 {
@@ -12,31 +10,34 @@ With flakes:
 }
 ```
 
-Use `inputs.sessiond` as `sessiond` in the examples below.
+Then import the module and enable `sessiond`:
 
-With npins:
+```nix
+{ inputs, ... }:
+{
+  imports = [
+    inputs.sessiond.nixosModules.default # on NixOS
+    inputs.sessiond.finixModules.default # on finix
+  ];
+
+  services.sessiond.enable = true;
+}
+```
+
+With npins, pin the source:
 
 ```sh
 npins add git --name sessiond https://tangled.org/r0chd.pl/sessiond --branch master
 ```
 
-Import the pinned source in your configuration:
+Then import the pinned module and enable `sessiond`:
 
 ```nix
+{ ... }:
 let
   sources = import ./npins;
   sessiond = import sources.sessiond.outPath { };
 in
-{
-  # ...
-}
-```
-
-### Configuration
-
-Import the module and enable `sessiond`:
-
-```nix
 {
   imports = [
     sessiond.nixosModules.default # on NixOS
@@ -50,7 +51,7 @@ Import the module and enable `sessiond`:
 The PAM module registers a session with `sessiond`.
 It is enabled for the `login` service by default;
 enable it for any other session-opening PAM service
-too, such as `gdm`, `sddm`, `greetd` or `hilsed`
+too, such as `gdm`, `sddm`, `greetd` or `hilsed`.
 
 ```nix
 {

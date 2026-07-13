@@ -1,6 +1,6 @@
 # sessiond
 
-[![coverage](https://coverage-badge.web.garage.r0chd.pl/coverage.svg)](https://tangled.org/parzivale.tngl.sh/sessiond/pipelines)
+![coverage](https://coverage-badge.web.garage.r0chd.pl/coverage.svg)
 
 `sessiond` is a session management daemon for systems that do not want to
 depend on `(e)logind`.

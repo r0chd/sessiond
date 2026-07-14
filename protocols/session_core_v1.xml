@@ -11,12 +11,6 @@
    </description>
    <arg name="session_id" type="uint" summary="new session identifier"/>
   </s2c>
-  <s2c name="session_removed">
-   <description summary="a session was destroyed">
-    Broadcast to all connected clients when any session is destroyed.
-   </description>
-   <arg name="session_id" type="uint" summary="destroyed session identifier"/>
-  </s2c>
   <s2c name="done">
    <description summary="initial field dump complete"/>
   </s2c>
@@ -192,6 +186,12 @@
    <arg name="code" type="enum" interface="error_code" summary="error kind"/>
    <arg name="message" type="varchar" summary="human-readable error detail"/>
   </s2c>
+  <c2s name="terminate">
+   <description summary="terminate the user"/>
+  </c2s>
+  <c2s name="kill">
+   <description summary="kill the user"/>
+  </c2s>
   <c2s name="destroy" destructor="true">
    <description summary="destroy this object"/>
   </c2s>

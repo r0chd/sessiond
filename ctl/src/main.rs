@@ -54,9 +54,6 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for State {
             session_core_manager::Event::SessionAdded { session_id } => {
                 self.add_session(object, session_id);
             }
-            session_core_manager::Event::SessionRemoved { session_id } => {
-                self.sessions.retain(|session| session.id != session_id);
-            }
             session_core_manager::Event::Done => {
                 self.done = true;
             }
@@ -276,6 +273,26 @@ enum UserCommand {
         #[arg(long, help = "emit machine-readable JSON output")]
         json: bool,
     },
+    #[command(
+        about = "force-stop user sessions",
+        group(ArgGroup::new("target").required(true).args(["uids", "current"]))
+    )]
+    Kill {
+        #[arg(long, help = "target your current user")]
+        current: bool,
+        #[arg(value_name = "UID", help = "user id; omit with --current")]
+        uids: Vec<u32>,
+    },
+    #[command(
+        about = "ask user sessions to exit",
+        group(ArgGroup::new("target").required(true).args(["uids", "current"]))
+    )]
+    Terminate {
+        #[arg(long, help = "target your current user")]
+        current: bool,
+        #[arg(value_name = "UID", help = "user id; omit with --current")]
+        uids: Vec<u32>,
+    },
 }
 
 #[derive(Parser)]
@@ -338,6 +355,21 @@ impl SessionAction {
             Self::Kill => object.send_kill(),
             Self::Lock => object.send_lock(),
             Self::Unlock => object.send_unlock(),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum UserAction {
+    Kill,
+    Terminate,
+}
+
+impl UserAction {
+    fn send(self, object: &session_core_user::SessionCoreUser) {
+        match self {
+            Self::Kill => object.send_kill(),
+            Self::Terminate => object.send_terminate(),
         }
     }
 }
@@ -695,6 +727,106 @@ fn main() -> anyhow::Result<()> {
                         user_state_name(user.state),
                         if user.lingering { "yes" } else { "no" },
                     );
+                }
+            }
+            UserCommand::Kill { current, uids } => {
+                let action = UserAction::Kill;
+                let uids = if current {
+                    vec![process::getuid().as_raw()]
+                } else {
+                    uids
+                };
+
+                for uid in &uids {
+                    state.add_user(&manager, *uid);
+                }
+
+                while state.users.iter().any(|user| !user.done) {
+                    event_queue.dispatch_events(&mut state, true)?;
+                }
+
+                if let Some(err) = state.error.take() {
+                    anyhow::bail!("{err}");
+                }
+
+                let unmatched = state
+                    .users
+                    .iter()
+                    .filter(|user| user.not_found)
+                    .map(|user| user.uid)
+                    .collect::<Vec<_>>();
+
+                if !unmatched.is_empty() {
+                    let uids = unmatched
+                        .iter()
+                        .map(std::string::ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    eprintln!("{} unknown user ids: {uids}", "error:".red());
+                    return Ok(());
+                }
+
+                for user in &mut state.users {
+                    user.done = false;
+                    action.send(&user.object);
+                }
+
+                while state.users.iter().any(|user| !user.done) {
+                    event_queue.dispatch_events(&mut state, true)?;
+                }
+
+                if let Some(err) = state.error {
+                    eprintln!("{} {err}", "error:".red());
+                }
+            }
+            UserCommand::Terminate { current, uids } => {
+                let action = UserAction::Terminate;
+                let uids = if current {
+                    vec![process::getuid().as_raw()]
+                } else {
+                    uids
+                };
+
+                for uid in &uids {
+                    state.add_user(&manager, *uid);
+                }
+
+                while state.users.iter().any(|user| !user.done) {
+                    event_queue.dispatch_events(&mut state, true)?;
+                }
+
+                if let Some(err) = state.error.take() {
+                    anyhow::bail!("{err}");
+                }
+
+                let unmatched = state
+                    .users
+                    .iter()
+                    .filter(|user| user.not_found)
+                    .map(|user| user.uid)
+                    .collect::<Vec<_>>();
+
+                if !unmatched.is_empty() {
+                    let uids = unmatched
+                        .iter()
+                        .map(std::string::ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    eprintln!("{} unknown user ids: {uids}", "error:".red());
+                    return Ok(());
+                }
+
+                for user in &mut state.users {
+                    user.done = false;
+                    action.send(&user.object);
+                }
+
+                while state.users.iter().any(|user| !user.done) {
+                    event_queue.dispatch_events(&mut state, true)?;
+                }
+
+                if let Some(err) = state.error {
+                    eprintln!("{} {err}", "error:".red());
                 }
             }
         },

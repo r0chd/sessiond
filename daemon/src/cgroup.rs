@@ -121,21 +121,30 @@ impl CgroupManager for SystemCgroupManager {
                 file.read_to_string(&mut contents)?;
 
                 if contents.contains("populated 0") {
-                    let Some((uid, cgroup_path)) =
-                        state.cgroup_manager.take_cgroup(session_id)
+                    let Some((uid, cgroup_path)) = state.cgroup_manager.take_cgroup(session_id)
                     else {
                         return Ok(calloop::PostAction::Remove);
                     };
 
                     fs::remove_dir(&cgroup_path)?;
-                    log::info!(session_id = session_id.as_raw(), path = cgroup_path.to_str(); "cgroup destroyed");
+                    log::info!(
+                        session_id = session_id.as_raw(),
+                        path = cgroup_path.to_str();
+                        "cgroup destroyed"
+                    );
 
                     if !state.cgroup_manager.has_uid_sessions(uid)
                         && !user::is_lingering(&state.world, &state.user_entities, uid)
                         && let Err(e) = state.cgroup_manager.remove_user_cgroup(uid)
                     {
-                        log::error!(uid = uid, error = e.to_string().as_str(); "failed to remove user cgroup");
+                        log::error!(
+                            uid = uid,
+                            error = e.to_string().as_str();
+                            "failed to remove user cgroup"
+                        );
                     }
+
+                    state.cleanup_user_runtime_dir(uid);
 
                     if state.shutting_down && state.cgroup_manager.is_empty() {
                         state.loop_signal.stop();

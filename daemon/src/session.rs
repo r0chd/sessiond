@@ -915,6 +915,12 @@ impl<C: cgroup::CgroupManager + 'static>
 
                 object.send_done();
             }
+            session_core_manager::Event::GetSeat {
+                session_core_seat,
+                seat: _,
+            } => {
+                session_core_seat.send_destroyed();
+            }
             session_core_manager::Event::Destroy => {
                 self.info_managers.retain(|m| m != object);
             }

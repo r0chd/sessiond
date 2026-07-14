@@ -55,6 +55,16 @@
    <arg name="uid" type="uint" summary="user ID to query"/>
    <returns iface="session_core_user"/>
   </c2s>
+  <c2s name="get_seat">
+   <description summary="create a per-seat info object">
+    Creates a session_core_seat object for the seat with the given name.
+    The daemon immediately pushes the seat fields, followed by done, and
+    re-sends fields as they change. If no matching seat exists, destroyed
+    is sent instead.
+   </description>
+   <arg name="seat" type="varchar" summary="seat name to query"/>
+   <returns iface="session_core_seat"/>
+  </c2s>
   <c2s name="reboot">
    <description summary="reboot the system"/>
   </c2s>
@@ -147,6 +157,145 @@
   </c2s>
  </object>
 
+ <object name="session_core_seat" version="1">
+  <description summary="per-seat information">
+   Provides information about a single seat. All fields are pushed
+   immediately on creation and re-sent if they change.
+  </description>
+  <s2c name="seat">
+   <arg name="seat" type="varchar" summary="seat name"/>
+  </s2c>
+  <s2c name="mode">
+   <arg name="mode" type="enum" interface="seat_mode" summary="seat mode"/>
+  </s2c>
+  <s2c name="current_vt">
+   <arg name="vt" type="uint" summary="current virtual terminal, 0 if none or not VT-bound"/>
+  </s2c>
+  <s2c name="client_added">
+   <description summary="seat client added">
+    Sent once per client during the initial dump and whenever a new client
+    joins the seat. Use get_client with this PID to retrieve
+    the client's status object.
+   </description>
+   <arg name="pid" type="uint" summary="PID of the client that opened the seat"/>
+  </s2c>
+  <c2s name="get_client">
+   <description summary="create a per-seat-client info object">
+    Creates a session_core_seat_client object for the client with the given PID
+    on this seat. The daemon immediately pushes the client fields, followed by
+    done, and re-sends fields as they change. If no matching client exists,
+    destroyed is sent instead.
+   </description>
+   <arg name="pid" type="uint" summary="PID of the client that opened the seat"/>
+   <returns iface="session_core_seat_client"/>
+  </c2s>
+  <s2c name="done">
+   <description summary="initial field dump complete"/>
+  </s2c>
+  <s2c name="destroyed">
+   <description summary="seat has been removed or did not exist">
+    Sent when the seat is destroyed or if the seat name passed to get_seat
+    was not found. The client should release this object.
+   </description>
+  </s2c>
+  <c2s name="destroy" destructor="true">
+   <description summary="destroy this object"/>
+  </c2s>
+ </object>
+
+ <object name="session_core_seat_client" version="1">
+  <description summary="per-seat-client information">
+   Provides information about a single client attached to a seat. All fields
+   are pushed immediately on creation and re-sent if they change.
+  </description>
+  <s2c name="session">
+   <arg name="session" type="uint" summary="seat client session identifier"/>
+  </s2c>
+  <s2c name="state">
+   <arg name="state" type="enum" interface="seat_client_state" summary="seat client state"/>
+  </s2c>
+  <s2c name="active">
+   <arg name="active" type="uint" summary="non-zero if this is the active seat client"/>
+  </s2c>
+  <s2c name="next">
+   <arg name="next" type="uint" summary="non-zero if this client is queued to become active"/>
+  </s2c>
+  <s2c name="pid">
+   <arg name="pid" type="uint" summary="PID of the client that opened the seat"/>
+  </s2c>
+  <s2c name="uid">
+   <arg name="uid" type="uint" summary="UID of the client that opened the seat"/>
+  </s2c>
+  <s2c name="gid">
+   <arg name="gid" type="uint" summary="GID of the client that opened the seat"/>
+  </s2c>
+  <s2c name="device_added">
+   <description summary="seat client device added">
+    Sent once per device during the initial dump and whenever a new device is
+    assigned to this client. Use get_device with this device_id to retrieve
+    the device status object.
+   </description>
+   <arg name="device_id" type="uint" summary="device id scoped to the seat client"/>
+  </s2c>
+  <s2c name="device_removed">
+   <description summary="seat client device removed"/>
+   <arg name="device_id" type="uint" summary="device id scoped to the seat client"/>
+  </s2c>
+  <s2c name="done">
+   <description summary="initial field dump complete"/>
+  </s2c>
+  <s2c name="destroyed">
+   <description summary="seat client has been removed or did not exist">
+    Sent when the client is removed or if the PID passed to get_client
+    was not found. The client should release this object.
+   </description>
+  </s2c>
+  <c2s name="get_device">
+   <description summary="create a per-seat-device info object">
+    Creates a session_core_seat_device object for the device with the given
+    id on this seat client. The daemon immediately pushes the device fields,
+    followed by done, and re-sends fields as they change. If no matching
+    device exists, destroyed is sent instead.
+   </description>
+   <arg name="device_id" type="uint" summary="device id scoped to the seat client"/>
+   <returns iface="session_core_seat_device"/>
+  </c2s>
+  <c2s name="destroy" destructor="true">
+   <description summary="destroy this object"/>
+  </c2s>
+ </object>
+
+ <object name="session_core_seat_device" version="1">
+  <description summary="per-seat-device information">
+   Provides information about a single device assigned to a seat client. All
+   fields are pushed immediately on creation and re-sent if they change.
+  </description>
+  <s2c name="device_id">
+   <arg name="device_id" type="uint" summary="device id scoped to the seat client"/>
+  </s2c>
+  <s2c name="path">
+   <arg name="path" type="varchar" summary="device path"/>
+  </s2c>
+  <s2c name="kind">
+   <arg name="kind" type="enum" interface="seat_device_kind" summary="device kind"/>
+  </s2c>
+  <s2c name="active">
+   <arg name="active" type="uint" summary="non-zero if this device is currently active"/>
+  </s2c>
+  <s2c name="done">
+   <description summary="initial field dump complete"/>
+  </s2c>
+  <s2c name="destroyed">
+   <description summary="seat device has been removed or did not exist">
+    Sent when the device is removed or if the device_id passed to get_device
+    was not found. The client should release this object.
+   </description>
+  </s2c>
+  <c2s name="destroy" destructor="true">
+   <description summary="destroy this object"/>
+  </c2s>
+ </object>
+
  <object name="session_core_user" version="1">
   <description summary="per-user information">
    Provides information about a single user, identified by uid.
@@ -210,6 +359,26 @@
   <value idx="1" name="active" summary="session is in the foreground"/>
   <value idx="2" name="closing" summary="session is being destroyed"/>
   <value idx="3" name="opening" summary="session is being created"/>
+ </enum>
+
+ <enum name="seat_mode">
+  <value idx="0" name="vt_bound" summary="seat follows the active virtual terminal"/>
+  <value idx="1" name="non_vt_bound" summary="seat is not bound to virtual terminals"/>
+ </enum>
+
+ <enum name="seat_client_state">
+  <value idx="0" name="new" summary="client is not yet enabled"/>
+  <value idx="1" name="enabled" summary="client may use seat devices"/>
+  <value idx="2" name="pending_disabled" summary="client must acknowledge disabled state"/>
+  <value idx="3" name="disabled" summary="client is inactive"/>
+ </enum>
+
+ <enum name="seat_device_kind">
+  <value idx="0" name="drm" summary="DRM device"/>
+  <value idx="1" name="evdev" summary="evdev input device"/>
+  <value idx="2" name="hidraw" summary="hidraw device"/>
+  <value idx="3" name="wscons" summary="wscons device"/>
+  <value idx="4" name="unknown" summary="unknown or unsupported device kind"/>
  </enum>
 
  <enum name="error_code">

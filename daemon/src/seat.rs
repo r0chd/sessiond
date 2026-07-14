@@ -1,5 +1,8 @@
 use crate::seat_v1::{seat, seat_manager};
-use crate::{device, ecs, seat_v1, session, session_core_v1, terminal};
+use crate::session_core_v1::{
+    session_core_seat, session_core_seat_client, session_core_seat_device,
+};
+use crate::{cgroup, device, ecs, seat_v1, session, session_core_v1, terminal};
 use bevy_ecs::{entity, world};
 use calloop::signals;
 use rustix::io;
@@ -1104,5 +1107,53 @@ impl<C: crate::cgroup::CgroupManager + 'static> hyprwire::Dispatch<seat::Seat>
                     .retain(|entity| *entity != client_entity);
             }
         }
+    }
+}
+
+impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_core_seat::SessionCoreSeat>
+    for crate::Sessiond<C>
+{
+    fn event(
+        &mut self,
+        _object: &session_core_seat::SessionCoreSeat,
+        event: <session_core_seat::SessionCoreSeat as hyprwire::Object>::Event<'_>,
+    ) {
+        match event {
+            session_core_seat::Event::GetClient {
+                session_core_seat_client,
+                pid,
+            } => {}
+            session_core_seat::Event::Destroy => {}
+        }
+    }
+}
+
+impl<C: cgroup::CgroupManager + 'static>
+    hyprwire::Dispatch<session_core_seat_client::SessionCoreSeatClient> for crate::Sessiond<C>
+{
+    fn event(
+        &mut self,
+        _object: &session_core_seat_client::SessionCoreSeatClient,
+        event: <session_core_seat_client::SessionCoreSeatClient as hyprwire::Object>::Event<'_>,
+    ) {
+        match event {
+            session_core_seat_client::Event::GetDevice {
+                session_core_seat_device,
+                device_id,
+            } => {}
+            session_core_seat_client::Event::Destroy => {}
+        }
+    }
+}
+
+impl<C: cgroup::CgroupManager + 'static>
+    hyprwire::Dispatch<session_core_seat_device::SessionCoreSeatDevice> for crate::Sessiond<C>
+{
+    fn event(
+        &mut self,
+        _object: &session_core_seat_device::SessionCoreSeatDevice,
+        event: <session_core_seat_device::SessionCoreSeatDevice as hyprwire::Object>::Event<'_>,
+    ) {
+        let session_core_seat_device::Event::Destroy = event;
     }
 }

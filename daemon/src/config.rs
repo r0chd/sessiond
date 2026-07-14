@@ -65,7 +65,7 @@ pub struct UserConfig {
 }
 
 #[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Config {
     #[serde(default)]
     pub management: ManagementConfig,
@@ -73,6 +73,8 @@ pub struct Config {
     pub users: BTreeMap<String, UserConfig>,
     #[serde(default = "default_seats")]
     pub seats: BTreeMap<String, SeatConfig>,
+    #[serde(default = "default_seat")]
+    pub default_seat: String,
 }
 
 impl Default for Config {
@@ -81,12 +83,17 @@ impl Default for Config {
             management: ManagementConfig::default(),
             users: BTreeMap::new(),
             seats: default_seats(),
+            default_seat: "seat0".to_string(),
         }
     }
 }
 
 fn default_seats() -> BTreeMap<String, SeatConfig> {
     BTreeMap::from([("seat0".to_string(), SeatConfig::default())])
+}
+
+fn default_seat() -> String {
+    "seat0".to_string()
 }
 
 impl Config {

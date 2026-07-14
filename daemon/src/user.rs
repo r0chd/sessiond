@@ -1,6 +1,6 @@
 use crate::{ecs, session, session_core_user, session_core_v1};
 use bevy_ecs::{entity, world};
-use std::{fs, io, path};
+use std::{fs, io};
 
 pub fn create_runtime_dir(uid: u32) {
     let runtime_dir = format!("/run/user/{uid}");
@@ -52,13 +52,13 @@ pub fn get_or_create(
     entities: &mut Vec<entity::Entity>,
     session_entities: &[entity::Entity],
     uid: u32,
+    lingering: bool,
 ) -> Option<entity::Entity> {
     if let Some(entity) = entity_by_uid(world, entities, uid) {
         return Some(entity);
     }
 
     let user = users::get_user_by_uid(uid)?;
-    let lingering = linger_path(uid).exists();
     let state = compute_state(world, session_entities, uid, lingering);
     let entity = ecs::insert_user(
         world,
@@ -193,78 +193,6 @@ impl<C: crate::cgroup::CgroupManager + 'static>
             );
             return;
         }
-
-        if let session_core_user::Event::SetLingering { lingering } = event {
-            if let Err(err) = set_lingering(uid, lingering != 0) {
-                object.send_error(
-                    session_core_v1::ErrorCode::Io,
-                    format!("failed to set lingering: {err}"),
-                );
-                return;
-            }
-
-            match (
-                lingering != 0,
-                session::entities_by_uid(&self.world, &self.session_entities, uid).count() == 0,
-            ) {
-                // Clean up when lingering was turned off and no sessions are active
-                (false, true) => {
-                    if let Err(e) = self.cgroup_manager.remove_user_cgroup(uid) {
-                        log::error!(uid, error = e.to_string().as_str(); "failed to remove user cgroup");
-                    }
-                    if let Err(e) = remove_runtime_dir(uid) {
-                        log::error!(uid, error = e.to_string().as_str(); "failed to remove runtime dir");
-                    }
-                }
-                // Create runtime dir and cgroup if lingering
-                // was enabled for user with no active sessions
-                (true, true) => {
-                    create_runtime_dir(uid);
-                    if let Err(e) = self.cgroup_manager.ensure_user_cgroup(uid) {
-                        log::error!(uid, error = e.to_string().as_str(); "failed to create user cgroup");
-                    }
-                }
-                _ => {}
-            }
-
-            log::info!(uid, lingering; "lingering updated");
-            if let Some(mut component) = self.world.get_mut::<ecs::Lingering>(entity) {
-                component.0 = lingering != 0;
-            }
-            if let Some(objects) = self.world.get::<ecs::UserObjects>(entity) {
-                for object in &objects.0 {
-                    object.send_lingering(lingering);
-                    object.send_ok();
-                }
-            }
-        }
-    }
-}
-
-const LINGER_DIR: &str = "/var/lib/sessiond";
-
-fn linger_path(uid: u32) -> path::PathBuf {
-    path::Path::new(LINGER_DIR).join(uid.to_string())
-}
-
-pub fn lingering_uids() -> io::Result<Vec<u32>> {
-    let uids = fs::read_dir(LINGER_DIR)?
-        .filter_map(|entry| entry.ok()?.file_name().to_str()?.parse::<u32>().ok())
-        .collect();
-
-    Ok(uids)
-}
-
-fn set_lingering(uid: u32, lingering: bool) -> io::Result<()> {
-    if lingering {
-        fs::File::create(linger_path(uid))?;
-        return Ok(());
-    }
-
-    match fs::remove_file(linger_path(uid)) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(err),
     }
 }
 

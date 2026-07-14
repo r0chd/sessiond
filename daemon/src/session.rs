@@ -389,7 +389,7 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager::Ses
             return;
         };
 
-        if client.creds().uid != self.management_uid && !client.creds().uid.is_root() {
+        if !self.management_access.allows(client.creds()) {
             log::warn!(uid = client.creds().uid.as_raw(); "rejected request from non-root client");
             return;
         }
@@ -722,6 +722,7 @@ impl<C: cgroup::CgroupManager + 'static>
                     &mut self.user_entities,
                     &self.session_entities,
                     uid,
+                    false,
                 ) else {
                     log::warn!(uid; "get_user requested for unknown user");
                     session_core_user.send_not_found();
@@ -741,10 +742,7 @@ impl<C: cgroup::CgroupManager + 'static>
                     .filter(|session| session.0 != client.creds().uid.as_raw())
                     .count();
 
-                if client.creds().uid != self.management_uid
-                    && !client.creds().uid.is_root()
-                    && foreign_session_count > 0
-                {
+                if foreign_session_count > 0 && !self.management_access.allows(client.creds()) {
                     log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "reboot denied: multiple sessions active");
                     object.send_error(
                         session_core_v1::ErrorCode::ActiveSessions,
@@ -795,10 +793,7 @@ impl<C: cgroup::CgroupManager + 'static>
                     .filter(|session| session.0 != client.creds().uid.as_raw())
                     .count();
 
-                if client.creds().uid != self.management_uid
-                    && !client.creds().uid.is_root()
-                    && foreign_session_count > 0
-                {
+                if foreign_session_count > 0 && !self.management_access.allows(client.creds()) {
                     log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "poweroff denied: multiple sessions active");
                     object.send_error(
                         session_core_v1::ErrorCode::ActiveSessions,
@@ -849,10 +844,7 @@ impl<C: cgroup::CgroupManager + 'static>
                     .filter(|session| session.0 != client.creds().uid.as_raw())
                     .count();
 
-                if client.creds().uid != self.management_uid
-                    && !client.creds().uid.is_root()
-                    && foreign_session_count > 0
-                {
+                if foreign_session_count > 0 && !self.management_access.allows(client.creds()) {
                     log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "suspend denied: multiple sessions active");
                     object.send_error(
                         session_core_v1::ErrorCode::ActiveSessions,
@@ -887,10 +879,7 @@ impl<C: cgroup::CgroupManager + 'static>
                     .filter(|session| session.0 != client.creds().uid.as_raw())
                     .count();
 
-                if client.creds().uid != self.management_uid
-                    && !client.creds().uid.is_root()
-                    && foreign_session_count > 0
-                {
+                if foreign_session_count > 0 && !self.management_access.allows(client.creds()) {
                     log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "hibernate denied: multiple sessions active");
                     object.send_error(
                         session_core_v1::ErrorCode::ActiveSessions,

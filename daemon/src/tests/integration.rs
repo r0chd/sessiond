@@ -35,25 +35,29 @@ fn daemon_binary() -> path::PathBuf {
     candidate
 }
 
-struct DaemonGuard(Option<(process::Child, path::PathBuf)>);
+struct DaemonGuard(Option<(process::Child, path::PathBuf, path::PathBuf, path::PathBuf)>);
 
 impl DaemonGuard {
     fn stop(mut self) {
-        if let Some((mut child, socket_path)) = self.0.take() {
+        if let Some((mut child, socket_path, linger_dir, config_path)) = self.0.take() {
             let pid = rustix::process::Pid::from_raw(child.id() as i32).unwrap();
             let _ = rustix::process::kill_process(pid, rustix::process::Signal::TERM);
             let _ = child.wait();
             let _ = std::fs::remove_file(&socket_path);
+            let _ = std::fs::remove_dir_all(&linger_dir);
+            let _ = std::fs::remove_file(&config_path);
         }
     }
 }
 
 impl Drop for DaemonGuard {
     fn drop(&mut self) {
-        if let Some((mut child, socket_path)) = self.0.take() {
+        if let Some((mut child, socket_path, linger_dir, config_path)) = self.0.take() {
             let _ = child.kill();
             let _ = child.wait();
             let _ = std::fs::remove_file(&socket_path);
+            let _ = std::fs::remove_dir_all(&linger_dir);
+            let _ = std::fs::remove_file(&config_path);
         }
     }
 }
@@ -61,17 +65,22 @@ impl Drop for DaemonGuard {
 fn start_daemon(socket_path: path::PathBuf) -> DaemonGuard {
     let uid = rustix::process::getuid().as_raw().to_string();
     let gid = rustix::process::getgid().as_raw().to_string();
+    let linger_dir = socket_path.with_extension("linger");
+    let config_path = socket_path.with_extension("toml");
+    std::fs::create_dir(&linger_dir).expect("failed to create test linger dir");
+    std::fs::write(
+        &config_path,
+        format!("[management]\nuser = {uid:?}\n\n[seats.seat0]\nuser = {uid:?}\ngroup = {gid:?}\n"),
+    )
+    .expect("failed to write test config");
     let child = process::Command::new(daemon_binary())
         .arg("--no-cgroup")
         .arg("--socket-path")
         .arg(&socket_path)
-        .arg("--management-user")
-        .arg(&uid)
-        .arg("--seat-user")
-        .arg(&uid)
-        .arg("--seat-group")
-        .arg(&gid)
+        .arg("--config")
+        .arg(&config_path)
         .env("LOG_LEVEL", "off")
+        .env("SESSIOND_LINGER_DIR", &linger_dir)
         .spawn()
         .expect("failed to spawn daemon");
 
@@ -81,7 +90,7 @@ fn start_daemon(socket_path: path::PathBuf) -> DaemonGuard {
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
 
-    DaemonGuard(Some((child, socket_path)))
+    DaemonGuard(Some((child, socket_path, linger_dir, config_path)))
 }
 
 struct MgmtState {

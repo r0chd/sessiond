@@ -70,7 +70,9 @@ fn start_daemon(socket_path: path::PathBuf) -> DaemonGuard {
     std::fs::create_dir(&linger_dir).expect("failed to create test linger dir");
     std::fs::write(
         &config_path,
-        format!("[management]\nuser = {uid:?}\n\n[seats.seat0]\nuser = {uid:?}\ngroup = {gid:?}\n"),
+        format!(
+            "[management]\nuser = {uid:?}\ngroup = {gid:?}\n\n[seats.seat0]\nuser = {uid:?}\ngroup = {gid:?}\n"
+        ),
     )
     .expect("failed to write test config");
     let child = process::Command::new(daemon_binary())

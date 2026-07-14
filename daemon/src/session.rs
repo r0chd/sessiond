@@ -917,9 +917,15 @@ impl<C: cgroup::CgroupManager + 'static>
             }
             session_core_manager::Event::GetSeat {
                 session_core_seat,
-                seat: _,
+                seat,
             } => {
-                session_core_seat.send_destroyed();
+                let Some(seat_entity) =
+                    seat::seat_entity_by_name(&self.world, &self.seat_entities, &seat)
+                else {
+                    session_core_seat.send_destroyed();
+                    return;
+                };
+                seat::add_seat_object(&mut self.world, seat_entity, session_core_seat);
             }
             session_core_manager::Event::Destroy => {
                 self.info_managers.retain(|m| m != object);

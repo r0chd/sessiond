@@ -1,3 +1,6 @@
+use crate::session_core_v1::{
+    session_core_seat, session_core_seat_client, session_core_seat_device,
+};
 use crate::session_management_v1::session_management_session;
 use crate::{
     device, seat, seat_v1, session, session_core_session, session_core_user, session_core_v1,
@@ -67,6 +70,7 @@ pub fn insert_client(world: &mut World, object: seat_v1::seat::Seat, pid: u32) -
         .spawn((
             SeatObject(object),
             ClientPid(pid),
+            ClientObjects(Vec::new()),
             Devices(Vec::new()),
             SeatState(seat::SeatState::New),
         ))
@@ -80,6 +84,7 @@ pub fn insert_seat(world: &mut World, name: String, mode: SeatKind, current_vt: 
             SeatMode(mode),
             CurrentVt(current_vt),
             SeatClients(Vec::new()),
+            SeatObjects(Vec::new()),
         ))
         .id()
 }
@@ -96,6 +101,7 @@ pub fn insert_device(
     world
         .spawn((
             DeviceObjects(vec![DeviceObject { object, id }]),
+            SeatDeviceObjects(Vec::new()),
             DevicePath(path),
             DeviceRefCount(1),
             DeviceKind(kind),
@@ -157,10 +163,21 @@ pub struct SeatObject(pub seat_v1::seat::Seat);
 pub struct ClientPid(pub u32);
 
 #[derive(Component)]
+pub struct ClientObjects(pub Vec<session_core_seat_client::SessionCoreSeatClient>);
+
+#[derive(Component)]
 pub struct Devices(pub Vec<Entity>);
 
 #[derive(Component)]
 pub struct DeviceObjects(pub Vec<DeviceObject>);
+
+#[derive(Component)]
+pub struct SeatDeviceObjects(pub Vec<SeatDeviceObject>);
+
+pub struct SeatDeviceObject {
+    pub object: session_core_seat_device::SessionCoreSeatDevice,
+    pub id: u32,
+}
 
 pub struct DeviceObject {
     pub object: seat_v1::device::Device,
@@ -199,6 +216,9 @@ pub struct CurrentVt(pub u32);
 
 #[derive(Component)]
 pub struct SeatClients(pub Vec<Entity>);
+
+#[derive(Component)]
+pub struct SeatObjects(pub Vec<session_core_seat::SessionCoreSeat>);
 
 #[derive(Component)]
 pub struct ActiveClient(pub Entity);

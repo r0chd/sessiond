@@ -52,6 +52,16 @@ pub fn close_device(
         .ok_or_else(|| anyhow::anyhow!("device not found"))?;
 
     let device_entity = devices.0[idx];
+    let device_id = world
+        .get::<ecs::DeviceObjects>(device_entity)
+        .and_then(|objects| {
+            objects
+                .0
+                .iter()
+                .find(|candidate| candidate.object == *object)
+                .map(|candidate| candidate.id)
+        })
+        .ok_or_else(|| anyhow::anyhow!("device object not found"))?;
     remove_object(world, device_entity, object);
     let device_path = device_path(world, device_entity)?;
     log::debug!(
@@ -61,6 +71,9 @@ pub fn close_device(
         seat_name
     );
 
+    seat::notify_client_device_removed(world, client_entity, device_id);
+    seat::notify_device_id_destroyed(world, device_entity, device_id);
+    seat::remove_device_id_objects(world, device_entity, device_id);
     if decrement_ref(world, device_entity) > 0 {
         return Ok(());
     }
@@ -77,6 +90,7 @@ pub fn close_device(
     if let Some(mut devices) = world.get_mut::<ecs::Devices>(client_entity) {
         devices.0.remove(idx);
     }
+    seat::notify_device_destroyed(world, device_entity);
     world.despawn(device_entity);
 
     Ok(())
@@ -156,12 +170,14 @@ pub fn activate(world: &mut world::World, entity: entity::Entity) -> anyhow::Res
             drm_set_master(&fd.0)
                 .map_err(|err| anyhow::anyhow!("Could not make device fd drm master: {err}"))?;
             world.entity_mut(entity).insert(ecs::DeviceActive(true));
+            notify_active(world, entity, true);
         }
         DeviceKind::Evdev | DeviceKind::Hidraw => {
             return Err(anyhow::anyhow!("device type cannot be activated"));
         }
         DeviceKind::Wscons => {
             world.entity_mut(entity).insert(ecs::DeviceActive(true));
+            notify_active(world, entity, true);
         }
     }
 
@@ -209,7 +225,16 @@ pub fn deactivate(world: &mut world::World, entity: entity::Entity) -> anyhow::R
     }
 
     world.entity_mut(entity).insert(ecs::DeviceActive(false));
+    notify_active(world, entity, false);
     Ok(())
+}
+
+fn notify_active(world: &world::World, entity: entity::Entity, active: bool) {
+    if let Some(objects) = world.get::<ecs::SeatDeviceObjects>(entity) {
+        for object in &objects.0 {
+            object.object.send_active(u32::from(active));
+        }
+    }
 }
 
 pub fn matches_path(world: &world::World, entity: entity::Entity, path: &path::Path) -> bool {

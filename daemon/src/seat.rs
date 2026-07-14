@@ -2,7 +2,7 @@ use crate::seat_v1::{seat, seat_manager};
 use crate::session_core_v1::{
     session_core_seat, session_core_seat_client, session_core_seat_device,
 };
-use crate::{cgroup, device, ecs, seat_v1, session, session_core_v1, terminal};
+use crate::{cgroup, device, ecs, seat_v1, session, session_core_v1, terminal, user};
 use bevy_ecs::{entity, world};
 use calloop::signals;
 use rustix::io;
@@ -132,14 +132,14 @@ pub fn device_entity_by_core_object(
         })
 }
 
-fn seat_mode_event(mode: ecs::SeatKind) -> session_core_v1::SeatMode {
+const fn seat_mode_event(mode: ecs::SeatKind) -> session_core_v1::SeatMode {
     match mode {
         ecs::SeatKind::VtBound => session_core_v1::SeatMode::VtBound,
         ecs::SeatKind::NonVtBound => session_core_v1::SeatMode::NonVtBound,
     }
 }
 
-fn client_state_event(state: SeatState) -> session_core_v1::SeatClientState {
+const fn client_state_event(state: SeatState) -> session_core_v1::SeatClientState {
     match state {
         SeatState::New => session_core_v1::SeatClientState::New,
         SeatState::Enabled => session_core_v1::SeatClientState::Enabled,
@@ -148,7 +148,7 @@ fn client_state_event(state: SeatState) -> session_core_v1::SeatClientState {
     }
 }
 
-pub fn device_kind_event(kind: device::DeviceKind) -> session_core_v1::SeatDeviceKind {
+pub const fn device_kind_event(kind: device::DeviceKind) -> session_core_v1::SeatDeviceKind {
     match kind {
         device::DeviceKind::Drm => session_core_v1::SeatDeviceKind::Drm,
         device::DeviceKind::Evdev => session_core_v1::SeatDeviceKind::Evdev,
@@ -1547,6 +1547,52 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_core_seat::S
                     client_entity,
                     session_core_seat_client,
                 );
+            }
+            session_core_seat::Event::Terminate => {
+                let Some(seat_entity) =
+                    seat_entity_by_core_object(&self.world, &self.seat_entities, object)
+                else {
+                    object.send_destroyed();
+                    return;
+                };
+                let Some(seat_name) = self
+                    .world
+                    .get::<ecs::SeatName>(seat_entity)
+                    .map(|seat| seat.0.clone())
+                else {
+                    object.send_destroyed();
+                    return;
+                };
+
+                let session_entities =
+                    session::entities_by_seat_name(&self.world, &self.session_entities, &seat_name)
+                        .collect::<Vec<_>>();
+
+                log::info!(seat = seat_name.as_str(), sessions = session_entities.len(); "seat terminate requested");
+
+                let Some(client) = object.client() else {
+                    return;
+                };
+                if !self.management_access.allows(client.creds())
+                    && session_entities.iter().any(|entity| {
+                        self.world
+                            .get::<ecs::Uid>(*entity)
+                            .is_none_or(|uid| uid.0 != client.creds().uid.as_raw())
+                    })
+                {
+                    object.send_error(
+                        session_core_v1::ErrorCode::PermissionDenied,
+                        "permission denied",
+                    );
+                    return;
+                }
+
+                for entity in session_entities {
+                    self.terminate_session(entity);
+                }
+
+                user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
+                object.send_ok();
             }
             session_core_seat::Event::Destroy => {
                 if let Some(seat_entity) =

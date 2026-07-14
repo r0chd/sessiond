@@ -189,6 +189,9 @@
    <arg name="pid" type="uint" summary="PID of the client that opened the seat"/>
    <returns iface="session_core_seat_client"/>
   </c2s>
+  <c2s name="terminate">
+   <description summary="send SIGTERM to all sessions on the seat"/>
+  </c2s>
   <s2c name="done">
    <description summary="initial field dump complete"/>
   </s2c>
@@ -197,6 +200,14 @@
     Sent when the seat is destroyed or if the seat name passed to get_seat
     was not found. The client should release this object.
    </description>
+  </s2c>
+  <s2c name="ok">
+   <description summary="last operation completed successfully"/>
+  </s2c>
+  <s2c name="error">
+   <description summary="last operation failed"/>
+   <arg name="code" type="enum" interface="error_code" summary="error kind"/>
+   <arg name="message" type="varchar" summary="human-readable error detail"/>
   </s2c>
   <c2s name="destroy" destructor="true">
    <description summary="destroy this object"/>

@@ -51,6 +51,7 @@ struct Seat {
     done: bool,
 }
 
+#[allow(clippy::struct_excessive_bools)]
 struct SeatClient {
     seat: String,
     pid: u32,
@@ -338,9 +339,15 @@ impl hyprwire::Dispatch<session_core_seat::SessionCoreSeat> for State {
                 let object = object.clone();
                 self.add_seat_client(&object, pid);
             }
-            session_core_seat::Event::Done => self.seats[idx].done = true,
+            session_core_seat::Event::Done | session_core_seat::Event::Ok => {
+                self.seats[idx].done = true;
+            }
             session_core_seat::Event::Destroyed => {
                 self.seats[idx].destroyed = true;
+                self.seats[idx].done = true;
+            }
+            session_core_seat::Event::Error { code: _, message } => {
+                self.error = Some(message);
                 self.seats[idx].done = true;
             }
         }
@@ -366,7 +373,7 @@ impl hyprwire::Dispatch<session_core_seat_client::SessionCoreSeatClient> for Sta
                 self.seat_clients[idx].session = session;
             }
             session_core_seat_client::Event::State { state } => {
-                self.seat_clients[idx].state = state
+                self.seat_clients[idx].state = state;
             }
             session_core_seat_client::Event::Active { active } => {
                 self.seat_clients[idx].active = active != 0;
@@ -568,6 +575,16 @@ enum SeatCommand {
         seat: Option<String>,
         #[arg(long, help = "emit machine-readable JSON output")]
         json: bool,
+    },
+    #[command(
+        about = "ask seat sessions to exit",
+        group(ArgGroup::new("target").required(true).args(["seats", "current"]))
+    )]
+    Terminate {
+        #[arg(long, help = "target your current seat")]
+        current: bool,
+        #[arg(value_name = "SEAT", help = "seat name; omit with --current")]
+        seats: Vec<String>,
     },
 }
 
@@ -1362,6 +1379,69 @@ fn main() -> anyhow::Result<()> {
                                 }
                             );
                         }
+                    }
+                }
+                SeatCommand::Terminate { current, seats } => {
+                    let seats = if current {
+                        let uid = process::getuid();
+                        let session = state
+                            .sessions
+                            .iter()
+                            .find(|session| session.uid == uid.as_raw())
+                            .context(format!(
+                                "{} Session for uid {} not found, check if pam module is installed",
+                                "error:".red(),
+                                uid.as_raw()
+                            ))?;
+                        let seat = session.seat.clone().context(format!(
+                            "{} current session is not assigned to a seat",
+                            "error:".red()
+                        ))?;
+                        vec![seat]
+                    } else {
+                        seats
+                    };
+
+                    let mut unmatched = Vec::new();
+                    let mut matched = Vec::new();
+
+                    for seat_name in &seats {
+                        if let Some(seat) = state
+                            .seats
+                            .iter()
+                            .find(|seat| seat.name == *seat_name && !seat.destroyed)
+                        {
+                            matched.push(seat.object.clone());
+                        } else {
+                            unmatched.push(seat_name);
+                        }
+                    }
+
+                    if !unmatched.is_empty() {
+                        let seats = unmatched
+                            .iter()
+                            .map(std::string::ToString::to_string)
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        eprintln!("{} unknown seats: {seats}", "error:".red());
+                        return Ok(());
+                    }
+
+                    for seat in &mut state.seats {
+                        if matched.iter().any(|object| object == &seat.object) {
+                            seat.done = false;
+                        }
+                    }
+                    for object in matched {
+                        object.send_terminate();
+                    }
+
+                    while state.seats.iter().any(|seat| !seat.done) {
+                        event_queue.dispatch_events(&mut state, true)?;
+                    }
+
+                    if let Some(err) = state.error {
+                        eprintln!("{} {err}", "error:".red());
                     }
                 }
             }

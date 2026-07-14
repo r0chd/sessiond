@@ -2,7 +2,7 @@ use anyhow::Context;
 use std::collections::BTreeMap;
 use std::{fs, io, path};
 
-#[derive(serde::Deserialize, Default)]
+#[derive(serde::Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum SeatKind {
     #[default]

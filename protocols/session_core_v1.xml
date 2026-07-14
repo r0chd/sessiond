@@ -192,13 +192,6 @@
    <arg name="code" type="enum" interface="error_code" summary="error kind"/>
    <arg name="message" type="varchar" summary="human-readable error detail"/>
   </s2c>
-  <c2s name="set_lingering">
-   <description summary="enable or disable lingering for this user">
-    Persists the lingering flag so it survives across sessions. Requires
-    root, or that the caller's uid matches this user's uid.
-   </description>
-   <arg name="lingering" type="uint" summary="non-zero to enable, zero to disable"/>
-  </c2s>
   <c2s name="destroy" destructor="true">
    <description summary="destroy this object"/>
   </c2s>

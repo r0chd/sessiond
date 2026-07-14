@@ -50,48 +50,29 @@ use std::{env, fs, path};
 
 #[derive(Parser)]
 struct Args {
-    #[arg(
-        long,
-        value_name = "USER",
-        default_value = "root",
-        help = "Allow USER to bind seat_v1"
-    )]
-    seat_user: String,
-    #[arg(
-        long,
-        value_name = "GROUP",
-        default_value = "root",
-        help = "Allow members of GROUP to bind seat_v1"
-    )]
-    seat_group: String,
     #[arg(long, default_value = "/run/sessiond.sock")]
     socket_path: path::PathBuf,
-    #[arg(
-        long,
-        value_name = "USER",
-        default_value = "root",
-        help = "Allow USER to create and destroy sessions"
-    )]
-    management_user: String,
     #[arg(
         long,
         help = "Disable cgroup management (useful for running without root)"
     )]
     no_cgroup: bool,
+    #[arg(short, long, help = "Path to configuration file")]
+    config: Option<path::PathBuf>,
 }
 
-struct SeatAccess {
+struct Access {
     user: process::Uid,
     group: process::Gid,
 }
 
-impl SeatAccess {
+impl Access {
     const fn new(user: process::Uid, group: process::Gid) -> Self {
         Self { user, group }
     }
 
     fn allows(&self, creds: &net::UCred) -> bool {
-        if self.user == creds.uid || self.group == creds.gid {
+        if self.user == creds.uid || self.group == creds.gid || creds.uid.is_root() {
             return true;
         }
 
@@ -125,8 +106,8 @@ struct Sessiond<C: cgroup::CgroupManager + 'static> {
     user_entities: Vec<entity::Entity>,
     seat_entities: Vec<entity::Entity>,
     client_entities: Vec<entity::Entity>,
-    seat_access: SeatAccess,
-    management_uid: process::Uid,
+    seat_access: Access,
+    management_access: Access,
     #[cfg(feature = "consolekit")]
     consolekit: consolekit::Server,
     shutting_down: bool,
@@ -157,14 +138,12 @@ impl<C: cgroup::CgroupManager + 'static> Sessiond<C> {
 }
 
 struct DaemonConfig {
+    settings: config::Config,
     socket_path: path::PathBuf,
-    vtbound: bool,
-    seat_access: SeatAccess,
-    management_uid: process::Uid,
 }
 
 fn run<C: cgroup::CgroupManager + 'static>(
-    config: DaemonConfig,
+    config: &DaemonConfig,
     make_cgroup: impl FnOnce(calloop::LoopHandle<'static, Sessiond<C>>) -> anyhow::Result<C>,
 ) -> anyhow::Result<()> {
     let mut event_loop = calloop::EventLoop::try_new()?;
@@ -178,12 +157,17 @@ fn run<C: cgroup::CgroupManager + 'static>(
 
     let cgroup_manager = make_cgroup(event_loop.handle())?;
 
-    if let Err(e) = fs::create_dir_all("/var/lib/sessiond") {
-        log::warn!(
-            error = e.to_string().as_str();
-            "failed to create linger dir, linger feature unavailable"
-        );
-    }
+    // We don't support multi seat yet
+    anyhow::ensure!(
+        config.settings.seats.len() == 1,
+        "exactly one seat must be configured"
+    );
+    let (seat_name, seat_config) = config
+        .settings
+        .seats
+        .iter()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("exactly one seat must be configured"))?;
 
     let mut sessiond = Sessiond {
         next_session_id: session::SessionId::from_raw(1),
@@ -193,8 +177,14 @@ fn run<C: cgroup::CgroupManager + 'static>(
         user_entities: Vec::new(),
         seat_entities: Vec::new(),
         client_entities: Vec::new(),
-        seat_access: config.seat_access,
-        management_uid: config.management_uid,
+        seat_access: Access::new(
+            resolve_user(&seat_config.user)?,
+            resolve_group(&seat_config.group)?,
+        ),
+        management_access: Access::new(
+            resolve_user(&config.settings.management.user)?,
+            resolve_group(&config.settings.management.group)?,
+        ),
         #[cfg(feature = "consolekit")]
         consolekit: consolekit::Server::start(),
         shutting_down: false,
@@ -202,10 +192,12 @@ fn run<C: cgroup::CgroupManager + 'static>(
         world: world::World::new(),
     };
 
+    let vtbound = seat_config.kind == config::SeatKind::VtBound;
+
     let seat_entity = ecs::insert_seat(
         &mut sessiond.world,
-        "seat0".to_string(),
-        if config.vtbound {
+        seat_name.clone(),
+        if vtbound {
             ecs::SeatKind::VtBound
         } else {
             ecs::SeatKind::NonVtBound
@@ -214,27 +206,29 @@ fn run<C: cgroup::CgroupManager + 'static>(
     );
     sessiond.seat_entities.push(seat_entity);
 
-    match user::lingering_uids() {
-        Ok(uids) => {
-            for uid in uids {
-                user::get_or_create(
-                    &mut sessiond.world,
-                    &mut sessiond.user_entities,
-                    &sessiond.session_entities,
-                    uid,
+    config
+        .settings
+        .users
+        .iter()
+        .filter(|(_, config)| config.linger)
+        .filter_map(|(name, _)| users::get_user_by_name(name))
+        .for_each(|user| {
+            user::get_or_create(
+                &mut sessiond.world,
+                &mut sessiond.user_entities,
+                &sessiond.session_entities,
+                user.uid(),
+                true,
+            );
+            user::create_runtime_dir(user.uid());
+            if let Err(e) = sessiond.cgroup_manager.ensure_user_cgroup(user.uid()) {
+                log::error!(
+                    uid = user.uid(),
+                    error = e.to_string().as_str();
+                    "failed to create user cgroup"
                 );
-                user::create_runtime_dir(uid);
-                if let Err(e) = sessiond.cgroup_manager.ensure_user_cgroup(uid) {
-                    log::error!(
-                        uid,
-                        error = e.to_string().as_str();
-                        "failed to create user cgroup"
-                    );
-                }
             }
-        }
-        Err(e) => log::error!(error = e.to_string().as_str(); "failed to read lingering users"),
-    }
+        });
 
     let path = config.socket_path.as_path();
     let mut socket = server::Server::bind(&path)?;
@@ -377,24 +371,15 @@ fn main() -> anyhow::Result<()> {
 
     log::info!("sessiond daemon starting");
 
-    let vtbound = env::var("SESSIOND_VTBOUND")
-        .ok()
-        .is_none_or(|vtbound| vtbound == "1");
-
     let config = DaemonConfig {
+        settings: config::Config::load(args.config)?,
         socket_path: args.socket_path,
-        vtbound,
-        seat_access: SeatAccess::new(
-            resolve_user(&args.seat_user)?,
-            resolve_group(&args.seat_group)?,
-        ),
-        management_uid: resolve_user(&args.management_user)?,
     };
 
     if args.no_cgroup {
-        run(config, |_| Ok(cgroup::DummyCgroupManager))
+        run(&config, |_| Ok(cgroup::DummyCgroupManager))
     } else {
-        run(config, cgroup::SystemCgroupManager::new)
+        run(&config, cgroup::SystemCgroupManager::new)
     }
 }
 

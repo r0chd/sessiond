@@ -7,6 +7,16 @@
 let
   cfg = config.services.sessiond;
   lingerUsersScript = import ./linger-users.nix { inherit lib pkgs cfg; };
+  settingsFormat = pkgs.formats.toml { };
+  daemonConfig = settingsFormat.generate "sessiond.toml" {
+    seats.seat0 = {
+      inherit (cfg.settings.seat) user group;
+    };
+    users = lib.mapAttrs (_: user: {
+      inherit (user) linger;
+      cgroup = { };
+    }) cfg.settings.users;
+  };
 in
 {
   imports = [ ./common.nix ];
@@ -34,7 +44,7 @@ in
       wantedBy = [ "default.target" ];
 
       serviceConfig = {
-        ExecStart = "${cfg.package}/bin/sessiond --seat-user ${cfg.settings.seat.user} --seat-group ${cfg.settings.seat.group}";
+        ExecStart = "${cfg.package}/bin/sessiond --config ${daemonConfig}";
         Environment = "LOG_LEVEL=${cfg.logLevel}";
         Delegate = true;
       };

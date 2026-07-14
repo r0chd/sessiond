@@ -72,6 +72,18 @@ pub fn entities_by_uid<'a>(
     })
 }
 
+pub fn entities_by_seat_name<'a>(
+    world: &'a world::World,
+    entities: &'a [entity::Entity],
+    seat_name: &'a str,
+) -> impl Iterator<Item = entity::Entity> + 'a {
+    self::entities(world, entities).filter(move |entity| {
+        world
+            .get::<ecs::SeatName>(*entity)
+            .is_some_and(|session_seat| session_seat.0 == seat_name)
+    })
+}
+
 pub fn entity_by_object(
     world: &world::World,
     entities: &[entity::Entity],

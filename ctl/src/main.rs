@@ -12,7 +12,11 @@ use hyprwire::client;
 use owo_colors::OwoColorize;
 use rustix::process;
 use serde_json::json;
-use session_core_v1::{session_core_manager, session_core_session, session_core_user};
+use session_core_v1::{
+    session_core_manager, session_core_seat, session_core_seat_client, session_core_seat_device,
+    session_core_session, session_core_user,
+};
+use std::fs;
 
 struct Session {
     id: u32,
@@ -37,9 +41,48 @@ struct User {
     done: bool,
 }
 
+struct Seat {
+    name: String,
+    object: session_core_seat::SessionCoreSeat,
+    mode: session_core_v1::SeatMode,
+    current_vt: u32,
+    clients: Vec<u32>,
+    destroyed: bool,
+    done: bool,
+}
+
+struct SeatClient {
+    seat: String,
+    pid: u32,
+    object: session_core_seat_client::SessionCoreSeatClient,
+    session: u32,
+    state: session_core_v1::SeatClientState,
+    active: bool,
+    next: bool,
+    uid: Option<u32>,
+    gid: Option<u32>,
+    devices: Vec<u32>,
+    destroyed: bool,
+    done: bool,
+}
+
+struct SeatDevice {
+    client_pid: u32,
+    id: u32,
+    object: session_core_seat_device::SessionCoreSeatDevice,
+    path: String,
+    kind: session_core_v1::SeatDeviceKind,
+    active: bool,
+    destroyed: bool,
+    done: bool,
+}
+
 struct State {
     sessions: Vec<Session>,
     users: Vec<User>,
+    seats: Vec<Seat>,
+    seat_clients: Vec<SeatClient>,
+    seat_devices: Vec<SeatDevice>,
     done: bool,
     error: Option<String>,
 }
@@ -66,6 +109,105 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for State {
 }
 
 impl State {
+    fn add_seat(&mut self, manager: &session_core_manager::SessionCoreManager, name: String) {
+        if self.seats.iter().any(|seat| seat.name == name) {
+            return;
+        }
+
+        let Some(object) = manager.send_get_seat::<Self>(&name) else {
+            self.error = Some(format!("failed to create seat object for {name}"));
+            self.done = true;
+            return;
+        };
+
+        self.seats.push(Seat {
+            name,
+            object,
+            mode: session_core_v1::SeatMode::NonVtBound,
+            current_vt: 0,
+            clients: Vec::new(),
+            destroyed: false,
+            done: false,
+        });
+    }
+
+    fn add_seat_client(&mut self, seat_object: &session_core_seat::SessionCoreSeat, pid: u32) {
+        let Some(seat) = self.seats.iter().find(|seat| seat.object == *seat_object) else {
+            return;
+        };
+
+        if self
+            .seat_clients
+            .iter()
+            .any(|client| client.seat == seat.name && client.pid == pid)
+        {
+            return;
+        }
+
+        let Some(object) = seat.object.send_get_client::<Self>(pid) else {
+            self.error = Some(format!("failed to create seat client object for pid {pid}"));
+            self.done = true;
+            return;
+        };
+
+        self.seat_clients.push(SeatClient {
+            seat: seat.name.clone(),
+            pid,
+            object,
+            session: 0,
+            state: session_core_v1::SeatClientState::New,
+            active: false,
+            next: false,
+            uid: None,
+            gid: None,
+            devices: Vec::new(),
+            destroyed: false,
+            done: false,
+        });
+    }
+
+    fn add_seat_device(
+        &mut self,
+        client_object: &session_core_seat_client::SessionCoreSeatClient,
+        device_id: u32,
+    ) {
+        let Some(client) = self
+            .seat_clients
+            .iter()
+            .find(|client| client.object == *client_object)
+        else {
+            return;
+        };
+
+        if self
+            .seat_devices
+            .iter()
+            .any(|device| device.client_pid == client.pid && device.id == device_id)
+        {
+            return;
+        }
+
+        let Some(object) = client.object.send_get_device::<Self>(device_id) else {
+            self.error = Some(format!(
+                "failed to create seat device object for pid {} device {device_id}",
+                client.pid
+            ));
+            self.done = true;
+            return;
+        };
+
+        self.seat_devices.push(SeatDevice {
+            client_pid: client.pid,
+            id: device_id,
+            object,
+            path: String::new(),
+            kind: session_core_v1::SeatDeviceKind::Unknown,
+            active: false,
+            destroyed: false,
+            done: false,
+        });
+    }
+
     fn add_user(&mut self, manager: &session_core_manager::SessionCoreManager, uid: u32) {
         let Some(object) = manager.send_get_user::<Self>(uid) else {
             self.error = Some(format!("failed to create user object for uid {uid}"));
@@ -175,6 +317,115 @@ impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for State {
     }
 }
 
+impl hyprwire::Dispatch<session_core_seat::SessionCoreSeat> for State {
+    fn event(
+        &mut self,
+        object: &session_core_seat::SessionCoreSeat,
+        event: <session_core_seat::SessionCoreSeat as hyprwire::Object>::Event<'_>,
+    ) {
+        let Some(idx) = self.seats.iter().position(|seat| seat.object == *object) else {
+            return;
+        };
+
+        match event {
+            session_core_seat::Event::Seat { seat } => self.seats[idx].name = seat,
+            session_core_seat::Event::Mode { mode } => self.seats[idx].mode = mode,
+            session_core_seat::Event::CurrentVt { vt } => self.seats[idx].current_vt = vt,
+            session_core_seat::Event::ClientAdded { pid } => {
+                if !self.seats[idx].clients.contains(&pid) {
+                    self.seats[idx].clients.push(pid);
+                }
+                let object = object.clone();
+                self.add_seat_client(&object, pid);
+            }
+            session_core_seat::Event::Done => self.seats[idx].done = true,
+            session_core_seat::Event::Destroyed => {
+                self.seats[idx].destroyed = true;
+                self.seats[idx].done = true;
+            }
+        }
+    }
+}
+
+impl hyprwire::Dispatch<session_core_seat_client::SessionCoreSeatClient> for State {
+    fn event(
+        &mut self,
+        object: &session_core_seat_client::SessionCoreSeatClient,
+        event: <session_core_seat_client::SessionCoreSeatClient as hyprwire::Object>::Event<'_>,
+    ) {
+        let Some(idx) = self
+            .seat_clients
+            .iter()
+            .position(|client| client.object == *object)
+        else {
+            return;
+        };
+
+        match event {
+            session_core_seat_client::Event::Session { session } => {
+                self.seat_clients[idx].session = session;
+            }
+            session_core_seat_client::Event::State { state } => {
+                self.seat_clients[idx].state = state
+            }
+            session_core_seat_client::Event::Active { active } => {
+                self.seat_clients[idx].active = active != 0;
+            }
+            session_core_seat_client::Event::Next { next } => {
+                self.seat_clients[idx].next = next != 0;
+            }
+            session_core_seat_client::Event::Pid { pid } => self.seat_clients[idx].pid = pid,
+            session_core_seat_client::Event::Uid { uid } => self.seat_clients[idx].uid = Some(uid),
+            session_core_seat_client::Event::Gid { gid } => self.seat_clients[idx].gid = Some(gid),
+            session_core_seat_client::Event::DeviceAdded { device_id } => {
+                if !self.seat_clients[idx].devices.contains(&device_id) {
+                    self.seat_clients[idx].devices.push(device_id);
+                }
+                let object = object.clone();
+                self.add_seat_device(&object, device_id);
+            }
+            session_core_seat_client::Event::DeviceRemoved { device_id } => {
+                self.seat_clients[idx]
+                    .devices
+                    .retain(|candidate| *candidate != device_id);
+            }
+            session_core_seat_client::Event::Done => self.seat_clients[idx].done = true,
+            session_core_seat_client::Event::Destroyed => {
+                self.seat_clients[idx].destroyed = true;
+                self.seat_clients[idx].done = true;
+            }
+        }
+    }
+}
+
+impl hyprwire::Dispatch<session_core_seat_device::SessionCoreSeatDevice> for State {
+    fn event(
+        &mut self,
+        object: &session_core_seat_device::SessionCoreSeatDevice,
+        event: <session_core_seat_device::SessionCoreSeatDevice as hyprwire::Object>::Event<'_>,
+    ) {
+        let Some(device) = self
+            .seat_devices
+            .iter_mut()
+            .find(|device| device.object == *object)
+        else {
+            return;
+        };
+
+        match event {
+            session_core_seat_device::Event::DeviceId { device_id } => device.id = device_id,
+            session_core_seat_device::Event::Path { path } => device.path = path,
+            session_core_seat_device::Event::Kind { kind } => device.kind = kind,
+            session_core_seat_device::Event::Active { active } => device.active = active != 0,
+            session_core_seat_device::Event::Done => device.done = true,
+            session_core_seat_device::Event::Destroyed => {
+                device.destroyed = true;
+                device.done = true;
+            }
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum Command {
     #[command(
@@ -189,6 +440,12 @@ enum Command {
         arg_required_else_help = true
     )]
     User(UserCommand),
+    #[command(
+        subcommand,
+        about = "inspect seats and attached clients",
+        arg_required_else_help = true
+    )]
+    Seat(SeatCommand),
     #[command(about = "reboot the system")]
     Reboot,
     #[command(about = "power off the system")]
@@ -295,6 +552,25 @@ enum UserCommand {
     },
 }
 
+#[derive(Subcommand)]
+enum SeatCommand {
+    #[command(about = "list seats from active sessions")]
+    List {
+        #[arg(long, help = "emit machine-readable JSON output")]
+        json: bool,
+    },
+    #[command(about = "show a seat tree with clients and devices")]
+    Status {
+        #[arg(
+            value_name = "SEAT",
+            help = "seat name; defaults when only one seat exists"
+        )]
+        seat: Option<String>,
+        #[arg(long, help = "emit machine-readable JSON output")]
+        json: bool,
+    },
+}
+
 #[derive(Parser)]
 #[command(
     name = "sessionctl",
@@ -393,6 +669,38 @@ const fn user_state_name(state: session_core_v1::UserState) -> &'static str {
     }
 }
 
+const fn seat_mode_name(mode: session_core_v1::SeatMode) -> &'static str {
+    match mode {
+        session_core_v1::SeatMode::VtBound => "vt-bound",
+        session_core_v1::SeatMode::NonVtBound => "non-vt-bound",
+    }
+}
+
+const fn seat_client_state_name(state: session_core_v1::SeatClientState) -> &'static str {
+    match state {
+        session_core_v1::SeatClientState::New => "new",
+        session_core_v1::SeatClientState::Enabled => "enabled",
+        session_core_v1::SeatClientState::PendingDisabled => "pending-disabled",
+        session_core_v1::SeatClientState::Disabled => "disabled",
+    }
+}
+
+const fn seat_device_kind_name(kind: session_core_v1::SeatDeviceKind) -> &'static str {
+    match kind {
+        session_core_v1::SeatDeviceKind::Drm => "drm",
+        session_core_v1::SeatDeviceKind::Evdev => "evdev",
+        session_core_v1::SeatDeviceKind::Hidraw => "hidraw",
+        session_core_v1::SeatDeviceKind::Wscons => "wscons",
+        session_core_v1::SeatDeviceKind::Unknown => "unknown",
+    }
+}
+
+fn process_name(pid: u32) -> Option<String> {
+    let name = fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
 fn print_json(value: &serde_json::Value) -> anyhow::Result<()> {
     println!("{}", serde_json::to_string_pretty(value)?);
     Ok(())
@@ -410,6 +718,9 @@ fn main() -> anyhow::Result<()> {
     let mut state = State {
         sessions: Vec::new(),
         users: Vec::new(),
+        seats: Vec::new(),
+        seat_clients: Vec::new(),
+        seat_devices: Vec::new(),
         done: false,
         error: None,
     };
@@ -830,6 +1141,231 @@ fn main() -> anyhow::Result<()> {
                 }
             }
         },
+        Command::Seat(command) => {
+            let mut seat_names = state
+                .sessions
+                .iter()
+                .filter_map(|session| session.seat.clone())
+                .collect::<Vec<_>>();
+            seat_names.sort();
+            seat_names.dedup();
+
+            for seat in &seat_names {
+                state.add_seat(&manager, seat.clone());
+            }
+
+            while state.seats.iter().any(|seat| !seat.done)
+                || state.seat_clients.iter().any(|client| !client.done)
+                || state.seat_devices.iter().any(|device| !device.done)
+            {
+                event_queue.dispatch_events(&mut state, true)?;
+            }
+
+            if let Some(err) = state.error.take() {
+                anyhow::bail!("{err}");
+            }
+
+            match command {
+                SeatCommand::List { json } => {
+                    let seats = state
+                        .seats
+                        .iter()
+                        .filter(|seat| !seat.destroyed)
+                        .collect::<Vec<_>>();
+
+                    if json {
+                        return print_json(&json!({
+                            "seats": seats.iter().map(|seat| {
+                                json!({
+                                    "name": seat.name,
+                                    "mode": seat_mode_name(seat.mode),
+                                    "current_vt": seat.current_vt,
+                                    "clients": seat.clients.len(),
+                                })
+                            }).collect::<Vec<_>>(),
+                        }));
+                    }
+
+                    if seats.is_empty() {
+                        println!("No seats found from active sessions.");
+                        return Ok(());
+                    }
+
+                    let name_w = seats
+                        .iter()
+                        .map(|seat| seat.name.len())
+                        .max()
+                        .unwrap_or(0)
+                        .max(4);
+                    let mode_w = seats
+                        .iter()
+                        .map(|seat| seat_mode_name(seat.mode).len())
+                        .max()
+                        .unwrap_or(0)
+                        .max(4);
+                    println!(
+                        "  {:<name_w$}  {:<mode_w$}  {:<3}  CLIENTS",
+                        "SEAT", "MODE", "VT"
+                    );
+                    println!("  {}", "─".repeat(name_w + 2 + mode_w + 2 + 3 + 2 + 7));
+                    for seat in seats {
+                        println!(
+                            "  {:<name_w$}  {:<mode_w$}  {:<3}  {}",
+                            seat.name,
+                            seat_mode_name(seat.mode),
+                            if seat.current_vt == 0 {
+                                "-".to_string()
+                            } else {
+                                seat.current_vt.to_string()
+                            },
+                            seat.clients.len(),
+                        );
+                    }
+                }
+                SeatCommand::Status { seat, json } => {
+                    let seat_name = match seat {
+                        Some(seat) => seat,
+                        None if seat_names.len() == 1 => seat_names[0].clone(),
+                        None if seat_names.is_empty() => {
+                            eprintln!("{} no seats found from active sessions", "error:".red());
+                            return Ok(());
+                        }
+                        None => {
+                            eprintln!(
+                                "{} multiple seats found; specify one of: {}",
+                                "error:".red(),
+                                seat_names.join(", ")
+                            );
+                            return Ok(());
+                        }
+                    };
+
+                    let Some(seat) = state
+                        .seats
+                        .iter()
+                        .find(|candidate| candidate.name == seat_name && !candidate.destroyed)
+                    else {
+                        eprintln!("{} unknown seat: {seat_name}", "error:".red());
+                        return Ok(());
+                    };
+
+                    let clients = state
+                        .seat_clients
+                        .iter()
+                        .filter(|client| client.seat == seat.name && !client.destroyed)
+                        .collect::<Vec<_>>();
+
+                    if json {
+                        return print_json(&json!({
+                            "seat": {
+                                "name": seat.name,
+                                "mode": seat_mode_name(seat.mode),
+                                "current_vt": seat.current_vt,
+                                "clients": clients.iter().map(|client| {
+                                    let process_name = process_name(client.pid);
+                                    json!({
+                                        "pid": client.pid,
+                                        "process": process_name,
+                                        "session": client.session,
+                                        "state": seat_client_state_name(client.state),
+                                        "active": client.active,
+                                        "next": client.next,
+                                        "uid": client.uid,
+                                        "gid": client.gid,
+                                        "devices": state.seat_devices.iter()
+                                            .filter(|device| device.client_pid == client.pid && !device.destroyed)
+                                            .map(|device| json!({
+                                                "id": device.id,
+                                                "path": device.path,
+                                                "kind": seat_device_kind_name(device.kind),
+                                                "active": device.active,
+                                            }))
+                                            .collect::<Vec<_>>(),
+                                    })
+                                }).collect::<Vec<_>>(),
+                            }
+                        }));
+                    }
+
+                    let vt = if seat.current_vt == 0 {
+                        "-".to_string()
+                    } else {
+                        seat.current_vt.to_string()
+                    };
+                    println!(
+                        "{} {}  mode={}  vt={}",
+                        "Seat".bold(),
+                        seat.name.bold(),
+                        seat_mode_name(seat.mode),
+                        vt
+                    );
+
+                    if clients.is_empty() {
+                        println!("└─ no clients");
+                        return Ok(());
+                    }
+
+                    for (client_idx, client) in clients.iter().enumerate() {
+                        let last_client = client_idx + 1 == clients.len();
+                        let client_prefix = if last_client { "└─" } else { "├─" };
+                        let child_prefix = if last_client { "  " } else { "│ " };
+                        let mut flags = Vec::new();
+                        if client.active {
+                            flags.push("active");
+                        }
+                        if client.next {
+                            flags.push("next");
+                        }
+                        if client.state != session_core_v1::SeatClientState::Enabled {
+                            flags.push(seat_client_state_name(client.state));
+                        }
+                        let flags = if flags.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" [{}]", flags.join(", "))
+                        };
+                        println!(
+                            "{client_prefix} client pid={}{} session={}{}",
+                            client.pid,
+                            process_name(client.pid)
+                                .map(|name| format!(" ({name})"))
+                                .unwrap_or_default(),
+                            client.session,
+                            flags
+                        );
+
+                        let devices = state
+                            .seat_devices
+                            .iter()
+                            .filter(|device| device.client_pid == client.pid && !device.destroyed)
+                            .collect::<Vec<_>>();
+                        if devices.is_empty() {
+                            println!("{child_prefix}└─ no devices");
+                            continue;
+                        }
+
+                        for (device_idx, device) in devices.iter().enumerate() {
+                            let device_prefix = if device_idx + 1 == devices.len() {
+                                "└─"
+                            } else {
+                                "├─"
+                            };
+                            println!(
+                                "{child_prefix}{device_prefix} device #{} {} {} {}",
+                                device.id,
+                                seat_device_kind_name(device.kind),
+                                if device.active { "active" } else { "inactive" },
+                                if device.path.is_empty() {
+                                    "<unknown>"
+                                } else {
+                                    &device.path
+                                }
+                            );
+                        }
+                    }
+                }
+            }
+        }
         Command::Completions { shell: _ } => unreachable!(),
         cmd => {
             state.done = false;

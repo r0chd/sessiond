@@ -65,11 +65,17 @@ pub fn insert_user(
         .id()
 }
 
-pub fn insert_client(world: &mut World, object: seat_v1::seat::Seat, pid: u32) -> Entity {
+pub fn insert_client(
+    world: &mut World,
+    object: seat_v1::seat::Seat,
+    pid: u32,
+    session: Option<session::SessionId>,
+) -> Entity {
     world
         .spawn((
             SeatObject(object),
             ClientPid(pid),
+            ClientSession(session),
             ClientObjects(Vec::new()),
             Devices(Vec::new()),
             SeatState(seat::SeatState::New),
@@ -161,6 +167,9 @@ pub struct SeatObject(pub seat_v1::seat::Seat);
 
 #[derive(Component)]
 pub struct ClientPid(pub u32);
+
+#[derive(Component)]
+pub struct ClientSession(pub Option<session::SessionId>);
 
 #[derive(Component)]
 pub struct ClientObjects(pub Vec<session_core_seat_client::SessionCoreSeatClient>);

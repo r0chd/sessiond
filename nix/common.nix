@@ -38,6 +38,7 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    services.sessiond.settings.default-seat = lib.mkDefault "seat0";
     services.sessiond.settings.seats.seat0 = {
       user = lib.mkDefault "root";
       group = lib.mkDefault "seat";

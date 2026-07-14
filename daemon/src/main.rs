@@ -162,12 +162,11 @@ fn run<C: cgroup::CgroupManager + 'static>(
         config.settings.seats.len() == 1,
         "exactly one seat must be configured"
     );
-    let (seat_name, seat_config) = config
+    let seat_config = config
         .settings
         .seats
-        .iter()
-        .next()
-        .ok_or_else(|| anyhow::anyhow!("exactly one seat must be configured"))?;
+        .get(&config.settings.default_seat)
+        .ok_or_else(|| anyhow::anyhow!("configured `default-seat` not found"))?;
 
     let mut sessiond = Sessiond {
         next_session_id: session::SessionId::from_raw(1),
@@ -196,7 +195,7 @@ fn run<C: cgroup::CgroupManager + 'static>(
 
     let seat_entity = ecs::insert_seat(
         &mut sessiond.world,
-        seat_name.clone(),
+        config.settings.default_seat.clone(),
         if vtbound {
             ecs::SeatKind::VtBound
         } else {

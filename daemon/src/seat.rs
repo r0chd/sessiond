@@ -144,7 +144,14 @@ pub fn add_client(
     if let Some(object) = world.get::<ecs::SeatObject>(client_entity) {
         object.0.send_enabled();
     }
-    log::info!("Added client {} to {}", session_id.as_raw(), seat_name);
+    log::info!(
+        session_id = session_id.as_raw(),
+        seat = seat_name.as_str(),
+        pid = world
+            .get::<ecs::ClientPid>(client_entity)
+            .map_or(0, |pid| pid.0);
+        "added client to seat"
+    );
 
     Ok(())
 }
@@ -973,8 +980,9 @@ impl<C: crate::cgroup::CgroupManager + 'static> hyprwire::Dispatch<seat_manager:
                     return;
                 }
 
+                let opener_pid = creds.pid.as_raw_pid().cast_unsigned();
                 let opener_session_id = {
-                    let pid = server_client.creds().pid.as_raw_pid().cast_unsigned();
+                    let pid = opener_pid;
                     match self.cgroup_manager.find_session_by_pid(pid) {
                         Ok(session_id) => session_id,
                         Err(err) => {
@@ -990,7 +998,7 @@ impl<C: crate::cgroup::CgroupManager + 'static> hyprwire::Dispatch<seat_manager:
                     return;
                 };
 
-                let client_entity = ecs::insert_client(&mut self.world, seat.clone());
+                let client_entity = ecs::insert_client(&mut self.world, seat.clone(), opener_pid);
                 if let Err(err) = add_client(&mut self.world, seat_entity, client_entity) {
                     log::error!("Could not add client to seat: {err}");
                     seat.send_disabled();

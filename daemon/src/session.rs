@@ -717,13 +717,17 @@ impl<C: cgroup::CgroupManager + 'static>
                 session_core_user,
                 uid,
             } => {
-                let Some(entity) = user::get_or_create(
-                    &mut self.world,
-                    &mut self.user_entities,
-                    &self.session_entities,
-                    uid,
-                    false,
-                ) else {
+                let entity =
+                    user::entity_by_uid(&self.world, &self.user_entities, uid).or_else(|| {
+                        user::create(
+                            &mut self.world,
+                            &mut self.user_entities,
+                            &self.session_entities,
+                            uid,
+                            false,
+                        )
+                    });
+                let Some(entity) = entity else {
                     log::warn!(uid; "get_user requested for unknown user");
                     session_core_user.send_not_found();
                     return;

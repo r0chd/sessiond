@@ -47,17 +47,13 @@ pub fn entity_by_object(
     })
 }
 
-pub fn get_or_create(
+pub fn create(
     world: &mut world::World,
     entities: &mut Vec<entity::Entity>,
     session_entities: &[entity::Entity],
     uid: u32,
     lingering: bool,
 ) -> Option<entity::Entity> {
-    if let Some(entity) = entity_by_uid(world, entities, uid) {
-        return Some(entity);
-    }
-
     let user = users::get_user_by_uid(uid)?;
     let state = compute_state(world, session_entities, uid, lingering);
     let entity = ecs::insert_user(
@@ -191,7 +187,6 @@ impl<C: crate::cgroup::CgroupManager + 'static>
                 session_core_v1::ErrorCode::PermissionDenied,
                 "permission denied",
             );
-            return;
         }
     }
 }

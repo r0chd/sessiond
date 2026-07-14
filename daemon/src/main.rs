@@ -213,7 +213,7 @@ fn run<C: cgroup::CgroupManager + 'static>(
         .filter(|(_, config)| config.linger)
         .filter_map(|(name, _)| users::get_user_by_name(name))
         .for_each(|user| {
-            user::get_or_create(
+            user::create(
                 &mut sessiond.world,
                 &mut sessiond.user_entities,
                 &sessiond.session_entities,

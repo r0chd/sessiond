@@ -6,17 +6,8 @@
 }:
 let
   cfg = config.services.sessiond;
-  lingerUsersScript = import ./linger-users.nix { inherit lib pkgs cfg; };
   settingsFormat = pkgs.formats.toml { };
-  daemonConfig = settingsFormat.generate "sessiond.toml" {
-    seats.seat0 = {
-      inherit (cfg.settings.seat) user group;
-    };
-    users = lib.mapAttrs (_: user: {
-      inherit (user) linger;
-      cgroup = { };
-    }) cfg.settings.users;
-  };
+  daemonConfig = settingsFormat.generate "sessiond.toml" cfg.settings;
 in
 {
   imports = [ ./common.nix ];
@@ -45,12 +36,6 @@ in
         conditions = [ ];
         command = "${cfg.package}/bin/sessiond --config ${daemonConfig}";
         environment.LOG_LEVEL = cfg.logLevel;
-        log = true;
-      };
-      tasks.sessiond-linger-users = lib.mkIf (cfg.settings.users != { }) {
-        description = "sessiond linger users";
-        conditions = [ ];
-        command = "${lingerUsersScript}";
         log = true;
       };
     };

@@ -57,20 +57,11 @@ impl Default for ManagementConfig {
     }
 }
 
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct UserCgroupConfig {
-    pub memory_max: Option<u64>,
-    pub memory_high: Option<u64>,
-    pub pids_max: Option<u64>,
-    pub cpu_weight: Option<u16>,
-}
-
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct UserConfig {
+    #[serde(default)]
     pub linger: bool,
-    pub cgroup: UserCgroupConfig,
 }
 
 #[derive(serde::Deserialize)]

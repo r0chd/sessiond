@@ -276,19 +276,6 @@ enum UserCommand {
         #[arg(long, help = "emit machine-readable JSON output")]
         json: bool,
     },
-    #[command(about = "enable or disable lingering for a user")]
-    Linger {
-        #[arg(value_name = "UID", help = "user id to change")]
-        uid: u32,
-        #[arg(value_name = "STATE", help = "on to enable, off to disable")]
-        state: LingerState,
-    },
-}
-
-#[derive(Clone, Copy, ValueEnum)]
-enum LingerState {
-    On,
-    Off,
 }
 
 #[derive(Parser)]
@@ -709,49 +696,6 @@ fn main() -> anyhow::Result<()> {
                         if user.lingering { "yes" } else { "no" },
                     );
                 }
-            }
-            UserCommand::Linger {
-                uid,
-                state: linger_state,
-            } => {
-                state.add_user(&manager, uid);
-
-                while state.users.iter().any(|user| !user.done) {
-                    event_queue.dispatch_events(&mut state, true)?;
-                }
-
-                if let Some(err) = state.error.take() {
-                    anyhow::bail!("{err}");
-                }
-
-                let Some(user) = state.users.iter().find(|user| user.uid == uid) else {
-                    unreachable!();
-                };
-
-                if user.not_found {
-                    anyhow::bail!("no such user: {uid}");
-                }
-
-                let object = user.object.clone();
-                let lingering = matches!(linger_state, LingerState::On);
-
-                if let Some(user) = state.users.iter_mut().find(|user| user.uid == uid) {
-                    user.done = false;
-                }
-                object.send_set_lingering(u32::from(lingering));
-
-                while state.users.iter().any(|user| !user.done) {
-                    event_queue.dispatch_events(&mut state, true)?;
-                }
-
-                if let Some(err) = state.error.take() {
-                    anyhow::bail!("{err}");
-                }
-
-                println!(
-                    "lingering {} for uid {uid}",
-                    if lingering { "enabled" } else { "disabled" }
-                );
             }
         },
         Command::Completions { shell: _ } => unreachable!(),

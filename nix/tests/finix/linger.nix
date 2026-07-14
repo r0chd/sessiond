@@ -93,18 +93,8 @@ sessiondTest {
     user_3_uid = machine.succeed("id -u user_3").strip()
 
     for uid in (user_2_uid, user_3_uid):
-        machine.wait_until_succeeds(f"test -f /var/lib/sessiond/{uid}")
         machine.wait_until_succeeds(f"test -d /run/user/{uid}")
         machine.wait_until_succeeds(f"test -d /sys/fs/cgroup/sessiond/user-{uid}")
-
-    machine.succeed(f"sessionctl user linger {user_2_uid} off")
-    machine.fail(f"test -f /var/lib/sessiond/{user_2_uid}")
-    machine.fail(f"test -d /run/user/{user_2_uid}")
-    machine.fail(f"test -d /sys/fs/cgroup/sessiond/user-{user_2_uid}")
-
-    machine.succeed(f"test -f /var/lib/sessiond/{user_3_uid}")
-    machine.succeed(f"test -d /run/user/{user_3_uid}")
-    machine.succeed(f"test -d /sys/fs/cgroup/sessiond/user-{user_3_uid}")
 
     machine.shutdown()
   '';

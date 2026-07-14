@@ -137,35 +137,11 @@ impl<C: crate::cgroup::CgroupManager + 'static>
 
         match event {
             session_core_session::Event::Terminate => {
-                log::info!(session_id = session_id.as_raw(); "terminate requested");
-                set_session_state(
-                    &mut self.world,
-                    session_id,
-                    entity,
-                    session_core_v1::ActiveState::Closing,
-                );
-                if let Err(err) = self.cgroup_manager.terminate_session(session_id) {
-                    log::error!(session_id = session_id.as_raw(), err = err.to_string().as_str(); "terminate failed");
-                }
-                #[cfg(feature = "consolekit")]
-                self.sync_consolekit_session(session_id, entity);
-                let _ = self.remove_session(session_id);
+                self.terminate_session(entity);
                 user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
             }
             session_core_session::Event::Kill => {
-                log::info!(session_id = session_id.as_raw(); "kill requested");
-                set_session_state(
-                    &mut self.world,
-                    session_id,
-                    entity,
-                    session_core_v1::ActiveState::Closing,
-                );
-                if let Err(err) = self.cgroup_manager.kill_session(session_id) {
-                    log::error!(session_id = session_id.as_raw(), err = err.to_string().as_str(); "kill failed");
-                }
-                #[cfg(feature = "consolekit")]
-                self.sync_consolekit_session(session_id, entity);
-                let _ = self.remove_session(session_id);
+                self.kill_session(entity);
                 user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
             }
             session_core_session::Event::Lock => {
@@ -187,6 +163,88 @@ impl<C: crate::cgroup::CgroupManager + 'static>
                 }
             }
             _ => unreachable!(),
+        }
+    }
+}
+
+impl<C: crate::cgroup::CgroupManager + 'static> crate::Sessiond<C> {
+    pub fn kill_session(&mut self, entity: entity::Entity) {
+        let Some(session_id) = id(&self.world, entity) else {
+            return;
+        };
+
+        log::info!(session_id = session_id.as_raw(); "kill requested");
+
+        set_session_state(
+            &mut self.world,
+            session_id,
+            entity,
+            session_core_v1::ActiveState::Closing,
+        );
+        if let Err(err) = self.cgroup_manager.kill_session(session_id) {
+            log::error!(session_id = session_id.as_raw(), err = err.to_string().as_str(); "kill failed");
+        }
+        #[cfg(feature = "consolekit")]
+        self.sync_consolekit_session(session_id, entity);
+
+        self.finish_session_destroy(session_id);
+    }
+
+    pub fn terminate_session(&mut self, entity: entity::Entity) {
+        let Some(session_id) = id(&self.world, entity) else {
+            return;
+        };
+
+        log::info!(session_id = session_id.as_raw(); "terminate requested");
+
+        set_session_state(
+            &mut self.world,
+            session_id,
+            entity,
+            session_core_v1::ActiveState::Closing,
+        );
+        if let Err(err) = self.cgroup_manager.terminate_session(session_id) {
+            log::error!(session_id = session_id.as_raw(), err = err.to_string().as_str(); "terminate failed");
+        }
+        #[cfg(feature = "consolekit")]
+        self.sync_consolekit_session(session_id, entity);
+
+        self.finish_session_destroy(session_id);
+    }
+
+    fn finish_session_destroy(&mut self, session_id: SessionId) {
+        let Some(entity) = entity(&self.world, &self.session_entities, session_id) else {
+            log::warn!(session_id = session_id.as_raw(); "destroy requested for unknown session");
+            return;
+        };
+
+        let uid = self.world.get::<ecs::Uid>(entity).map_or(0, |uid| uid.0);
+        let username = self
+            .world
+            .get::<ecs::Username>(entity)
+            .map_or("", |username| username.0.as_str());
+        log::info!(session_id = session_id.as_raw(), uid, username; "session destroyed");
+
+        if let Some(objects) = self.world.get::<ecs::SessionObjects>(entity) {
+            for object in &objects.0 {
+                object.send_destroyed();
+            }
+        }
+        let _ = self.remove_session(session_id);
+        user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
+
+        self.cleanup_user_runtime_dir(uid);
+    }
+
+    pub(crate) fn cleanup_user_runtime_dir(&self, uid: u32) {
+        if !self.cgroup_manager.has_uid_sessions(uid)
+            && !user::is_lingering(&self.world, &self.user_entities, uid)
+            && entities_by_uid(&self.world, &self.session_entities, uid)
+                .next()
+                .is_none()
+            && let Err(e) = user::remove_runtime_dir(uid)
+        {
+            log::error!(uid, error = e.to_string().as_str(); "failed to remove runtime dir");
         }
     }
 }
@@ -292,62 +350,6 @@ pub fn set_state(
         for object in &objects.0 {
             object.send_active(state);
         }
-    }
-}
-
-fn destroy_session<C: cgroup::CgroupManager + 'static>(
-    state: &mut crate::Sessiond<C>,
-    session_id: SessionId,
-) {
-    let Some(entity) = entity(&state.world, &state.session_entities, session_id) else {
-        log::warn!(session_id = session_id.as_raw(); "destroy requested for unknown session");
-        return;
-    };
-
-    let uid = state.world.get::<ecs::Uid>(entity).map_or(0, |uid| uid.0);
-    let username = state
-        .world
-        .get::<ecs::Username>(entity)
-        .map_or("", |username| username.0.as_str());
-    log::info!(session_id = session_id.as_raw(), uid, username; "session destroyed");
-
-    if let Some(mut active_state) = state.world.get_mut::<ecs::ActiveState>(entity) {
-        active_state.0 = session_core_v1::ActiveState::Closing;
-    }
-    #[cfg(feature = "consolekit")]
-    state.sync_consolekit_session(session_id, entity);
-    if let Some(objects) = state.world.get::<ecs::SessionObjects>(entity) {
-        for object in &objects.0 {
-            object.send_active(session_core_v1::ActiveState::Closing);
-        }
-    }
-    if let Some(objects) = state.world.get::<ecs::SessionObjects>(entity) {
-        for object in &objects.0 {
-            object.send_destroyed();
-        }
-    }
-    let _ = state.remove_session(session_id);
-    user::sync_all(
-        &mut state.world,
-        &state.user_entities,
-        &state.session_entities,
-    );
-
-    for manager in &state.info_managers {
-        manager.send_session_removed(session_id.as_raw());
-    }
-
-    if let Err(e) = state.cgroup_manager.poll_destroy(session_id) {
-        log::error!(session_id = session_id.as_raw(), error = e.to_string().as_str(); "failed to poll destroy session cgroup");
-    }
-
-    if !user::is_lingering(&state.world, &state.user_entities, uid)
-        && entities_by_uid(&state.world, &state.session_entities, uid)
-            .next()
-            .is_none()
-        && let Err(e) = user::remove_runtime_dir(uid)
-    {
-        log::error!(session_id = session_id.as_raw(), uid, error = e.to_string().as_str(); "failed to remove runtime dir");
     }
 }
 
@@ -483,7 +485,13 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager::Ses
                 }
             }
             session_manager::Event::DestroySessionUnsafe { session_id } => {
-                destroy_session(self, SessionId::from_raw(session_id));
+                if let Some(entity) = entity(
+                    &self.world,
+                    &self.session_entities,
+                    SessionId::from_raw(session_id),
+                ) {
+                    self.terminate_session(entity);
+                }
             }
             session_manager::Event::Destroy => {}
             session_manager::Event::CreateSession {
@@ -632,7 +640,7 @@ impl<C: cgroup::CgroupManager + 'static>
                 object.send_done();
             }
             session_management_session::Event::Destroy => {
-                destroy_session(self, session_id);
+                self.terminate_session(entity);
             }
         }
     }

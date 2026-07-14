@@ -1,4 +1,4 @@
-use crate::{ecs, session, session_core_user, session_core_v1};
+use crate::{ecs, session, session_core_user, session_core_v1, user};
 use bevy_ecs::{entity, world};
 use std::{fs, io};
 
@@ -170,23 +170,58 @@ impl<C: crate::cgroup::CgroupManager + 'static>
         let Some(entity) = entity_by_object(&self.world, &self.user_entities, object) else {
             return;
         };
-
-        if matches!(event, session_core_user::Event::Destroy) {
-            if let Some(mut objects) = self.world.get_mut::<ecs::UserObjects>(entity) {
-                objects.0.retain(|candidate| candidate != object);
-            }
-            return;
-        }
-
         let Some(client) = object.client() else {
             return;
         };
-        let uid = self.world.get::<ecs::Uid>(entity).map_or(0, |uid| uid.0);
-        if !client.creds().uid.is_root() && client.creds().uid.as_raw() != uid {
-            object.send_error(
-                session_core_v1::ErrorCode::PermissionDenied,
-                "permission denied",
-            );
+
+        match event {
+            session_core_user::Event::Destroy => {
+                if let Some(mut objects) = self.world.get_mut::<ecs::UserObjects>(entity) {
+                    objects.0.retain(|candidate| candidate != object);
+                }
+            }
+            session_core_user::Event::Terminate => {
+                let uid = self.world.get::<ecs::Uid>(entity).map_or(0, |uid| uid.0);
+                if !self.management_access.allows(client.creds())
+                    && uid != client.creds().uid.as_raw()
+                {
+                    object.send_error(
+                        session_core_v1::ErrorCode::PermissionDenied,
+                        "permission denied",
+                    );
+                    return;
+                }
+
+                let entities = session::entities_by_uid(&self.world, &self.session_entities, uid)
+                    .collect::<Vec<_>>();
+                for entity in entities {
+                    self.terminate_session(entity);
+                }
+
+                user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
+                object.send_ok();
+            }
+            session_core_user::Event::Kill => {
+                let uid = self.world.get::<ecs::Uid>(entity).map_or(0, |uid| uid.0);
+                if !self.management_access.allows(client.creds())
+                    && uid != client.creds().uid.as_raw()
+                {
+                    object.send_error(
+                        session_core_v1::ErrorCode::PermissionDenied,
+                        "permission denied",
+                    );
+                    return;
+                }
+
+                let entities = session::entities_by_uid(&self.world, &self.session_entities, uid)
+                    .collect::<Vec<_>>();
+                for entity in entities {
+                    self.kill_session(entity);
+                }
+
+                user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
+                object.send_ok();
+            }
         }
     }
 }

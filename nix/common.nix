@@ -38,17 +38,24 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    services.sessiond.settings.default-seat = lib.mkDefault "seat0";
-    services.sessiond.settings.seats.seat0 = {
-      user = lib.mkDefault "root";
-      group = lib.mkDefault "seat";
+    assertions = lib.mkIf cfg.enable [
+      {
+        assertion = builtins.hasAttr cfg.settings.default-seat (cfg.settings.seats or { });
+        message = "services.sessiond.settings.default-seat must name a configured seat.";
+      }
+    ];
+
+    services.sessiond.settings = {
+      default-seat = lib.mkDefault "seat0";
+      seats.seat0 = {
+        user = lib.mkDefault "root";
+        group = lib.mkDefault "seat";
+      };
     };
 
     environment.systemPackages = [ cfg.package ];
     services.dbus.packages = [ cfg.package ];
 
     users.groups = lib.genAttrs seatGroups (_: { });
-
-    security.pam.services.login.sessiond = lib.mkDefault true;
   };
 }

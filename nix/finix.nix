@@ -12,23 +12,6 @@ in
 {
   imports = [ ./common.nix ];
 
-  options.security.pam.services = lib.mkOption {
-    type = lib.types.attrsOf (
-      lib.types.submodule (
-        { config, ... }:
-        {
-          options.sessiond = lib.mkEnableOption "opening sessiond sessions";
-
-          config.text = lib.mkIf config.sessiond (
-            lib.mkAfter ''
-              session   optional   ${cfg.package}/lib/security/pam_sessiond.so
-            ''
-          );
-        }
-      )
-    );
-  };
-
   config = lib.mkIf cfg.enable {
     finit = {
       services.sessiond = {
@@ -39,6 +22,10 @@ in
         log = true;
       };
     };
+
+    security.pam.services.login.text = lib.mkAfter ''
+      session   optional   ${cfg.package}/lib/security/pam_sessiond.so
+    '';
 
     services.polkit.package = pkgs.callPackage ./polkit {
       useConsoleKit = true;

@@ -53,9 +53,26 @@ It is enabled for the `login` service by default;
 enable it for any other session-opening PAM service
 too, such as `gdm`, `sddm`, `greetd` or `hilsed`.
 
+On NixOS:
+
 ```nix
 {
-  security.pam.services.<service>.sessiond = true;
+  security.pam.services.<service>.rules.session.sessiond = {
+    control = "optional";
+    modulePath = "${config.services.sessiond.package}/lib/security/pam_sessiond.so";
+    order = 900;
+  };
+}
+```
+
+On finix:
+
+```nix
+{ lib, config, ... }:
+{
+  security.pam.services.<service>.text = lib.mkAfter ''
+    session   optional   ${config.services.sessiond.package}/lib/security/pam_sessiond.so
+  '';
 }
 ```
 

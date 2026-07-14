@@ -12,23 +12,6 @@ in
 {
   imports = [ ./common.nix ];
 
-  options.security.pam.services = lib.mkOption {
-    type = lib.types.attrsOf (
-      lib.types.submodule (
-        { config, ... }:
-        {
-          options.sessiond = lib.mkEnableOption "opening sessiond sessions";
-
-          config.rules.session.sessiond = lib.mkIf config.sessiond {
-            control = "optional";
-            modulePath = "${cfg.package}/lib/security/pam_sessiond.so";
-            order = 900;
-          };
-        }
-      )
-    );
-  };
-
   config = lib.mkIf cfg.enable {
     systemd.services.sessiond = {
       description = "session management daemon";
@@ -39,6 +22,12 @@ in
         Environment = "LOG_LEVEL=${cfg.logLevel}";
         Delegate = true;
       };
+    };
+
+    security.pam.services.login.rules.session.sessiond = {
+      control = "optional";
+      modulePath = "${cfg.package}/lib/security/pam_sessiond.so";
+      order = 900;
     };
 
     security.polkit.package = pkgs.callPackage ./polkit {

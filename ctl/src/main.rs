@@ -28,6 +28,7 @@ struct Session {
     leader: u32,
     timestamp: u32,
     active: session_core_v1::ActiveState,
+    can_modify: bool,
     done: bool,
 }
 
@@ -37,6 +38,7 @@ struct User {
     username: String,
     lingering: bool,
     state: session_core_v1::UserState,
+    can_modify: bool,
     not_found: bool,
     done: bool,
 }
@@ -47,6 +49,7 @@ struct Seat {
     mode: session_core_v1::SeatMode,
     current_vt: u32,
     clients: Vec<u32>,
+    can_modify: bool,
     destroyed: bool,
     done: bool,
 }
@@ -85,6 +88,7 @@ struct State {
     seat_clients: Vec<SeatClient>,
     seat_devices: Vec<SeatDevice>,
     done: bool,
+    can_control_power: bool,
     error: Option<String>,
 }
 
@@ -100,6 +104,9 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for State {
             }
             session_core_manager::Event::Done => {
                 self.done = true;
+            }
+            session_core_manager::Event::CanControlPower { can_control_power } => {
+                self.can_control_power = can_control_power != 0;
             }
             session_core_manager::Event::Error { code: _, message } => {
                 self.error = Some(message);
@@ -127,6 +134,7 @@ impl State {
             mode: session_core_v1::SeatMode::NonVtBound,
             current_vt: 0,
             clients: Vec::new(),
+            can_modify: false,
             destroyed: false,
             done: false,
         });
@@ -222,6 +230,7 @@ impl State {
             username: String::new(),
             lingering: false,
             state: session_core_v1::UserState::Offline,
+            can_modify: false,
             not_found: false,
             done: false,
         });
@@ -247,6 +256,7 @@ impl State {
             timestamp: 0,
             done: false,
             active: session_core_v1::ActiveState::Online,
+            can_modify: false,
         });
     }
 }
@@ -283,6 +293,9 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for State {
             session_core_session::Event::Active { state } => {
                 session.active = state;
             }
+            session_core_session::Event::CanModify { can_modify } => {
+                session.can_modify = can_modify != 0;
+            }
             _ => {}
         }
     }
@@ -303,6 +316,9 @@ impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for State {
             session_core_user::Event::Username { username } => user.username = username,
             session_core_user::Event::Lingering { lingering } => user.lingering = lingering != 0,
             session_core_user::Event::State { state } => user.state = state,
+            session_core_user::Event::CanModify { can_modify } => {
+                user.can_modify = can_modify != 0;
+            }
             session_core_user::Event::Done | session_core_user::Event::Ok => {
                 user.done = true;
             }
@@ -332,6 +348,9 @@ impl hyprwire::Dispatch<session_core_seat::SessionCoreSeat> for State {
             session_core_seat::Event::Seat { seat } => self.seats[idx].name = seat,
             session_core_seat::Event::Mode { mode } => self.seats[idx].mode = mode,
             session_core_seat::Event::CurrentVt { vt } => self.seats[idx].current_vt = vt,
+            session_core_seat::Event::CanModify { can_modify } => {
+                self.seats[idx].can_modify = can_modify != 0;
+            }
             session_core_seat::Event::ClientAdded { pid } => {
                 if !self.seats[idx].clients.contains(&pid) {
                     self.seats[idx].clients.push(pid);
@@ -650,6 +669,15 @@ impl SessionAction {
             Self::Unlock => object.send_unlock(),
         }
     }
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Close => "close",
+            Self::Kill => "kill",
+            Self::Lock => "lock",
+            Self::Unlock => "unlock",
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -663,6 +691,13 @@ impl UserAction {
         match self {
             Self::Kill => object.send_kill(),
             Self::Terminate => object.send_terminate(),
+        }
+    }
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Kill => "kill",
+            Self::Terminate => "terminate",
         }
     }
 }
@@ -739,6 +774,7 @@ fn main() -> anyhow::Result<()> {
         seat_clients: Vec::new(),
         seat_devices: Vec::new(),
         done: false,
+        can_control_power: false,
         error: None,
     };
 
@@ -790,6 +826,7 @@ fn main() -> anyhow::Result<()> {
                             obj.insert("leader".into(), json!(session.leader));
                             obj.insert("timestamp".into(), json!(session.timestamp));
                             obj.insert("active".into(), json!(active_state_name(session.active)));
+                            obj.insert("can_modify".into(), json!(session.can_modify));
                             serde_json::Value::Object(obj)
                         }).collect::<Vec<_>>(),
                     }));
@@ -938,6 +975,15 @@ fn main() -> anyhow::Result<()> {
                             "error:".red(),
                             uid.as_raw()
                         ))?;
+                    if !session.can_modify {
+                        eprintln!(
+                            "{} cannot {} session {}: permission denied",
+                            "error:".red(),
+                            action.name(),
+                            session.id
+                        );
+                        return Ok(());
+                    }
                     action.send(&session.object);
 
                     return Ok(());
@@ -945,10 +991,15 @@ fn main() -> anyhow::Result<()> {
 
                 let mut unmatched = Vec::new();
                 let mut matched = Vec::new();
+                let mut denied = Vec::new();
 
                 for id in ids {
                     if let Some(session) = state.sessions.iter().find(|session| session.id == *id) {
-                        matched.push(session.object.clone());
+                        if session.can_modify {
+                            matched.push(session.object.clone());
+                        } else {
+                            denied.push(session.id);
+                        }
                     } else {
                         unmatched.push(id);
                     }
@@ -961,6 +1012,20 @@ fn main() -> anyhow::Result<()> {
                         .collect::<Vec<_>>()
                         .join(", ");
                     eprintln!("{} unknown session ids: {ids}", "error:".red());
+                    return Ok(());
+                }
+
+                if !denied.is_empty() {
+                    let ids = denied
+                        .iter()
+                        .map(std::string::ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    eprintln!(
+                        "{} cannot {} session ids without permission: {ids}",
+                        "error:".red(),
+                        action.name()
+                    );
                     return Ok(());
                 }
 
@@ -1013,6 +1078,7 @@ fn main() -> anyhow::Result<()> {
                                 "username": user.username,
                                 "lingering": user.lingering,
                                 "state": user_state_name(user.state),
+                                "can_modify": user.can_modify,
                             })
                         }).collect::<Vec<_>>(),
                     }));
@@ -1094,6 +1160,27 @@ fn main() -> anyhow::Result<()> {
                     return Ok(());
                 }
 
+                let denied = state
+                    .users
+                    .iter()
+                    .filter(|user| !user.not_found && !user.can_modify)
+                    .map(|user| user.uid)
+                    .collect::<Vec<_>>();
+
+                if !denied.is_empty() {
+                    let uids = denied
+                        .iter()
+                        .map(std::string::ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    eprintln!(
+                        "{} cannot {} user ids without permission: {uids}",
+                        "error:".red(),
+                        action.name()
+                    );
+                    return Ok(());
+                }
+
                 for user in &mut state.users {
                     user.done = false;
                     action.send(&user.object);
@@ -1141,6 +1228,27 @@ fn main() -> anyhow::Result<()> {
                         .collect::<Vec<_>>()
                         .join(", ");
                     eprintln!("{} unknown user ids: {uids}", "error:".red());
+                    return Ok(());
+                }
+
+                let denied = state
+                    .users
+                    .iter()
+                    .filter(|user| !user.not_found && !user.can_modify)
+                    .map(|user| user.uid)
+                    .collect::<Vec<_>>();
+
+                if !denied.is_empty() {
+                    let uids = denied
+                        .iter()
+                        .map(std::string::ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    eprintln!(
+                        "{} cannot {} user ids without permission: {uids}",
+                        "error:".red(),
+                        action.name()
+                    );
                     return Ok(());
                 }
 
@@ -1198,6 +1306,7 @@ fn main() -> anyhow::Result<()> {
                                     "mode": seat_mode_name(seat.mode),
                                     "current_vt": seat.current_vt,
                                     "clients": seat.clients.len(),
+                                    "can_modify": seat.can_modify,
                                 })
                             }).collect::<Vec<_>>(),
                         }));
@@ -1278,6 +1387,7 @@ fn main() -> anyhow::Result<()> {
                                 "name": seat.name,
                                 "mode": seat_mode_name(seat.mode),
                                 "current_vt": seat.current_vt,
+                                "can_modify": seat.can_modify,
                                 "clients": clients.iter().map(|client| {
                                     let process_name = process_name(client.pid);
                                     json!({
@@ -1404,6 +1514,7 @@ fn main() -> anyhow::Result<()> {
 
                     let mut unmatched = Vec::new();
                     let mut matched = Vec::new();
+                    let mut denied = Vec::new();
 
                     for seat_name in &seats {
                         if let Some(seat) = state
@@ -1411,7 +1522,11 @@ fn main() -> anyhow::Result<()> {
                             .iter()
                             .find(|seat| seat.name == *seat_name && !seat.destroyed)
                         {
-                            matched.push(seat.object.clone());
+                            if seat.can_modify {
+                                matched.push(seat.object.clone());
+                            } else {
+                                denied.push(seat.name.clone());
+                            }
                         } else {
                             unmatched.push(seat_name);
                         }
@@ -1424,6 +1539,15 @@ fn main() -> anyhow::Result<()> {
                             .collect::<Vec<_>>()
                             .join(", ");
                         eprintln!("{} unknown seats: {seats}", "error:".red());
+                        return Ok(());
+                    }
+
+                    if !denied.is_empty() {
+                        eprintln!(
+                            "{} cannot terminate seats without permission: {}",
+                            "error:".red(),
+                            denied.join(", ")
+                        );
                         return Ok(());
                     }
 
@@ -1448,6 +1572,21 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Completions { shell: _ } => unreachable!(),
         cmd => {
+            let command_name = match cmd {
+                Command::Reboot => "reboot",
+                Command::Poweroff => "power off",
+                Command::Hibernate => "hibernate",
+                Command::Suspend => "suspend",
+                _ => unreachable!(),
+            };
+            if !state.can_control_power {
+                eprintln!(
+                    "{} cannot {command_name} while other users have active sessions",
+                    "error:".red()
+                );
+                return Ok(());
+            }
+
             state.done = false;
             state.error = None;
 

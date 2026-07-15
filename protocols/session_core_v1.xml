@@ -80,6 +80,13 @@
   <c2s name="destroy" destructor="true">
    <description summary="destroy this object"/>
   </c2s>
+  <s2c name="can_control_power">
+   <description summary="client may run power operations">
+    Non-zero if this client can reboot, power off, suspend, or hibernate
+    without first closing other users' sessions.
+   </description>
+   <arg name="can_control_power" type="uint" summary="non-zero if power operations are currently allowed"/>
+  </s2c>
  </object>
  <object name="session_core_session" version="1">
   <description summary="per-session information">
@@ -155,6 +162,12 @@
   <c2s name="destroy" destructor="true">
    <description summary="destroy this object"/>
   </c2s>
+  <s2c name="can_modify">
+   <description summary="client may modify this session">
+    Non-zero if this client may lock, unlock, terminate, or kill this session.
+   </description>
+   <arg name="can_modify" type="uint" summary="non-zero if mutating requests are allowed"/>
+  </s2c>
  </object>
 
  <object name="session_core_seat" version="1">
@@ -212,6 +225,12 @@
   <c2s name="destroy" destructor="true">
    <description summary="destroy this object"/>
   </c2s>
+  <s2c name="can_modify">
+   <description summary="client may modify this seat">
+    Non-zero if this client may terminate all sessions on this seat.
+   </description>
+   <arg name="can_modify" type="uint" summary="non-zero if mutating requests are allowed"/>
+  </s2c>
  </object>
 
  <object name="session_core_seat_client" version="1">
@@ -355,6 +374,12 @@
   <c2s name="destroy" destructor="true">
    <description summary="destroy this object"/>
   </c2s>
+  <s2c name="can_modify">
+   <description summary="client may modify this user">
+    Non-zero if this client may terminate or kill this user's sessions.
+   </description>
+   <arg name="can_modify" type="uint" summary="non-zero if mutating requests are allowed"/>
+  </s2c>
  </object>
 
  <enum name="user_state">

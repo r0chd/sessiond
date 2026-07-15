@@ -139,6 +139,7 @@ pub fn add_object(
     world: &mut world::World,
     entity: entity::Entity,
     object: session_core_user::SessionCoreUser,
+    management_access: &crate::Access,
 ) {
     if let Some(uid) = world.get::<ecs::Uid>(entity) {
         object.send_uid(uid.0);
@@ -151,6 +152,12 @@ pub fn add_object(
     }
     if let Some(state) = world.get::<ecs::UserState>(entity) {
         object.send_state(state.0);
+    }
+    if let Some(client) = object.client() {
+        let uid = world.get::<ecs::Uid>(entity).map_or(0, |uid| uid.0);
+        let can_modify =
+            management_access.allows(client.creds()) || uid == client.creds().uid.as_raw();
+        object.send_can_modify(u32::from(can_modify));
     }
     object.send_done();
 

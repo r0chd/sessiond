@@ -113,6 +113,15 @@ pub fn entity_by_management_object(
     })
 }
 
+pub fn can_modify(
+    world: &world::World,
+    entity: entity::Entity,
+    creds: &rustix::net::UCred,
+) -> bool {
+    let session_uid = world.get::<ecs::Uid>(entity).map_or(0, |uid| uid.0);
+    creds.uid.is_root() || creds.uid.as_raw() == session_uid
+}
+
 impl<C: crate::cgroup::CgroupManager + 'static>
     hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Sessiond<C>
 {
@@ -138,8 +147,7 @@ impl<C: crate::cgroup::CgroupManager + 'static>
         let Some(client) = object.client() else {
             return;
         };
-        let session_uid = self.world.get::<ecs::Uid>(entity).map_or(0, |uid| uid.0);
-        if !client.creds().uid.is_root() && client.creds().uid.as_raw() != session_uid {
+        if !can_modify(&self.world, entity, client.creds()) {
             object.send_error(
                 session_core_v1::ErrorCode::PermissionDenied,
                 "permission denied",
@@ -282,6 +290,9 @@ pub fn add_object(
     if let Some(active_state) = world.get::<ecs::ActiveState>(entity) {
         object.send_active(active_state.0);
     }
+    if let Some(client) = object.client() {
+        object.send_can_modify(u32::from(can_modify(world, entity, client.creds())));
+    }
     if let Some(seat) = world.get::<ecs::SeatName>(entity) {
         object.send_seat(&seat.0);
     }
@@ -365,8 +376,22 @@ impl<C: cgroup::CgroupManager + 'static> session_core_v1::SessionCoreV1Handler
             .for_each(|session_id| {
                 object.send_session_added(session_id.as_raw());
             });
+        if let Some(client) = object.client() {
+            object.send_can_control_power(u32::from(self.can_control_power(client.creds())));
+        }
         object.send_done();
         self.info_managers.push(object);
+    }
+}
+
+impl<C: cgroup::CgroupManager + 'static> crate::Sessiond<C> {
+    // Allows to manage power commands (power off, reboot) only
+    // if no other sessions are active or user has root permissions
+    fn can_control_power(&self, creds: &rustix::net::UCred) -> bool {
+        self.management_access.allows(creds)
+            || entities(&self.world, &self.session_entities)
+                .filter_map(|entity| self.world.get::<ecs::Uid>(entity))
+                .all(|session| session.0 == creds.uid.as_raw())
     }
 }
 
@@ -732,7 +757,12 @@ impl<C: cgroup::CgroupManager + 'static>
                     return;
                 };
 
-                user::add_object(&mut self.world, entity, session_core_user);
+                user::add_object(
+                    &mut self.world,
+                    entity,
+                    session_core_user,
+                    &self.management_access,
+                );
             }
             session_core_manager::Event::Reboot => {
                 let Some(client) = object.client() else {
@@ -745,7 +775,7 @@ impl<C: cgroup::CgroupManager + 'static>
                     .filter(|session| session.0 != client.creds().uid.as_raw())
                     .count();
 
-                if foreign_session_count > 0 && !self.management_access.allows(client.creds()) {
+                if !self.can_control_power(client.creds()) {
                     log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "reboot denied: multiple sessions active");
                     object.send_error(
                         session_core_v1::ErrorCode::ActiveSessions,
@@ -796,7 +826,7 @@ impl<C: cgroup::CgroupManager + 'static>
                     .filter(|session| session.0 != client.creds().uid.as_raw())
                     .count();
 
-                if foreign_session_count > 0 && !self.management_access.allows(client.creds()) {
+                if !self.can_control_power(client.creds()) {
                     log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "poweroff denied: multiple sessions active");
                     object.send_error(
                         session_core_v1::ErrorCode::ActiveSessions,
@@ -847,7 +877,7 @@ impl<C: cgroup::CgroupManager + 'static>
                     .filter(|session| session.0 != client.creds().uid.as_raw())
                     .count();
 
-                if foreign_session_count > 0 && !self.management_access.allows(client.creds()) {
+                if !self.can_control_power(client.creds()) {
                     log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "suspend denied: multiple sessions active");
                     object.send_error(
                         session_core_v1::ErrorCode::ActiveSessions,
@@ -882,7 +912,7 @@ impl<C: cgroup::CgroupManager + 'static>
                     .filter(|session| session.0 != client.creds().uid.as_raw())
                     .count();
 
-                if foreign_session_count > 0 && !self.management_access.allows(client.creds()) {
+                if !self.can_control_power(client.creds()) {
                     log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "hibernate denied: multiple sessions active");
                     object.send_error(
                         session_core_v1::ErrorCode::ActiveSessions,
@@ -916,7 +946,13 @@ impl<C: cgroup::CgroupManager + 'static>
                     session_core_seat.send_destroyed();
                     return;
                 };
-                seat::add_object(&mut self.world, seat_entity, session_core_seat);
+                seat::add_object(
+                    &mut self.world,
+                    seat_entity,
+                    session_core_seat,
+                    &self.session_entities,
+                    &self.management_access,
+                );
             }
             session_core_manager::Event::Destroy => {
                 self.info_managers.retain(|m| m != object);

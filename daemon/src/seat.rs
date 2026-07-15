@@ -48,6 +48,8 @@ pub fn add_object(
     world: &mut world::World,
     seat_entity: entity::Entity,
     object: session_core_seat::SessionCoreSeat,
+    session_entities: &[entity::Entity],
+    management_access: &crate::Access,
 ) {
     if let Some(name) = world.get::<ecs::SeatName>(seat_entity) {
         object.send_seat(&name.0);
@@ -65,11 +67,42 @@ pub fn add_object(
             }
         }
     }
+    if let Some(client) = object.client() {
+        object.send_can_modify(u32::from(can_modify(
+            world,
+            seat_entity,
+            session_entities,
+            client.creds(),
+            management_access,
+        )));
+    }
     object.send_done();
 
     if let Some(mut objects) = world.get_mut::<ecs::SeatObjects>(seat_entity) {
         objects.0.push(object);
     }
+}
+
+fn can_modify(
+    world: &world::World,
+    seat_entity: entity::Entity,
+    session_entities: &[entity::Entity],
+    creds: &rustix::net::UCred,
+    management_access: &crate::Access,
+) -> bool {
+    if management_access.allows(creds) {
+        return true;
+    }
+
+    let Some(name) = world.get::<ecs::SeatName>(seat_entity) else {
+        return false;
+    };
+
+    session::entities_by_seat_name(world, session_entities, &name.0).all(|entity| {
+        world
+            .get::<ecs::Uid>(entity)
+            .is_some_and(|uid| uid.0 == creds.uid.as_raw())
+    })
 }
 
 pub fn notify_client_added(
@@ -815,13 +848,13 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_core_seat::S
                 let Some(client) = object.client() else {
                     return;
                 };
-                if !self.management_access.allows(client.creds())
-                    && session_entities.iter().any(|entity| {
-                        self.world
-                            .get::<ecs::Uid>(*entity)
-                            .is_none_or(|uid| uid.0 != client.creds().uid.as_raw())
-                    })
-                {
+                if !can_modify(
+                    &self.world,
+                    seat_entity,
+                    &self.session_entities,
+                    client.creds(),
+                    &self.management_access,
+                ) {
                     object.send_error(
                         session_core_v1::ErrorCode::PermissionDenied,
                         "permission denied",

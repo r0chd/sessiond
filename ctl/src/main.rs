@@ -32,6 +32,7 @@ struct Session {
     done: bool,
 }
 
+#[allow(clippy::struct_excessive_bools)]
 struct User {
     uid: u32,
     object: session_core_user::SessionCoreUser,
@@ -537,13 +538,23 @@ enum SessionCommand {
         #[arg(value_name = "SESSION", help = "session id; omit with --current")]
         ids: Vec<u32>,
     },
-    #[command(about = "lock sessions")]
+    #[command(
+        about = "lock sessions",
+        group(ArgGroup::new("target").args(["ids", "all"]).multiple(false))
+    )]
     Lock {
+        #[arg(long, help = "target all sessions")]
+        all: bool,
         #[arg(value_name = "SESSION", help = "session id; defaults to your session")]
         ids: Vec<u32>,
     },
-    #[command(about = "unlock sessions")]
+    #[command(
+        about = "unlock sessions",
+        group(ArgGroup::new("target").args(["ids", "all"]).multiple(false))
+    )]
     Unlock {
+        #[arg(long, help = "target all sessions")]
+        all: bool,
         #[arg(value_name = "SESSION", help = "session id; defaults to your session")]
         ids: Vec<u32>,
     },
@@ -646,8 +657,17 @@ impl SessionAction {
             SessionCommand::List { .. } => None,
             SessionCommand::Close { ids, .. }
             | SessionCommand::Kill { ids, .. }
-            | SessionCommand::Lock { ids }
-            | SessionCommand::Unlock { ids } => Some(ids),
+            | SessionCommand::Lock { ids, .. }
+            | SessionCommand::Unlock { ids, .. } => Some(ids),
+        }
+    }
+
+    const fn targets_all(command: &SessionCommand) -> bool {
+        match command {
+            SessionCommand::List { .. }
+            | SessionCommand::Close { .. }
+            | SessionCommand::Kill { .. } => false,
+            SessionCommand::Lock { all, .. } | SessionCommand::Unlock { all, .. } => *all,
         }
     }
 
@@ -657,7 +677,9 @@ impl SessionAction {
             SessionCommand::Close { current, .. } | SessionCommand::Kill { current, .. } => {
                 *current
             }
-            SessionCommand::Lock { ids } | SessionCommand::Unlock { ids } => ids.is_empty(),
+            SessionCommand::Lock { all, ids } | SessionCommand::Unlock { all, ids } => {
+                !*all && ids.is_empty()
+            }
         }
     }
 
@@ -989,19 +1011,31 @@ fn main() -> anyhow::Result<()> {
                     return Ok(());
                 }
 
-                let mut unmatched = Vec::new();
+                let mut unmatched: Vec<&u32> = Vec::new();
                 let mut matched = Vec::new();
                 let mut denied = Vec::new();
 
-                for id in ids {
-                    if let Some(session) = state.sessions.iter().find(|session| session.id == *id) {
+                if SessionAction::targets_all(&command) {
+                    for session in &state.sessions {
                         if session.can_modify {
                             matched.push(session.object.clone());
                         } else {
                             denied.push(session.id);
                         }
-                    } else {
-                        unmatched.push(id);
+                    }
+                } else {
+                    for id in ids {
+                        if let Some(session) =
+                            state.sessions.iter().find(|session| session.id == *id)
+                        {
+                            if session.can_modify {
+                                matched.push(session.object.clone());
+                            } else {
+                                denied.push(session.id);
+                            }
+                        } else {
+                            unmatched.push(id);
+                        }
                     }
                 }
 
@@ -1026,6 +1060,10 @@ fn main() -> anyhow::Result<()> {
                         "error:".red(),
                         action.name()
                     );
+                    return Ok(());
+                }
+
+                if matched.is_empty() {
                     return Ok(());
                 }
 

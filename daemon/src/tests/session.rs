@@ -187,67 +187,6 @@ fn entity_finds_correct_among_multiple() {
 }
 
 #[test]
-fn set_session_state_updates_active_state() {
-    let mut world = World::new();
-    let e = make_active_session_entity(&mut world, 1, 1000, session_core_v1::ActiveState::Online);
-    session::set_session_state(
-        &mut world,
-        SessionId::from_raw(1),
-        e,
-        session_core_v1::ActiveState::Active,
-    );
-    assert!(matches!(
-        world.get::<ecs::ActiveState>(e).unwrap().0,
-        session_core_v1::ActiveState::Active
-    ));
-}
-
-#[test]
-fn set_session_state_to_closing() {
-    let mut world = World::new();
-    let e = make_active_session_entity(&mut world, 1, 1000, session_core_v1::ActiveState::Active);
-    session::set_session_state(
-        &mut world,
-        SessionId::from_raw(1),
-        e,
-        session_core_v1::ActiveState::Closing,
-    );
-    assert!(matches!(
-        world.get::<ecs::ActiveState>(e).unwrap().0,
-        session_core_v1::ActiveState::Closing
-    ));
-}
-
-#[test]
-fn set_session_state_without_active_state_component() {
-    let mut world = World::new();
-    let e = make_session_entity(&mut world, 1, 1000);
-    session::set_session_state(
-        &mut world,
-        SessionId::from_raw(1),
-        e,
-        session_core_v1::ActiveState::Active,
-    );
-}
-
-#[test]
-fn set_session_state_with_vt_component() {
-    let mut world = World::new();
-    let e = make_active_session_entity(&mut world, 1, 1000, session_core_v1::ActiveState::Online);
-    world.entity_mut(e).insert(ecs::Vt(Some(3)));
-    session::set_session_state(
-        &mut world,
-        SessionId::from_raw(1),
-        e,
-        session_core_v1::ActiveState::Active,
-    );
-    assert!(matches!(
-        world.get::<ecs::ActiveState>(e).unwrap().0,
-        session_core_v1::ActiveState::Active
-    ));
-}
-
-#[test]
 fn set_state_updates_active_state() {
     let mut world = World::new();
     let e = make_active_session_entity(&mut world, 1, 1000, session_core_v1::ActiveState::Online);
@@ -264,6 +203,22 @@ fn set_state_updates_active_state() {
 }
 
 #[test]
+fn set_state_to_closing() {
+    let mut world = World::new();
+    let e = make_active_session_entity(&mut world, 1, 1000, session_core_v1::ActiveState::Active);
+    session::set_state(
+        &mut world,
+        SessionId::from_raw(1),
+        e,
+        session_core_v1::ActiveState::Closing,
+    );
+    assert!(matches!(
+        world.get::<ecs::ActiveState>(e).unwrap().0,
+        session_core_v1::ActiveState::Closing
+    ));
+}
+
+#[test]
 fn set_state_without_active_state_component() {
     let mut world = World::new();
     let e = make_session_entity(&mut world, 1, 1000);
@@ -271,23 +226,23 @@ fn set_state_without_active_state_component() {
         &mut world,
         SessionId::from_raw(1),
         e,
-        session_core_v1::ActiveState::Closing,
+        session_core_v1::ActiveState::Active,
     );
 }
 
 #[test]
 fn set_state_with_vt_component() {
     let mut world = World::new();
-    let e = make_active_session_entity(&mut world, 2, 2000, session_core_v1::ActiveState::Opening);
-    world.entity_mut(e).insert(ecs::Vt(Some(7)));
+    let e = make_active_session_entity(&mut world, 1, 1000, session_core_v1::ActiveState::Online);
+    world.entity_mut(e).insert(ecs::Vt(Some(3)));
     session::set_state(
         &mut world,
-        SessionId::from_raw(2),
+        SessionId::from_raw(1),
         e,
-        session_core_v1::ActiveState::Online,
+        session_core_v1::ActiveState::Active,
     );
     assert!(matches!(
         world.get::<ecs::ActiveState>(e).unwrap().0,
-        session_core_v1::ActiveState::Online
+        session_core_v1::ActiveState::Active
     ));
 }

@@ -14,6 +14,7 @@ mod seat_v1 {
 }
 
 mod cgroup;
+mod client;
 mod config;
 #[cfg(feature = "consolekit")]
 mod consolekit;

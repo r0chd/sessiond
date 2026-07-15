@@ -135,7 +135,7 @@ fn sync(world: &mut world::World, session_entities: &[entity::Entity], entity: e
     }
 }
 
-pub fn add_user_object(
+pub fn add_object(
     world: &mut world::World,
     entity: entity::Entity,
     object: session_core_user::SessionCoreUser,

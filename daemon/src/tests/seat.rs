@@ -1,3 +1,4 @@
+use crate::client;
 use crate::ecs::{self, SeatKind, SeatState as EcsSeatState};
 use crate::seat::{self, SeatState};
 use crate::session::SessionId;
@@ -14,11 +15,11 @@ fn make_client(world: &mut World) -> Entity {
 }
 
 #[test]
-fn add_client_assigns_session_id_1() {
+fn add_assigns_session_id_1() {
     let mut world = World::new();
     let seat = make_seat(&mut world);
     let client = make_client(&mut world);
-    seat::add_client(&mut world, seat, client).unwrap();
+    client::add(&mut world, seat, client).unwrap();
     assert_eq!(
         world.get::<ecs::Session>(client).map(|s| s.0.as_raw()),
         Some(1)
@@ -26,23 +27,23 @@ fn add_client_assigns_session_id_1() {
 }
 
 #[test]
-fn add_client_assigns_sequential_ids() {
+fn add_assigns_sequential_ids() {
     let mut world = World::new();
     let seat = make_seat(&mut world);
     let c1 = make_client(&mut world);
     let c2 = make_client(&mut world);
-    seat::add_client(&mut world, seat, c1).unwrap();
-    seat::add_client(&mut world, seat, c2).unwrap();
+    client::add(&mut world, seat, c1).unwrap();
+    client::add(&mut world, seat, c2).unwrap();
     assert_eq!(world.get::<ecs::Session>(c1).map(|s| s.0.as_raw()), Some(1));
     assert_eq!(world.get::<ecs::Session>(c2).map(|s| s.0.as_raw()), Some(2));
 }
 
 #[test]
-fn add_client_sets_enabled_state() {
+fn add_sets_enabled_state() {
     let mut world = World::new();
     let seat = make_seat(&mut world);
     let client = make_client(&mut world);
-    seat::add_client(&mut world, seat, client).unwrap();
+    client::add(&mut world, seat, client).unwrap();
     assert_eq!(
         world.get::<EcsSeatState>(client).map(|s| s.0),
         Some(SeatState::Enabled)
@@ -50,11 +51,11 @@ fn add_client_sets_enabled_state() {
 }
 
 #[test]
-fn add_client_sets_active_client() {
+fn add_sets_active_client() {
     let mut world = World::new();
     let seat = make_seat(&mut world);
     let client = make_client(&mut world);
-    seat::add_client(&mut world, seat, client).unwrap();
+    client::add(&mut world, seat, client).unwrap();
     assert_eq!(
         world.get::<ecs::ActiveClient>(seat).map(|a| a.0),
         Some(client)
@@ -62,40 +63,40 @@ fn add_client_sets_active_client() {
 }
 
 #[test]
-fn add_client_rejects_already_member() {
+fn add_rejects_already_member() {
     let mut world = World::new();
     let seat = make_seat(&mut world);
     let client = make_client(&mut world);
-    seat::add_client(&mut world, seat, client).unwrap();
-    assert!(seat::add_client(&mut world, seat, client).is_err());
+    client::add(&mut world, seat, client).unwrap();
+    assert!(client::add(&mut world, seat, client).is_err());
 }
 
 #[test]
-fn is_active_client_true_for_active() {
+fn is_active_true_for_active() {
     let mut world = World::new();
     let seat = make_seat(&mut world);
     let client = make_client(&mut world);
-    seat::add_client(&mut world, seat, client).unwrap();
-    assert!(seat::is_active_client(&world, seat, client));
+    client::add(&mut world, seat, client).unwrap();
+    assert!(client::is_active(&world, seat, client));
 }
 
 #[test]
-fn is_active_client_false_for_unrelated_entity() {
+fn is_active_false_for_unrelated_entity() {
     let mut world = World::new();
     let seat = make_seat(&mut world);
     let c1 = make_client(&mut world);
     let other = world.spawn_empty().id();
-    seat::add_client(&mut world, seat, c1).unwrap();
-    assert!(!seat::is_active_client(&world, seat, other));
+    client::add(&mut world, seat, c1).unwrap();
+    assert!(!client::is_active(&world, seat, other));
 }
 
 #[test]
-fn disable_client_sets_pending_disabled() {
+fn disable_sets_pending_disabled() {
     let mut world = World::new();
     let seat = make_seat(&mut world);
     let client = make_client(&mut world);
-    seat::add_client(&mut world, seat, client).unwrap();
-    seat::disable_client(&mut world, seat, client).unwrap();
+    client::add(&mut world, seat, client).unwrap();
+    client::disable(&mut world, seat, client).unwrap();
     assert_eq!(
         world.get::<EcsSeatState>(client).map(|s| s.0),
         Some(SeatState::PendingDisabled)
@@ -103,25 +104,25 @@ fn disable_client_sets_pending_disabled() {
 }
 
 #[test]
-fn disable_client_rejects_non_enabled() {
+fn disable_rejects_non_enabled() {
     let mut world = World::new();
     let seat = make_seat(&mut world);
     let client = make_client(&mut world);
-    seat::add_client(&mut world, seat, client).unwrap();
-    seat::disable_client(&mut world, seat, client).unwrap();
-    assert!(seat::disable_client(&mut world, seat, client).is_err());
+    client::add(&mut world, seat, client).unwrap();
+    client::disable(&mut world, seat, client).unwrap();
+    assert!(client::disable(&mut world, seat, client).is_err());
 }
 
 #[test]
-fn ack_disable_client_sets_disabled() {
+fn ack_disable_sets_disabled() {
     let mut world = World::new();
     let seat = make_seat(&mut world);
     let c1 = make_client(&mut world);
     let c2 = make_client(&mut world);
-    seat::add_client(&mut world, seat, c1).unwrap();
-    seat::add_client(&mut world, seat, c2).unwrap();
-    seat::disable_client(&mut world, seat, c2).unwrap();
-    seat::ack_disable_client(&mut world, seat, c2).unwrap();
+    client::add(&mut world, seat, c1).unwrap();
+    client::add(&mut world, seat, c2).unwrap();
+    client::disable(&mut world, seat, c2).unwrap();
+    client::ack_disable(&mut world, seat, c2).unwrap();
     assert_eq!(
         world.get::<EcsSeatState>(c2).map(|s| s.0),
         Some(SeatState::Disabled)
@@ -133,8 +134,8 @@ fn ack_disable_rejects_non_pending() {
     let mut world = World::new();
     let seat = make_seat(&mut world);
     let client = make_client(&mut world);
-    seat::add_client(&mut world, seat, client).unwrap();
-    assert!(seat::ack_disable_client(&mut world, seat, client).is_err());
+    client::add(&mut world, seat, client).unwrap();
+    assert!(client::ack_disable(&mut world, seat, client).is_err());
 }
 
 #[test]
@@ -142,7 +143,7 @@ fn ack_disable_activates_next_queued_client() {
     let mut world = World::new();
     let seat = make_seat(&mut world);
     let c1 = make_client(&mut world);
-    seat::add_client(&mut world, seat, c1).unwrap();
+    client::add(&mut world, seat, c1).unwrap();
 
     let c2 = make_client(&mut world);
     world
@@ -154,8 +155,8 @@ fn ack_disable_activates_next_queued_client() {
     world.entity_mut(c2).insert(ecs::SeatEntity(seat));
     world.entity_mut(seat).insert(ecs::NextClient(c2));
 
-    seat::disable_client(&mut world, seat, c1).unwrap();
-    seat::ack_disable_client(&mut world, seat, c1).unwrap();
+    client::disable(&mut world, seat, c1).unwrap();
+    client::ack_disable(&mut world, seat, c1).unwrap();
 
     assert_eq!(world.get::<ecs::ActiveClient>(seat).map(|a| a.0), Some(c2));
 }
@@ -165,7 +166,7 @@ fn set_next_session_switches_to_self_is_noop() {
     let mut world = World::new();
     let seat = make_seat(&mut world);
     let client = make_client(&mut world);
-    seat::add_client(&mut world, seat, client).unwrap();
+    client::add(&mut world, seat, client).unwrap();
     let session_id = world.get::<ecs::Session>(client).unwrap().0.as_raw();
     seat::set_next_session(&mut world, seat, client, session_id).unwrap();
     assert!(world.get::<ecs::NextClient>(seat).is_none());
@@ -176,7 +177,7 @@ fn set_next_session_rejects_zero() {
     let mut world = World::new();
     let seat = make_seat(&mut world);
     let client = make_client(&mut world);
-    seat::add_client(&mut world, seat, client).unwrap();
+    client::add(&mut world, seat, client).unwrap();
     assert!(seat::set_next_session(&mut world, seat, client, 0).is_err());
 }
 
@@ -186,8 +187,8 @@ fn set_next_session_queues_switch() {
     let seat = make_seat(&mut world);
     let c1 = make_client(&mut world);
     let c2 = make_client(&mut world);
-    seat::add_client(&mut world, seat, c1).unwrap();
-    seat::add_client(&mut world, seat, c2).unwrap();
+    client::add(&mut world, seat, c1).unwrap();
+    client::add(&mut world, seat, c2).unwrap();
     let c1_session = world.get::<ecs::Session>(c1).unwrap().0.as_raw();
     seat::set_next_session(&mut world, seat, c2, c1_session).unwrap();
     assert_eq!(world.get::<ecs::NextClient>(seat).map(|n| n.0), Some(c1));
@@ -198,7 +199,7 @@ fn remove_client_cleans_up() {
     let mut world = World::new();
     let seat = make_seat(&mut world);
     let client = make_client(&mut world);
-    seat::add_client(&mut world, seat, client).unwrap();
+    client::add(&mut world, seat, client).unwrap();
     seat::remove_client(&mut world, seat, client).unwrap();
     assert!(world.get::<ecs::ActiveClient>(seat).is_none());
     assert!(

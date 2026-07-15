@@ -1,14 +1,9 @@
 use crate::seat_v1::{seat, seat_manager};
-use crate::session_core_v1::{
-    session_core_seat, session_core_seat_client, session_core_seat_device,
-};
-use crate::{cgroup, device, ecs, seat_v1, session, session_core_v1, terminal, user};
+use crate::session_core_v1::session_core_seat;
+use crate::{cgroup, client, device, ecs, seat_v1, session, session_core_v1, terminal, user};
 use bevy_ecs::{entity, world};
 use calloop::signals;
 use rustix::io;
-use std::fs;
-
-const MAX_SEAT_DEVICES: u8 = 128;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SeatState {
@@ -18,19 +13,7 @@ pub enum SeatState {
     Disabled,
 }
 
-pub fn client_entity_by_seat_object(
-    world: &world::World,
-    entities: &[entity::Entity],
-    object: &seat_v1::seat::Seat,
-) -> Option<entity::Entity> {
-    entities.iter().copied().find(|entity| {
-        world
-            .get::<ecs::SeatObject>(*entity)
-            .is_some_and(|seat_object| seat_object.0 == *object)
-    })
-}
-
-pub fn seat_entity_by_core_object(
+pub fn entity_by_core_object(
     world: &world::World,
     entities: &[entity::Entity],
     object: &session_core_seat::SessionCoreSeat,
@@ -42,7 +25,7 @@ pub fn seat_entity_by_core_object(
     })
 }
 
-pub fn seat_entity_by_name(
+pub fn entity_by_name(
     world: &world::World,
     entities: &[entity::Entity],
     name: &str,
@@ -54,110 +37,14 @@ pub fn seat_entity_by_name(
     })
 }
 
-pub fn client_entity_by_pid(
-    world: &world::World,
-    entities: &[entity::Entity],
-    pid: u32,
-) -> Option<entity::Entity> {
-    entities.iter().copied().find(|entity| {
-        world
-            .get::<ecs::ClientPid>(*entity)
-            .is_some_and(|client_pid| client_pid.0 == pid)
-    })
-}
-
-pub fn client_entity_by_core_object(
-    world: &world::World,
-    entities: &[entity::Entity],
-    object: &session_core_seat_client::SessionCoreSeatClient,
-) -> Option<entity::Entity> {
-    entities.iter().copied().find(|entity| {
-        world
-            .get::<ecs::ClientObjects>(*entity)
-            .is_some_and(|objects| objects.0.iter().any(|candidate| candidate == object))
-    })
-}
-
-pub fn client_entity_by_device_object(
-    world: &world::World,
-    entities: &[entity::Entity],
-    object: &seat_v1::device::Device,
-) -> Option<entity::Entity> {
-    entities.iter().copied().find(|entity| {
-        world.get::<ecs::Devices>(*entity).is_some_and(|devices| {
-            devices
-                .0
-                .iter()
-                .any(|device_entity| device::contains_object(world, *device_entity, object))
-        })
-    })
-}
-
-pub fn device_entity_by_id(
-    world: &world::World,
-    client_entity: entity::Entity,
-    device_id: u32,
-) -> Option<entity::Entity> {
-    world
-        .get::<ecs::Devices>(client_entity)?
-        .0
-        .iter()
-        .copied()
-        .find(|device_entity| {
-            world
-                .get::<ecs::DeviceObjects>(*device_entity)
-                .is_some_and(|objects| objects.0.iter().any(|object| object.id == device_id))
-        })
-}
-
-pub fn device_entity_by_core_object(
-    world: &world::World,
-    client_entity: entity::Entity,
-    object: &session_core_seat_device::SessionCoreSeatDevice,
-) -> Option<entity::Entity> {
-    world
-        .get::<ecs::Devices>(client_entity)?
-        .0
-        .iter()
-        .copied()
-        .find(|device_entity| {
-            world
-                .get::<ecs::SeatDeviceObjects>(*device_entity)
-                .is_some_and(|objects| {
-                    objects
-                        .0
-                        .iter()
-                        .any(|candidate| candidate.object == *object)
-                })
-        })
-}
-
-const fn seat_mode_event(mode: ecs::SeatKind) -> session_core_v1::SeatMode {
+const fn mode_event(mode: ecs::SeatKind) -> session_core_v1::SeatMode {
     match mode {
         ecs::SeatKind::VtBound => session_core_v1::SeatMode::VtBound,
         ecs::SeatKind::NonVtBound => session_core_v1::SeatMode::NonVtBound,
     }
 }
 
-const fn client_state_event(state: SeatState) -> session_core_v1::SeatClientState {
-    match state {
-        SeatState::New => session_core_v1::SeatClientState::New,
-        SeatState::Enabled => session_core_v1::SeatClientState::Enabled,
-        SeatState::PendingDisabled => session_core_v1::SeatClientState::PendingDisabled,
-        SeatState::Disabled => session_core_v1::SeatClientState::Disabled,
-    }
-}
-
-pub const fn device_kind_event(kind: device::DeviceKind) -> session_core_v1::SeatDeviceKind {
-    match kind {
-        device::DeviceKind::Drm => session_core_v1::SeatDeviceKind::Drm,
-        device::DeviceKind::Evdev => session_core_v1::SeatDeviceKind::Evdev,
-        device::DeviceKind::Hidraw => session_core_v1::SeatDeviceKind::Hidraw,
-        device::DeviceKind::Wscons => session_core_v1::SeatDeviceKind::Wscons,
-    }
-}
-
-pub fn add_seat_object(
+pub fn add_object(
     world: &mut world::World,
     seat_entity: entity::Entity,
     object: session_core_seat::SessionCoreSeat,
@@ -166,7 +53,7 @@ pub fn add_seat_object(
         object.send_seat(&name.0);
     }
     if let Some(mode) = world.get::<ecs::SeatMode>(seat_entity) {
-        object.send_mode(seat_mode_event(mode.0));
+        object.send_mode(mode_event(mode.0));
     }
     if let Some(vt) = world.get::<ecs::CurrentVt>(seat_entity) {
         object.send_current_vt(vt.0);
@@ -185,82 +72,7 @@ pub fn add_seat_object(
     }
 }
 
-pub fn add_client_object(
-    world: &mut world::World,
-    seat_entity: entity::Entity,
-    client_entity: entity::Entity,
-    object: session_core_seat_client::SessionCoreSeatClient,
-) {
-    if let Some(session) = world
-        .get::<ecs::ClientSession>(client_entity)
-        .and_then(|session| session.0)
-        .or_else(|| {
-            world
-                .get::<ecs::Session>(client_entity)
-                .map(|session| session.0)
-        })
-    {
-        object.send_session(session.as_raw());
-    }
-    if let Some(state) = world.get::<ecs::SeatState>(client_entity) {
-        object.send_state(client_state_event(state.0));
-    }
-    object.send_active(u32::from(is_active_client(
-        world,
-        seat_entity,
-        client_entity,
-    )));
-    object.send_next(u32::from(
-        world
-            .get::<ecs::NextClient>(seat_entity)
-            .is_some_and(|next| next.0 == client_entity),
-    ));
-    if let Some(pid) = world.get::<ecs::ClientPid>(client_entity) {
-        object.send_pid(pid.0);
-    }
-    if let Some(devices) = world.get::<ecs::Devices>(client_entity) {
-        for device_entity in &devices.0 {
-            if let Some(objects) = world.get::<ecs::DeviceObjects>(*device_entity) {
-                for device_object in &objects.0 {
-                    object.send_device_added(device_object.id);
-                }
-            }
-        }
-    }
-    object.send_done();
-
-    if let Some(mut objects) = world.get_mut::<ecs::ClientObjects>(client_entity) {
-        objects.0.push(object);
-    }
-}
-
-pub fn add_device_object(
-    world: &mut world::World,
-    device_entity: entity::Entity,
-    device_id: u32,
-    object: session_core_seat_device::SessionCoreSeatDevice,
-) {
-    object.send_device_id(device_id);
-    if let Ok(path) = device::absolute_path_string(world, device_entity) {
-        object.send_path(path);
-    }
-    if let Some(kind) = world.get::<ecs::DeviceKind>(device_entity) {
-        object.send_kind(device_kind_event(kind.0));
-    }
-    if let Some(active) = world.get::<ecs::DeviceActive>(device_entity) {
-        object.send_active(u32::from(active.0));
-    }
-    object.send_done();
-
-    if let Some(mut objects) = world.get_mut::<ecs::SeatDeviceObjects>(device_entity) {
-        objects.0.push(ecs::SeatDeviceObject {
-            object,
-            id: device_id,
-        });
-    }
-}
-
-fn notify_seat_client_added(
+pub fn notify_client_added(
     world: &world::World,
     seat_entity: entity::Entity,
     client_entity: entity::Entity,
@@ -275,7 +87,7 @@ fn notify_seat_client_added(
     }
 }
 
-fn notify_seat_current_vt(world: &world::World, seat_entity: entity::Entity) {
+fn notify_current_vt(world: &world::World, seat_entity: entity::Entity) {
     let vt = world
         .get::<ecs::CurrentVt>(seat_entity)
         .map_or(0, |vt| vt.0);
@@ -286,411 +98,18 @@ fn notify_seat_current_vt(world: &world::World, seat_entity: entity::Entity) {
     }
 }
 
-fn notify_client_state(world: &world::World, client_entity: entity::Entity) {
-    let Some(state) = world
-        .get::<ecs::SeatState>(client_entity)
-        .map(|state| state.0)
-    else {
-        return;
-    };
-    if let Some(objects) = world.get::<ecs::ClientObjects>(client_entity) {
-        for object in &objects.0 {
-            object.send_state(client_state_event(state));
-        }
-    }
-}
-
-fn notify_client_active(
-    world: &world::World,
-    seat_entity: entity::Entity,
-    client_entity: entity::Entity,
-) {
-    let active = u32::from(is_active_client(world, seat_entity, client_entity));
-    if let Some(objects) = world.get::<ecs::ClientObjects>(client_entity) {
-        for object in &objects.0 {
-            object.send_active(active);
-        }
-    }
-}
-
-fn notify_client_next(world: &world::World, client_entity: entity::Entity, next: bool) {
-    if let Some(objects) = world.get::<ecs::ClientObjects>(client_entity) {
-        for object in &objects.0 {
-            object.send_next(u32::from(next));
-        }
-    }
-}
-
-fn notify_client_device_added(world: &world::World, client_entity: entity::Entity, device_id: u32) {
-    if let Some(objects) = world.get::<ecs::ClientObjects>(client_entity) {
-        for object in &objects.0 {
-            object.send_device_added(device_id);
-        }
-    }
-}
-
-pub fn notify_client_device_removed(
-    world: &world::World,
-    client_entity: entity::Entity,
-    device_id: u32,
-) {
-    if let Some(objects) = world.get::<ecs::ClientObjects>(client_entity) {
-        for object in &objects.0 {
-            object.send_device_removed(device_id);
-        }
-    }
-}
-
-pub fn notify_client_destroyed(world: &world::World, client_entity: entity::Entity) {
-    if let Some(objects) = world.get::<ecs::ClientObjects>(client_entity) {
-        for object in &objects.0 {
-            object.send_destroyed();
-        }
-    }
-}
-
-pub fn notify_device_destroyed(world: &world::World, device_entity: entity::Entity) {
-    if let Some(objects) = world.get::<ecs::SeatDeviceObjects>(device_entity) {
-        for object in &objects.0 {
-            object.object.send_destroyed();
-        }
-    }
-}
-
-pub fn notify_device_id_destroyed(
-    world: &world::World,
-    device_entity: entity::Entity,
-    device_id: u32,
-) {
-    if let Some(objects) = world.get::<ecs::SeatDeviceObjects>(device_entity) {
-        for object in &objects.0 {
-            if object.id == device_id {
-                object.object.send_destroyed();
-            }
-        }
-    }
-}
-
-pub fn remove_device_object(
-    world: &mut world::World,
-    device_entity: entity::Entity,
-    object: &session_core_seat_device::SessionCoreSeatDevice,
-) {
-    if let Some(mut objects) = world.get_mut::<ecs::SeatDeviceObjects>(device_entity) {
-        objects.0.retain(|candidate| candidate.object != *object);
-    }
-}
-
-pub fn remove_device_id_objects(
-    world: &mut world::World,
-    device_entity: entity::Entity,
-    device_id: u32,
-) {
-    if let Some(mut objects) = world.get_mut::<ecs::SeatDeviceObjects>(device_entity) {
-        objects.0.retain(|candidate| candidate.id != device_id);
-    }
-}
-
-pub fn notify_device_removed(
-    world: &world::World,
-    client_entity: entity::Entity,
-    device_entity: entity::Entity,
-) {
-    if let Some(objects) = world.get::<ecs::DeviceObjects>(device_entity) {
-        for device_object in &objects.0 {
-            notify_client_device_removed(world, client_entity, device_object.id);
-        }
-    }
-    notify_device_destroyed(world, device_entity);
-}
-
-pub fn add_client(
-    world: &mut world::World,
-    seat_entity: entity::Entity,
-    client_entity: entity::Entity,
-) -> anyhow::Result<()> {
-    if world.get::<ecs::SeatName>(client_entity).is_some() {
-        log::error!("Could not add client: client is already a member of a seat");
-        return Err(anyhow::anyhow!("client is already a member of a seat"));
-    }
-    if world.get::<ecs::Session>(client_entity).is_some() {
-        log::error!("Could not add client: client cannot be reused");
-        return Err(anyhow::anyhow!("client cannot be reused"));
-    }
-
-    let seat_name = seat_name(world, seat_entity)?;
-    refresh_current_vts(world, &[seat_entity]);
-
-    let mode = seat_mode(world, seat_entity)?;
-    let session_id = match mode {
-        ecs::SeatKind::VtBound => {
-            if let Some(active_client) = world.get::<ecs::ActiveClient>(seat_entity) {
-                let active_state = world
-                    .get::<ecs::SeatState>(active_client.0)
-                    .map(|state| state.0);
-                if active_state != Some(SeatState::PendingDisabled) {
-                    log::error!("Could not add client: seat is VT-bound and has an active client");
-                    return Err(anyhow::anyhow!("seat is VT-bound and has an active client"));
-                }
-            }
-
-            let vt = world
-                .get::<ecs::CurrentVt>(seat_entity)
-                .map(|vt| vt.0)
-                .ok_or_else(|| anyhow::anyhow!("could not determine VT for client"))?;
-            if vt == 0 {
-                log::error!("Could not determine VT for client");
-                return Err(anyhow::anyhow!("could not determine VT for client"));
-            }
-
-            let already_pending =
-                world
-                    .get::<ecs::SeatClients>(seat_entity)
-                    .is_some_and(|clients| {
-                        clients.0.iter().any(|client| {
-                            world
-                                .get::<ecs::Session>(*client)
-                                .is_some_and(|session| session.0.as_raw() == vt)
-                        })
-                    });
-            if world.get::<ecs::ActiveClient>(seat_entity).is_some() && already_pending {
-                log::error!(
-                    "Could not add client: seat is VT-bound and already has pending client"
-                );
-                return Err(anyhow::anyhow!(
-                    "seat is VT-bound and already has pending client"
-                ));
-            }
-
-            session::SessionId::from_raw(vt)
-        }
-        ecs::SeatKind::NonVtBound => {
-            let mut next_session = 1;
-            while world
-                .get::<ecs::SeatClients>(seat_entity)
-                .is_some_and(|clients| {
-                    clients.0.iter().any(|client| {
-                        world
-                            .get::<ecs::Session>(*client)
-                            .is_some_and(|session| session.0.as_raw() == next_session)
-                    })
-                })
-            {
-                next_session += 1;
-            }
-
-            session::SessionId::from_raw(next_session)
-        }
-    };
-
-    if mode == ecs::SeatKind::VtBound {
-        vt_open(session_id.as_raw())?;
-    }
-
-    world.entity_mut(client_entity).insert((
-        ecs::SeatName(seat_name.clone()),
-        ecs::SeatEntity(seat_entity),
-        ecs::Session(session_id),
-        ecs::SeatState(SeatState::Enabled),
-    ));
-    if let Some(mut clients) = world.get_mut::<ecs::SeatClients>(seat_entity) {
-        clients.0.push(client_entity);
-    }
-    world
-        .entity_mut(seat_entity)
-        .insert(ecs::ActiveClient(client_entity));
-    notify_seat_client_added(world, seat_entity, client_entity);
-    notify_client_state(world, client_entity);
-    notify_client_active(world, seat_entity, client_entity);
-
-    if let Some(object) = world.get::<ecs::SeatObject>(client_entity) {
-        object.0.send_enabled();
-    }
-    log::info!(
-        session_id = session_id.as_raw(),
-        seat = seat_name.as_str(),
-        pid = world
-            .get::<ecs::ClientPid>(client_entity)
-            .map_or(0, |pid| pid.0);
-        "added client to seat"
-    );
-
-    Ok(())
-}
-
-pub fn is_active_client(
-    world: &world::World,
-    seat_entity: entity::Entity,
-    client_entity: entity::Entity,
-) -> bool {
-    world
-        .get::<ecs::ActiveClient>(seat_entity)
-        .is_some_and(|active_client| active_client.0 == client_entity)
-}
-
-pub fn open_client(
-    world: &mut world::World,
-    seat_entity: entity::Entity,
-    client_entity: entity::Entity,
-) -> anyhow::Result<()> {
-    let seat_name = seat_name(world, seat_entity)?;
-    let session_id = client_session_id(world, client_entity)?;
-    let state = seat_state(world, client_entity)?;
-
-    if state != SeatState::New && state != SeatState::Disabled {
-        log::error!("Could not enable client: client is not new or disabled");
-        return Err(anyhow::anyhow!("client is not new or disabled"));
-    }
-
-    if let Some(active_client) = world.get::<ecs::ActiveClient>(seat_entity) {
-        let active_state = world
-            .get::<ecs::SeatState>(active_client.0)
-            .map(|state| state.0);
-        if !is_vt_bound(world, seat_entity) || active_state != Some(SeatState::PendingDisabled) {
-            log::error!("Could not enable client: seat already has an active client");
-            return Err(anyhow::anyhow!("seat already has an active client"));
-        }
-    }
-
-    if is_vt_bound(world, seat_entity) {
-        vt_open(session_id.as_raw())?;
-    }
-
-    if let Some(devices) = world.get_mut::<ecs::Devices>(client_entity) {
-        for device_entity in devices.0.clone() {
-            if let Err(err) = device::activate(world, device_entity) {
-                let path = device::path_display(world, device_entity);
-                log::error!("Could not activate {path}: {err}");
-            }
-        }
-    }
-
-    if let Some(object) = world.get::<ecs::SeatObject>(client_entity) {
-        object.0.send_enabled();
-    }
-    world
-        .entity_mut(client_entity)
-        .insert(ecs::SeatState(SeatState::Enabled));
-    world
-        .entity_mut(seat_entity)
-        .insert(ecs::ActiveClient(client_entity));
-    notify_client_state(world, client_entity);
-    notify_client_active(world, seat_entity, client_entity);
-    log::info!("Opened client {} on {}", session_id.as_raw(), seat_name);
-
-    Ok(())
-}
-
-pub fn disable_client(
-    world: &mut world::World,
-    seat_entity: entity::Entity,
-    client_entity: entity::Entity,
-) -> anyhow::Result<()> {
-    if seat_state(world, client_entity)? != SeatState::Enabled {
-        log::error!("Could not disable client: client is not active");
-        return Err(anyhow::anyhow!("client is not active"));
-    }
-
-    if !is_active_client(world, seat_entity, client_entity) {
-        log::error!("Could not disable client: client is not the active seat client");
-        return Err(anyhow::anyhow!("client is not the active seat client"));
-    }
-
-    let session_id = client_session_id(world, client_entity)?;
-    let seat_name = seat_name(world, seat_entity)?;
-
-    deactivate_client_devices(world, client_entity);
-
-    world
-        .entity_mut(client_entity)
-        .insert(ecs::SeatState(SeatState::PendingDisabled));
-    notify_client_state(world, client_entity);
-    if let Some(object) = world.get::<ecs::SeatObject>(client_entity) {
-        object.0.send_disabled();
-    }
-    log::info!("Disabling client {} on {}", session_id.as_raw(), seat_name);
-
-    Ok(())
-}
-
-pub fn ack_disable_client(
-    world: &mut world::World,
-    seat_entity: entity::Entity,
-    client_entity: entity::Entity,
-) -> anyhow::Result<()> {
-    if seat_state(world, client_entity)? != SeatState::PendingDisabled {
-        log::error!("Could not ack disable: client is not pending disable");
-        return Err(anyhow::anyhow!("client is not pending disable"));
-    }
-
-    let session_id = client_session_id(world, client_entity)?;
-    let seat_name = seat_name(world, seat_entity)?;
-    world
-        .entity_mut(client_entity)
-        .insert(ecs::SeatState(SeatState::Disabled));
-    notify_client_state(world, client_entity);
-    log::info!("Disabled client {} on {}", session_id.as_raw(), seat_name);
-
-    if !is_active_client(world, seat_entity, client_entity) {
-        return Ok(());
-    }
-
-    world.entity_mut(seat_entity).remove::<ecs::ActiveClient>();
-    notify_client_active(world, seat_entity, client_entity);
-    let _ = activate(world, seat_entity);
-
-    Ok(())
-}
-
-fn deactivate_client_devices(world: &mut world::World, client_entity: entity::Entity) {
-    let Some(devices) = world
-        .get::<ecs::Devices>(client_entity)
-        .map(|devices| devices.0.clone())
-    else {
-        return;
-    };
-
-    let mut retained_devices = Vec::new();
-    for device_entity in devices {
-        if let Err(err) = device::deactivate(world, device_entity) {
-            let path = device::path_display(world, device_entity);
-            log::error!("Could not deactivate {path}: {err}");
-            retained_devices.push(device_entity);
-            continue;
-        }
-
-        match device::device_kind(world, device_entity) {
-            Ok(device::DeviceKind::Drm | device::DeviceKind::Wscons) => {
-                retained_devices.push(device_entity);
-            }
-            Ok(device::DeviceKind::Evdev | device::DeviceKind::Hidraw) => {
-                notify_device_removed(world, client_entity, device_entity);
-                world.despawn(device_entity);
-            }
-            Err(err) => {
-                log::error!("Could not determine device kind: {err}");
-                retained_devices.push(device_entity);
-            }
-        }
-    }
-
-    if let Some(mut devices) = world.get_mut::<ecs::Devices>(client_entity) {
-        devices.0 = retained_devices;
-    }
-}
-
 pub fn set_next_session(
     world: &mut world::World,
     seat_entity: entity::Entity,
     client_entity: entity::Entity,
     session: u32,
 ) -> anyhow::Result<()> {
-    if seat_state(world, client_entity)? != SeatState::Enabled {
+    if state(world, client_entity)? != SeatState::Enabled {
         log::error!("Could not set next session: client is not active");
         return Err(anyhow::anyhow!("client is not active"));
     }
 
-    if !is_active_client(world, seat_entity, client_entity) {
+    if !client::is_active(world, seat_entity, client_entity) {
         log::error!("Could not set next session: client is not the active seat client");
         return Err(anyhow::anyhow!("client is not the active seat client"));
     }
@@ -701,7 +120,7 @@ pub fn set_next_session(
     }
     let session = session::SessionId::from_raw(session);
 
-    if client_session_id(world, client_entity)? == session {
+    if client::session_id(world, client_entity)? == session {
         log::info!("Could not set next session: requested session is already active");
         return Ok(());
     }
@@ -734,17 +153,13 @@ pub fn set_next_session(
         return Err(anyhow::anyhow!("no such client"));
     };
 
-    let seat_name = seat_name(world, seat_entity)?;
-    log::info!(
-        "Queuing switch to client {} on {}",
-        session.as_raw(),
-        seat_name
-    );
+    let name = name(world, seat_entity)?;
+    log::info!("Queuing switch to client {} on {}", session.as_raw(), name);
     world
         .entity_mut(seat_entity)
         .insert(ecs::NextClient(target));
-    notify_client_next(world, target, true);
-    disable_client(world, seat_entity, client_entity)?;
+    client::notify_next(world, target, true);
+    client::disable(world, seat_entity, client_entity)?;
 
     Ok(())
 }
@@ -759,13 +174,13 @@ pub fn remove_client(
         .is_some_and(|next_client| next_client.0 == client_entity)
     {
         world.entity_mut(seat_entity).remove::<ecs::NextClient>();
-        notify_client_next(world, client_entity, false);
+        client::notify_next(world, client_entity, false);
     }
 
     let session_id = world
         .get::<ecs::Session>(client_entity)
         .map(|session| session.0);
-    let seat_name = seat_name(world, seat_entity)?;
+    let name = name(world, seat_entity)?;
 
     if let Some(mut clients) = world.get_mut::<ecs::SeatClients>(seat_entity) {
         clients.0.retain(|client| *client != client_entity);
@@ -777,7 +192,7 @@ pub fn remove_client(
                 let path = device::path_display(world, device_entity);
                 log::error!("Could not deactivate {path}: {err}");
             }
-            notify_device_removed(world, client_entity, device_entity);
+            device::notify_removed(world, client_entity, device_entity);
             world.despawn(device_entity);
         }
     }
@@ -785,10 +200,10 @@ pub fn remove_client(
         devices.0.clear();
     }
 
-    let was_current = is_active_client(world, seat_entity, client_entity);
+    let was_current = client::is_active(world, seat_entity, client_entity);
     if was_current {
         world.entity_mut(seat_entity).remove::<ecs::ActiveClient>();
-        notify_client_active(world, seat_entity, client_entity);
+        client::notify_active(world, seat_entity, client_entity);
         let _ = activate(world, seat_entity);
     }
 
@@ -815,179 +230,16 @@ pub fn remove_client(
         }
     }
 
-    notify_client_destroyed(world, client_entity);
+    client::notify_destroyed(world, client_entity);
     world.despawn(client_entity);
 
     log::info!(
         "Removed client {} from {}",
         session_id.map_or(0, session::SessionId::as_raw),
-        seat_name
+        name
     );
 
     Ok(())
-}
-
-pub fn open_device(
-    world: &mut world::World,
-    seat_entity: entity::Entity,
-    client_entity: entity::Entity,
-    device: seat_v1::device::Device,
-    path: &str,
-) {
-    if !is_active_client(world, seat_entity, client_entity) {
-        device.send_failed(
-            seat_v1::DeviceError::SeatDisabled,
-            io::Errno::PERM.raw_os_error().cast_unsigned(),
-            "open_device is only valid for the active seat client",
-        );
-        return;
-    }
-
-    let Ok(sanitized_path) = fs::canonicalize(path) else {
-        device.send_failed(
-            seat_v1::DeviceError::OpenFailed,
-            io::Errno::NOENT.raw_os_error().cast_unsigned(),
-            "could not canonicalize device path",
-        );
-        return;
-    };
-
-    if seat_state(world, client_entity).ok() != Some(SeatState::Enabled) {
-        device.send_failed(
-            seat_v1::DeviceError::SeatDisabled,
-            io::Errno::BUSY.raw_os_error().cast_unsigned(),
-            "open_device is only valid while the seat is enabled",
-        );
-        return;
-    }
-
-    let Some(kind) = device::DeviceKind::from_path(&sanitized_path) else {
-        log::error!(
-            "{} is not a supported device type ",
-            sanitized_path.display()
-        );
-        device.send_failed(
-            seat_v1::DeviceError::OpenFailed,
-            io::Errno::INVAL.raw_os_error().cast_unsigned(),
-            "unsupported device type",
-        );
-        return;
-    };
-
-    let Some(device_entities) = world
-        .get::<ecs::Devices>(client_entity)
-        .map(|devices| devices.0.clone())
-    else {
-        device.send_failed(
-            seat_v1::DeviceError::OpenFailed,
-            io::Errno::INVAL.raw_os_error().cast_unsigned(),
-            "client has no device storage",
-        );
-        return;
-    };
-
-    let open_handle_count = device_entities
-        .iter()
-        .map(|device_entity| device::object_count(world, *device_entity))
-        .sum::<usize>();
-    if open_handle_count >= usize::from(MAX_SEAT_DEVICES) {
-        log::error!("Client exceeded max seat devices");
-        device.send_failed(
-            seat_v1::DeviceError::OpenFailed,
-            io::Errno::MFILE.raw_os_error().cast_unsigned(),
-            "client exceeded max seat devices",
-        );
-        return;
-    }
-
-    let device_id = device_entities
-        .iter()
-        .filter_map(|device_entity| device::max_id(world, *device_entity))
-        .max()
-        .map_or(1, |id| id + 1);
-
-    if let Some(old_device) = device_entities
-        .iter()
-        .find(|device_entity| device::matches_path(world, **device_entity, &sanitized_path))
-        .copied()
-    {
-        device::add_object(world, old_device, device, device_id);
-        notify_client_device_added(world, client_entity, device_id);
-        if let Err(err) = device::send_opened(world, old_device) {
-            log::error!("Could not send opened device event: {err}");
-        }
-        return;
-    }
-
-    let session_id = client_session_id(world, client_entity)
-        .map(super::session::SessionId::as_raw)
-        .unwrap_or_default();
-    let seat_name = seat_name(world, seat_entity).unwrap_or_else(|_| "<unknown>".to_string());
-
-    log::debug!(
-        "Opening device {} for client {} on {}",
-        sanitized_path.display(),
-        session_id,
-        seat_name
-    );
-
-    let fd = match rustix::fs::open(
-        &sanitized_path,
-        rustix::fs::OFlags::RDWR
-            | rustix::fs::OFlags::NOCTTY
-            | rustix::fs::OFlags::NOFOLLOW
-            | rustix::fs::OFlags::CLOEXEC
-            | rustix::fs::OFlags::NONBLOCK,
-        rustix::fs::Mode::empty(),
-    ) {
-        Ok(fd) => fd,
-        Err(err) => {
-            log::error!("Could not open file: {err}");
-            device.send_failed(
-                seat_v1::DeviceError::OpenFailed,
-                err.raw_os_error().cast_unsigned(),
-                "could not open device",
-            );
-            return;
-        }
-    };
-
-    let device_entity = ecs::insert_device(
-        world,
-        device,
-        sanitized_path,
-        kind,
-        device_id,
-        matches!(kind, device::DeviceKind::Evdev | device::DeviceKind::Hidraw),
-        fd,
-    );
-
-    if let Err(err) = device::activate(world, device_entity) {
-        let path = device::path_display(world, device_entity);
-        log::error!("Could not activate {path}: {err}");
-        let errno = err
-            .root_cause()
-            .downcast_ref::<io::Errno>()
-            .copied()
-            .unwrap_or(io::Errno::INVAL);
-        if let Some(object) = device::last_object(world, device_entity) {
-            object.send_failed(
-                seat_v1::DeviceError::OpenFailed,
-                errno.raw_os_error().cast_unsigned(),
-                "could not activate device",
-            );
-        }
-        world.despawn(device_entity);
-        return;
-    }
-
-    if let Err(err) = device::send_opened(world, device_entity) {
-        log::error!("Could not send opened device event: {err}");
-    }
-    if let Some(mut devices) = world.get_mut::<ecs::Devices>(client_entity) {
-        devices.0.push(device_entity);
-    }
-    notify_client_device_added(world, client_entity, device_id);
 }
 
 pub fn refresh_current_vts(world: &mut world::World, seat_entities: &[entity::Entity]) {
@@ -1003,7 +255,7 @@ pub fn refresh_current_vts(world: &mut world::World, seat_entities: &[entity::En
                     .is_none_or(|current| current.0 != vt);
                 world.entity_mut(seat_entity).insert(ecs::CurrentVt(vt));
                 if changed {
-                    notify_seat_current_vt(world, seat_entity);
+                    notify_current_vt(world, seat_entity);
                 }
             }
             Err(err) => log::error!("Could not query active VT: {err}"),
@@ -1113,16 +365,16 @@ fn send_session_switched(world: &world::World, seat_entity: entity::Entity, sess
     }
 }
 
-fn activate(world: &mut world::World, seat_entity: entity::Entity) -> anyhow::Result<()> {
+pub fn activate(world: &mut world::World, seat_entity: entity::Entity) -> anyhow::Result<()> {
     if world.get::<ecs::ActiveClient>(seat_entity).is_some() {
         return Ok(());
     }
 
-    let seat_name = seat_name(world, seat_entity)?;
+    let name = name(world, seat_entity)?;
     let next_client =
         if let Some(next_client) = world.entity_mut(seat_entity).take::<ecs::NextClient>() {
-            log::debug!("Activating next queued client on {seat_name}");
-            notify_client_next(world, next_client.0, false);
+            log::debug!("Activating next queued client on {name}");
+            client::notify_next(world, next_client.0, false);
             Some(next_client.0)
         } else {
             let clients = world
@@ -1130,8 +382,8 @@ fn activate(world: &mut world::World, seat_entity: entity::Entity) -> anyhow::Re
                 .map(|clients| clients.0.clone())
                 .unwrap_or_default();
             if clients.is_empty() {
-                log::info!("No clients on {seat_name} to activate");
-                return Err(anyhow::anyhow!("No clients on {seat_name} to activate"));
+                log::info!("No clients on {name} to activate");
+                return Err(anyhow::anyhow!("No clients on {name} to activate"));
             }
 
             if is_vt_bound(world, seat_entity) {
@@ -1153,13 +405,13 @@ fn activate(world: &mut world::World, seat_entity: entity::Entity) -> anyhow::Re
                 }
                 client
             } else {
-                log::debug!("Activating first client on {seat_name}");
+                log::debug!("Activating first client on {name}");
                 clients.first().copied()
             }
         };
 
     if let Some(client) = next_client {
-        open_client(world, seat_entity, client)?;
+        client::open(world, seat_entity, client)?;
     }
 
     Ok(())
@@ -1183,7 +435,7 @@ fn release_vt(
         .get::<ecs::ActiveClient>(seat_entity)
         .map(|client| client.0)
     {
-        disable_client(world, seat_entity, active_client)?;
+        client::disable(world, seat_entity, active_client)?;
     }
 
     ack_vt_release(world, seat_entity)?;
@@ -1201,7 +453,7 @@ fn ack_vt_release(world: &mut world::World, seat_entity: entity::Entity) -> anyh
 
     terminal::Terminal::open(cur_vt)?.ack_release()?;
     world.entity_mut(seat_entity).insert(ecs::CurrentVt(0));
-    notify_seat_current_vt(world, seat_entity);
+    notify_current_vt(world, seat_entity);
 
     Ok(())
 }
@@ -1216,7 +468,7 @@ fn activate_vt(
     world
         .entity_mut(seat_entity)
         .insert(ecs::CurrentVt(acquired_vt));
-    notify_seat_current_vt(world, seat_entity);
+    notify_current_vt(world, seat_entity);
 
     if world.get::<ecs::ActiveClient>(seat_entity).is_none() {
         let has_clients = world
@@ -1225,8 +477,8 @@ fn activate_vt(
         if has_clients {
             activate(world, seat_entity)?;
         } else {
-            let seat_name = seat_name(world, seat_entity)?;
-            log::debug!("No clients on {seat_name} while acquiring VT {acquired_vt}");
+            let name = name(world, seat_entity)?;
+            log::debug!("No clients on {name} while acquiring VT {acquired_vt}");
         }
     }
 
@@ -1235,7 +487,7 @@ fn activate_vt(
     Ok(Some(acquired_vt))
 }
 
-fn vt_open(vt: u32) -> anyhow::Result<()> {
+pub fn vt_open(vt: u32) -> anyhow::Result<()> {
     let terminal = terminal::Terminal::open(vt)?;
     terminal.set_process_switching(true)?;
     terminal.set_keyboard(false)?;
@@ -1266,41 +518,31 @@ fn current_vt() -> anyhow::Result<u32> {
     Ok(u32::from(tty0fd.current_vt()?))
 }
 
-fn is_vt_bound(world: &world::World, seat_entity: entity::Entity) -> bool {
+pub fn is_vt_bound(world: &world::World, seat_entity: entity::Entity) -> bool {
     world
         .get::<ecs::SeatMode>(seat_entity)
         .is_some_and(|mode| mode.0 == ecs::SeatKind::VtBound)
 }
 
-fn seat_name(world: &world::World, seat_entity: entity::Entity) -> anyhow::Result<String> {
+pub fn name(world: &world::World, seat_entity: entity::Entity) -> anyhow::Result<String> {
     world
         .get::<ecs::SeatName>(seat_entity)
         .map(|seat| seat.0.clone())
         .ok_or_else(|| anyhow::anyhow!("configured seat has no name"))
 }
 
-fn seat_mode(world: &world::World, seat_entity: entity::Entity) -> anyhow::Result<ecs::SeatKind> {
+pub fn mode(world: &world::World, seat_entity: entity::Entity) -> anyhow::Result<ecs::SeatKind> {
     world
         .get::<ecs::SeatMode>(seat_entity)
         .map(|mode| mode.0)
         .ok_or_else(|| anyhow::anyhow!("configured seat has no mode"))
 }
 
-fn seat_state(world: &world::World, client_entity: entity::Entity) -> anyhow::Result<SeatState> {
+pub fn state(world: &world::World, client_entity: entity::Entity) -> anyhow::Result<SeatState> {
     world
         .get::<ecs::SeatState>(client_entity)
         .map(|state| state.0)
         .ok_or_else(|| anyhow::anyhow!("client has no seat state"))
-}
-
-fn client_session_id(
-    world: &world::World,
-    client_entity: entity::Entity,
-) -> anyhow::Result<session::SessionId> {
-    world
-        .get::<ecs::Session>(client_entity)
-        .map(|session| session.0)
-        .ok_or_else(|| anyhow::anyhow!("client has no session id"))
 }
 
 impl<C: crate::cgroup::CgroupManager + 'static> seat_v1::SeatV1Handler for crate::Sessiond<C> {
@@ -1388,14 +630,14 @@ impl<C: crate::cgroup::CgroupManager + 'static> hyprwire::Dispatch<seat_manager:
                     opener_pid,
                     opener_session_id,
                 );
-                if let Err(err) = add_client(&mut self.world, seat_entity, client_entity) {
+                if let Err(err) = client::add(&mut self.world, seat_entity, client_entity) {
                     log::error!("Could not add client to seat: {err}");
                     seat.send_disabled();
                     self.world.despawn(client_entity);
                     return;
                 }
 
-                let Some(seat_name) = self
+                let Some(name) = self
                     .world
                     .get::<ecs::SeatName>(client_entity)
                     .map(|seat| seat.0.clone())
@@ -1417,15 +659,15 @@ impl<C: crate::cgroup::CgroupManager + 'static> hyprwire::Dispatch<seat_manager:
                             .get::<ecs::SeatEntity>(entity)
                             .is_none_or(|seat| seat.0 != seat_entity)
                         {
-                            log::info!(session_id = session_id.as_raw(), seat = seat_name.as_str(); "session seat changed");
+                            log::info!(session_id = session_id.as_raw(), seat = name.as_str(); "session seat changed");
                             self.world.entity_mut(entity).insert((
-                                ecs::SeatName(seat_name.clone()),
+                                ecs::SeatName(name.clone()),
                                 ecs::SeatEntity(seat_entity),
                             ));
                         }
                         if let Some(objects) = self.world.get::<ecs::SessionObjects>(entity) {
                             for object in &objects.0 {
-                                object.send_seat(&seat_name);
+                                object.send_seat(&name);
                             }
                         }
                     } else {
@@ -1443,7 +685,7 @@ impl<C: crate::cgroup::CgroupManager + 'static> hyprwire::Dispatch<seat::Seat>
 {
     fn event(&mut self, object: &seat::Seat, event: <seat::Seat as hyprwire::Object>::Event<'_>) {
         let Some(client_entity) =
-            client_entity_by_seat_object(&self.world, &self.client_entities, object)
+            client::entity_by_seat_object(&self.world, &self.client_entities, object)
         else {
             return;
         };
@@ -1462,7 +704,7 @@ impl<C: crate::cgroup::CgroupManager + 'static> hyprwire::Dispatch<seat::Seat>
                     .world
                     .get::<ecs::SeatState>(client_entity)
                     .map(|state| state.0);
-                if let Err(err) = ack_disable_client(&mut self.world, seat_entity, client_entity) {
+                if let Err(err) = client::ack_disable(&mut self.world, seat_entity, client_entity) {
                     log::error!("Could not ack disable: {err}");
 
                     match state {
@@ -1479,7 +721,7 @@ impl<C: crate::cgroup::CgroupManager + 'static> hyprwire::Dispatch<seat::Seat>
                 }
             }
             seat::Event::OpenDevice { device, path } => {
-                open_device(&mut self.world, seat_entity, client_entity, device, &path);
+                device::open(&mut self.world, seat_entity, client_entity, device, &path);
             }
             seat::Event::SwitchSession { session } => {
                 if !is_vt_bound(&self.world, seat_entity) {
@@ -1521,13 +763,13 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_core_seat::S
                 pid,
             } => {
                 let Some(seat_entity) =
-                    seat_entity_by_core_object(&self.world, &self.seat_entities, object)
+                    entity_by_core_object(&self.world, &self.seat_entities, object)
                 else {
                     session_core_seat_client.send_destroyed();
                     return;
                 };
                 let Some(client_entity) =
-                    client_entity_by_pid(&self.world, &self.client_entities, pid)
+                    client::entity_by_pid(&self.world, &self.client_entities, pid)
                 else {
                     session_core_seat_client.send_destroyed();
                     return;
@@ -1541,7 +783,7 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_core_seat::S
                     return;
                 }
 
-                add_client_object(
+                client::add_object(
                     &mut self.world,
                     seat_entity,
                     client_entity,
@@ -1550,12 +792,12 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_core_seat::S
             }
             session_core_seat::Event::Terminate => {
                 let Some(seat_entity) =
-                    seat_entity_by_core_object(&self.world, &self.seat_entities, object)
+                    entity_by_core_object(&self.world, &self.seat_entities, object)
                 else {
                     object.send_destroyed();
                     return;
                 };
-                let Some(seat_name) = self
+                let Some(name) = self
                     .world
                     .get::<ecs::SeatName>(seat_entity)
                     .map(|seat| seat.0.clone())
@@ -1565,10 +807,10 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_core_seat::S
                 };
 
                 let session_entities =
-                    session::entities_by_seat_name(&self.world, &self.session_entities, &seat_name)
+                    session::entities_by_seat_name(&self.world, &self.session_entities, &name)
                         .collect::<Vec<_>>();
 
-                log::info!(seat = seat_name.as_str(), sessions = session_entities.len(); "seat terminate requested");
+                log::info!(seat = name.as_str(), sessions = session_entities.len(); "seat terminate requested");
 
                 let Some(client) = object.client() else {
                     return;
@@ -1596,80 +838,12 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_core_seat::S
             }
             session_core_seat::Event::Destroy => {
                 if let Some(seat_entity) =
-                    seat_entity_by_core_object(&self.world, &self.seat_entities, object)
+                    entity_by_core_object(&self.world, &self.seat_entities, object)
                     && let Some(mut objects) = self.world.get_mut::<ecs::SeatObjects>(seat_entity)
                 {
                     objects.0.retain(|candidate| candidate != object);
                 }
             }
         }
-    }
-}
-
-impl<C: cgroup::CgroupManager + 'static>
-    hyprwire::Dispatch<session_core_seat_client::SessionCoreSeatClient> for crate::Sessiond<C>
-{
-    fn event(
-        &mut self,
-        object: &session_core_seat_client::SessionCoreSeatClient,
-        event: <session_core_seat_client::SessionCoreSeatClient as hyprwire::Object>::Event<'_>,
-    ) {
-        match event {
-            session_core_seat_client::Event::GetDevice {
-                session_core_seat_device,
-                device_id,
-            } => {
-                let Some(client_entity) =
-                    client_entity_by_core_object(&self.world, &self.client_entities, object)
-                else {
-                    session_core_seat_device.send_destroyed();
-                    return;
-                };
-                let Some(device_entity) =
-                    device_entity_by_id(&self.world, client_entity, device_id)
-                else {
-                    session_core_seat_device.send_destroyed();
-                    return;
-                };
-
-                add_device_object(
-                    &mut self.world,
-                    device_entity,
-                    device_id,
-                    session_core_seat_device,
-                );
-            }
-            session_core_seat_client::Event::Destroy => {
-                if let Some(client_entity) =
-                    client_entity_by_core_object(&self.world, &self.client_entities, object)
-                    && let Some(mut objects) =
-                        self.world.get_mut::<ecs::ClientObjects>(client_entity)
-                {
-                    objects.0.retain(|candidate| candidate != object);
-                }
-            }
-        }
-    }
-}
-
-impl<C: cgroup::CgroupManager + 'static>
-    hyprwire::Dispatch<session_core_seat_device::SessionCoreSeatDevice> for crate::Sessiond<C>
-{
-    fn event(
-        &mut self,
-        object: &session_core_seat_device::SessionCoreSeatDevice,
-        event: <session_core_seat_device::SessionCoreSeatDevice as hyprwire::Object>::Event<'_>,
-    ) {
-        let session_core_seat_device::Event::Destroy = event;
-        let Some(client_entity) = self.client_entities.iter().copied().find(|client_entity| {
-            device_entity_by_core_object(&self.world, *client_entity, object).is_some()
-        }) else {
-            return;
-        };
-        let Some(device_entity) = device_entity_by_core_object(&self.world, client_entity, object)
-        else {
-            return;
-        };
-        remove_device_object(&mut self.world, device_entity, object);
     }
 }

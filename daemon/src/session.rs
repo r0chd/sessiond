@@ -75,12 +75,12 @@ pub fn entities_by_uid<'a>(
 pub fn entities_by_seat_name<'a>(
     world: &'a world::World,
     entities: &'a [entity::Entity],
-    seat_name: &'a str,
+    name: &'a str,
 ) -> impl Iterator<Item = entity::Entity> + 'a {
     self::entities(world, entities).filter(move |entity| {
         world
             .get::<ecs::SeatName>(*entity)
-            .is_some_and(|session_seat| session_seat.0 == seat_name)
+            .is_some_and(|session_seat| session_seat.0 == name)
     })
 }
 
@@ -187,7 +187,7 @@ impl<C: crate::cgroup::CgroupManager + 'static> crate::Sessiond<C> {
 
         log::info!(session_id = session_id.as_raw(); "kill requested");
 
-        set_session_state(
+        set_state(
             &mut self.world,
             session_id,
             entity,
@@ -209,7 +209,7 @@ impl<C: crate::cgroup::CgroupManager + 'static> crate::Sessiond<C> {
 
         log::info!(session_id = session_id.as_raw(); "terminate requested");
 
-        set_session_state(
+        set_state(
             &mut self.world,
             session_id,
             entity,
@@ -261,7 +261,7 @@ impl<C: crate::cgroup::CgroupManager + 'static> crate::Sessiond<C> {
     }
 }
 
-pub fn add_session_object(
+pub fn add_object(
     world: &mut world::World,
     session_id: SessionId,
     entity: entity::Entity,
@@ -309,27 +309,6 @@ pub fn add_session_object(
 
     if let Some(mut objects) = world.get_mut::<ecs::SessionObjects>(entity) {
         objects.0.push(object);
-    }
-}
-
-pub fn set_session_state(
-    world: &mut world::World,
-    session_id: SessionId,
-    entity: entity::Entity,
-    state: session_core_v1::ActiveState,
-) {
-    let vt = world
-        .get::<ecs::Vt>(entity)
-        .and_then(|vt| vt.0)
-        .unwrap_or_default();
-    log::info!(session_id = session_id.as_raw(), vt; "session state changed");
-    if let Some(mut active_state) = world.get_mut::<ecs::ActiveState>(entity) {
-        active_state.0 = state;
-    }
-    if let Some(objects) = world.get::<ecs::SessionObjects>(entity) {
-        for object in &objects.0 {
-            object.send_active(state);
-        }
     }
 }
 
@@ -680,7 +659,7 @@ impl<C: cgroup::CgroupManager + 'static>
 
                 let session_id = SessionId::from_raw(session_id);
                 if let Some(entity) = entity(&self.world, &self.session_entities, session_id) {
-                    add_session_object(&mut self.world, session_id, entity, session_core_session);
+                    add_object(&mut self.world, session_id, entity, session_core_session);
                     return;
                 }
 
@@ -705,7 +684,7 @@ impl<C: cgroup::CgroupManager + 'static>
                 };
 
                 if let Some(entity) = entity(&self.world, &self.session_entities, session_id) {
-                    add_session_object(&mut self.world, session_id, entity, session_core_session);
+                    add_object(&mut self.world, session_id, entity, session_core_session);
                     return;
                 }
 
@@ -726,7 +705,7 @@ impl<C: cgroup::CgroupManager + 'static>
                 if let Some(entity) = entity_by_uid(&self.world, &self.session_entities, uid)
                     && let Some(session_id) = id(&self.world, entity)
                 {
-                    add_session_object(&mut self.world, session_id, entity, session_core_session);
+                    add_object(&mut self.world, session_id, entity, session_core_session);
                     return;
                 }
 
@@ -753,7 +732,7 @@ impl<C: cgroup::CgroupManager + 'static>
                     return;
                 };
 
-                user::add_user_object(&mut self.world, entity, session_core_user);
+                user::add_object(&mut self.world, entity, session_core_user);
             }
             session_core_manager::Event::Reboot => {
                 let Some(client) = object.client() else {
@@ -932,12 +911,12 @@ impl<C: cgroup::CgroupManager + 'static>
                 seat,
             } => {
                 let Some(seat_entity) =
-                    seat::seat_entity_by_name(&self.world, &self.seat_entities, &seat)
+                    seat::entity_by_name(&self.world, &self.seat_entities, &seat)
                 else {
                     session_core_seat.send_destroyed();
                     return;
                 };
-                seat::add_seat_object(&mut self.world, seat_entity, session_core_seat);
+                seat::add_object(&mut self.world, seat_entity, session_core_seat);
             }
             session_core_manager::Event::Destroy => {
                 self.info_managers.retain(|m| m != object);

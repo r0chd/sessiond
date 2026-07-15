@@ -54,7 +54,7 @@ pub fn create(
     uid: u32,
     lingering: bool,
 ) -> Option<entity::Entity> {
-    let user = users::get_user_by_uid(uid)?;
+    let user = uzers::get_user_by_uid(uid)?;
     let state = compute_state(world, session_entities, uid, lingering);
     let entity = ecs::insert_user(
         world,

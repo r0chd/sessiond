@@ -211,7 +211,7 @@ fn run<C: cgroup::CgroupManager + 'static>(
         .users
         .iter()
         .filter(|(_, config)| config.linger)
-        .filter_map(|(name, _)| users::get_user_by_name(name))
+        .filter_map(|(name, _)| uzers::get_user_by_name(name))
         .for_each(|user| {
             user::create(
                 &mut sessiond.world,
@@ -388,8 +388,8 @@ fn resolve_user(user: &str) -> anyhow::Result<process::Uid> {
         return Ok(process::Uid::from_raw(uid));
     }
 
-    users::get_user_by_name(user)
-        .map(|user: users::User| process::Uid::from_raw(user.uid()))
+    uzers::get_user_by_name(user)
+        .map(|user: uzers::User| process::Uid::from_raw(user.uid()))
         .ok_or_else(|| anyhow::anyhow!("unknown seat user {user:?}"))
 }
 
@@ -398,7 +398,7 @@ fn resolve_group(group: &str) -> anyhow::Result<process::Gid> {
         return Ok(process::Gid::from_raw(gid));
     }
 
-    users::get_group_by_name(group)
-        .map(|group: users::Group| process::Gid::from_raw(group.gid()))
+    uzers::get_group_by_name(group)
+        .map(|group: uzers::Group| process::Gid::from_raw(group.gid()))
         .ok_or_else(|| anyhow::anyhow!("unknown seat group {group:?}"))
 }

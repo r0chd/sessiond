@@ -422,7 +422,7 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager::Ses
                 let session_id = self.next_session_id;
                 self.next_session_id = self.next_session_id.next();
                 let is_local = is_local != 0;
-                let username = users::get_user_by_uid(uid)
+                let username = uzers::get_user_by_uid(uid)
                     .map(|user| user.name().to_string_lossy().into_owned())
                     .unwrap_or_default();
                 log::info!(session_id = session_id.as_raw(), uid, username = username.as_str(), vt, is_local, remote_host = remote_host.as_str(); "session created");
@@ -516,7 +516,7 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager::Ses
             } => {
                 let session_id = self.next_session_id;
                 self.next_session_id = self.next_session_id.next();
-                let username = users::get_user_by_uid(uid)
+                let username = uzers::get_user_by_uid(uid)
                     .map(|user| user.name().to_string_lossy().into_owned())
                     .unwrap_or_default();
                 log::info!(session_id = session_id.as_raw(), uid, username = username.as_str(); "session created");

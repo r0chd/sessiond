@@ -53,7 +53,7 @@ impl PamServiceModule for Pam {
                 .ok_or(pamsm::PamError::USER_UNKNOWN)?
                 .to_string_lossy()
                 .to_string();
-            let uid = users::get_user_by_name(&username)
+            let uid = uzers::get_user_by_name(&username)
                 .ok_or(pamsm::PamError::USER_UNKNOWN)?
                 .uid();
             let vt = pamh

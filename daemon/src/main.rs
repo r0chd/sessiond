@@ -54,6 +54,7 @@ use clap::Parser;
 use hyprwire::server;
 use rustix::{net, process};
 use session_core_v1::{session_core_manager, session_core_session, session_core_user};
+use std::collections::{BTreeMap, HashMap};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::{env, fs, path};
@@ -111,6 +112,8 @@ impl Access {
 struct Sessiond<C: cgroup::CgroupManager + 'static> {
     next_session_id: session::SessionId,
     info_managers: Vec<session_core_manager::SessionCoreManager>,
+    session_manager_v1_envs:
+        HashMap<session_management_v1::session_manager::SessionManager, BTreeMap<String, String>>,
     cgroup_manager: C,
     session_entities: Vec<entity::Entity>,
     user_entities: Vec<entity::Entity>,
@@ -183,6 +186,7 @@ fn run<C: cgroup::CgroupManager + 'static>(
     let mut sessiond = Sessiond {
         next_session_id: session::SessionId::from_raw(1),
         info_managers: Vec::new(),
+        session_manager_v1_envs: HashMap::new(),
         cgroup_manager,
         session_entities: Vec::new(),
         user_entities: Vec::new(),

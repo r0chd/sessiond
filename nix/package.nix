@@ -18,7 +18,7 @@ rustPlatform.buildRustPackage {
   cargoLock = {
     lockFile = ../Cargo.lock;
     outputHashes = {
-      "pamsm-0.5.5" = "sha256-Zh6i+cMfema6wYw1eZeXnMjPOXR3z+Sdh4UUfRirH/g=";
+      "pamsm-0.5.5" = "sha256-wmSKEVSgd36kwa9ky4H9+ubnqUUwyUPw/OjK8v3wGbk=";
     };
   };
 

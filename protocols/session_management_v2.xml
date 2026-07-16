@@ -8,10 +8,10 @@
   <c2s name="create_session">
    <description summary="start registering a new session, returning an owning session object">
     Returns a session_management_session object bound to the calling
-    connection. The session is not created yet: the client may send vt
-    and remote_host on the returned object to stage optional fields, then
-    must send done to commit. The daemon then pushes session_id and seat,
-    followed by done, or error if creation failed.
+    connection. The session is not created yet: the client may send vt,
+    remote_host, and env on the returned object to stage optional fields,
+    then must send done to commit. The daemon then pushes session_id and
+    seat, followed by done, or error if creation failed.
    </description>
    <arg name="uid" type="uint" summary="user id"/>
    <returns iface="session_management_session"/>
@@ -26,9 +26,10 @@
    Bound to the connection that created the session. Before done is
    sent, the session is only staged: vt and remote_host may be sent to
    set optional fields. is_local is not a field; the session is treated
-   as remote if remote_host was set, local otherwise. Once created,
-   destroying this object, explicitly or by disconnecting, tears the
-   session down if it has not already been destroyed.
+   as remote if remote_host was set, local otherwise. Environment
+   variables may also be staged before done. Once created, destroying
+   this object, explicitly or by disconnecting, tears the session down if
+   it has not already been destroyed.
   </description>
   <c2s name="vt">
    <description summary="stage the virtual terminal number">
@@ -43,9 +44,16 @@
    </description>
    <arg name="remote_host" type="varchar" summary="remote host name"/>
   </c2s>
+  <c2s name="env">
+   <description summary="stage an environment variable">
+    Optional. Must be sent before done. May be sent multiple times.
+   </description>
+   <arg name="name" type="varchar" summary="environment variable name"/>
+   <arg name="value" type="varchar" summary="environment variable value"/>
+  </c2s>
   <c2s name="done">
    <description summary="commit staged fields and create the session">
-    Creates the session using uid and any staged vt/remote_host. The
+    Creates the session using uid and any staged vt/remote_host/env. The
     daemon responds with session_id and seat, followed by done, or with
     error if creation failed.
    </description>

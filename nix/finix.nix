@@ -16,7 +16,7 @@ in
     finit = {
       services.sessiond = {
         description = "session management daemon";
-        conditions = [ ];
+        conditions = [ "service/syslogd/ready" ];
         command = "${cfg.package}/bin/sessiond --config ${daemonConfig}";
         environment.LOG_LEVEL = cfg.logLevel;
         log = true;

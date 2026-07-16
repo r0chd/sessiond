@@ -6,6 +6,7 @@ use crate::{
 };
 use bevy_ecs::{entity, world};
 use rustix::system;
+use std::collections::BTreeMap;
 use std::{fs, time};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -123,6 +124,24 @@ pub fn can_modify(
 ) -> bool {
     let session_uid = world.get::<ecs::Uid>(entity).map_or(0, |uid| uid.0);
     creds.uid.is_root() || creds.uid.as_raw() == session_uid
+}
+
+pub fn session_envs_by_uid(
+    world: &world::World,
+    entities: &[entity::Entity],
+    uid: u32,
+    exclude: Option<entity::Entity>,
+) -> BTreeMap<String, String> {
+    let mut env = BTreeMap::new();
+    for entity in entities_by_uid(world, entities, uid) {
+        if Some(entity) == exclude {
+            continue;
+        }
+        if let Some(session_env) = world.get::<ecs::SessionEnv>(entity) {
+            env.extend(session_env.0.clone());
+        }
+    }
+    env
 }
 
 impl<C: crate::cgroup::CgroupManager + 'static>
@@ -560,11 +579,17 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager_v1::
                     active_state = session_core_v1::ActiveState::Active;
                 }
 
-                let env = self.user_config(&username).environment(
+                let mut env = self.user_config(&username).environment(
                     uid,
                     session_id.as_raw(),
                     session_seat.as_deref(),
                 );
+                env.extend(session_envs_by_uid(
+                    &self.world,
+                    &self.session_entities,
+                    uid,
+                    None,
+                ));
 
                 let session_entity = ecs::insert_session(
                     &mut self.world,
@@ -584,6 +609,13 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager_v1::
                     None,
                 );
 
+                if let Some(pending_env) = self.session_manager_v1_envs.remove(object)
+                    && let Some(mut session_env) =
+                        self.world.get_mut::<ecs::SessionEnv>(session_entity)
+                {
+                    session_env.0 = pending_env;
+                }
+
                 self.session_entities.push(session_entity);
                 #[cfg(feature = "consolekit")]
                 self.sync_consolekit_session(session_id, session_entity);
@@ -600,6 +632,12 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager_v1::
                     manager.send_session_added(session_id.as_raw());
                 }
             }
+            session_manager_v1::Event::Env { name, value } => {
+                self.session_manager_v1_envs
+                    .entry(object.clone())
+                    .or_default()
+                    .insert(name, value);
+            }
             session_manager_v1::Event::DestroySession { session_id } => {
                 if let Some(entity) = entity(
                     &self.world,
@@ -609,7 +647,9 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager_v1::
                     self.terminate_session(entity);
                 }
             }
-            session_manager_v1::Event::Destroy => {}
+            session_manager_v1::Event::Destroy => {
+                self.session_manager_v1_envs.remove(object);
+            }
         }
     }
 }
@@ -655,7 +695,6 @@ impl<C: cgroup::CgroupManager + 'static>
                     .get::<ecs::Vt>(entity)
                     .and_then(|vt| vt.0)
                     .unwrap_or_default();
-
                 seat::refresh_current_vts(&mut self.world, &self.seat_entities);
 
                 let mut session_seat_entity = if vt != 0 {
@@ -712,11 +751,19 @@ impl<C: cgroup::CgroupManager + 'static>
                 object.send_session_id(session_id.as_raw());
                 object.send_seat(session_seat.as_deref().unwrap_or_default());
                 if let (Some(uid), Some(username)) = (uid, username) {
-                    for (name, value) in self.user_config(&username).environment(
+                    let mut env = self.user_config(&username).environment(
                         uid,
                         session_id.as_raw(),
                         session_seat.as_deref(),
-                    ) {
+                    );
+                    env.extend(session_envs_by_uid(
+                        &self.world,
+                        &self.session_entities,
+                        uid,
+                        Some(entity),
+                    ));
+
+                    for (name, value) in env {
                         object.send_env(name.as_str(), value.as_str());
                     }
                 }
@@ -724,6 +771,15 @@ impl<C: cgroup::CgroupManager + 'static>
 
                 for manager in &self.info_managers {
                     manager.send_session_added(session_id.as_raw());
+                }
+            }
+            session_management_session::Event::Env { name, value } => {
+                if let Some(mut env) = self.world.get_mut::<ecs::SessionEnv>(entity) {
+                    env.0.insert(name, value);
+                } else {
+                    self.world
+                        .entity_mut(entity)
+                        .insert(ecs::SessionEnv(BTreeMap::from([(name, value)])));
                 }
             }
             session_management_session::Event::Destroy => {

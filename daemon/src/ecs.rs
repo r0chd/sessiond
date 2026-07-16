@@ -6,6 +6,7 @@ use crate::{
     device, seat, seat_v1, session, session_core_session, session_core_user, session_core_v1,
 };
 use bevy_ecs::prelude::*;
+use std::collections::BTreeMap;
 use std::os::fd;
 use std::{path, time};
 
@@ -32,6 +33,7 @@ pub fn insert_session(
         LeaderId(leader_id),
         IsLocal(remote_host.is_none()),
         RemoteHost(remote_host),
+        SessionEnv(BTreeMap::new()),
         SessionObjects(Vec::new()),
         ActiveState(active_state),
     ));
@@ -152,6 +154,9 @@ pub struct IsLocal(pub bool);
 
 #[derive(Component)]
 pub struct RemoteHost(pub Option<String>);
+
+#[derive(Component)]
+pub struct SessionEnv(pub BTreeMap<String, String>);
 
 #[derive(Component)]
 pub struct SessionObjects(pub Vec<session_core_session::SessionCoreSession>);

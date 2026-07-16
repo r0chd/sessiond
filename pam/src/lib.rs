@@ -92,6 +92,13 @@ impl PamServiceModule for Pam {
                 .unwrap_or_default();
             let is_local = u32::from(remote_host.is_empty());
 
+            let envlist = pamh.getenvlist()?;
+            for env in envlist.iter() {
+                if let Some((name, value)) = env.to_string_lossy().split_once('=') {
+                    manager.send_env(name, value);
+                }
+            }
+
             manager.send_create_session(uid, vt, is_local, remote_host);
 
             while !session.done {

@@ -9,8 +9,10 @@
   <c2s name="create_session">
    <description summary="[unsafe: can leak the session] register a session without an owning object">
     Registers a session and replies on this object with session_id, seat,
-    env variables, and done. The caller must pair it with destroy_session
-    or the session's resources (cgroup, runtime directory) leak.
+    env variables, and done. Any env variables sent before create_session
+    are attached to the created session. The caller must pair it with
+    destroy_session or the session's resources (cgroup, runtime
+    directory) leak.
    </description>
    <arg name="uid" type="uint" summary="user id"/>
    <arg name="vt" type="uint" summary="virtual terminal number, 0 if the session is not bound to a VT"/>
@@ -41,6 +43,13 @@
     create_session leaks the session's resources.
    </description>
    <arg name="session_id" type="uint" summary="session identifier from session_id"/>
+  </c2s>
+  <c2s name="env">
+   <description summary="stage an environment variable for the next created session">
+    Optional. May be sent multiple times before create_session.
+   </description>
+   <arg name="name" type="varchar" summary="environment variable name"/>
+   <arg name="value" type="varchar" summary="environment variable value"/>
   </c2s>
   <c2s name="destroy" destructor="true">
    <description summary="destroy this object"/>

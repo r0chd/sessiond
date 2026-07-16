@@ -17,7 +17,7 @@ anyhow = "1.0.102"
 clap = { version = "4.6.1", features = ["derive"] }
 env_logger = { version = "0.11.10", features = ["kv"] }
 log = { version = "0.4.31", features = ["kv"] }
-hyprwire = "0.4.3"
+hyprwire = "0.4.4"
 calloop = { version = "0.14.4", features = ["signals"] }
 rustix = { version = "1.1.4", features = ["fs", "net", "process", "system"] }
 zbus = { version = "5.16.0", optional = true }
@@ -27,7 +27,7 @@ toml = "1.1.2"
 uzers = "0.12.2"
 
 [build-dependencies]
-hyprwire-scanner = "0.4.3"
+hyprwire-scanner = "0.4.4"
 
 [features]
 consolekit = ["dep:zbus"]

@@ -2,6 +2,10 @@ mod session_management_v1 {
     hyprwire::include_protocol!("session_management_v1");
     pub use server::*;
 }
+mod session_management_v2 {
+    hyprwire::include_protocol!("session_management_v2");
+    pub use server::*;
+}
 mod session_core_v1 {
     hyprwire::include_protocol!("session_core_v1");
     pub use server::*;
@@ -28,6 +32,11 @@ mod user;
 #[cfg(test)]
 mod session_management_v1_client {
     hyprwire::include_protocol!("session_management_v1");
+    pub use client::*;
+}
+#[cfg(test)]
+mod session_management_v2_client {
+    hyprwire::include_protocol!("session_management_v2");
     pub use client::*;
 }
 #[cfg(test)]
@@ -109,6 +118,7 @@ struct Sessiond<C: cgroup::CgroupManager + 'static> {
     client_entities: Vec<entity::Entity>,
     seat_access: Access,
     management_access: Access,
+    settings: config::Config,
     #[cfg(feature = "consolekit")]
     consolekit: consolekit::Server,
     shutting_down: bool,
@@ -144,7 +154,7 @@ struct DaemonConfig {
 }
 
 fn run<C: cgroup::CgroupManager + 'static>(
-    config: &DaemonConfig,
+    config: DaemonConfig,
     make_cgroup: impl FnOnce(calloop::LoopHandle<'static, Sessiond<C>>) -> anyhow::Result<C>,
 ) -> anyhow::Result<()> {
     let mut event_loop = calloop::EventLoop::try_new()?;
@@ -158,9 +168,8 @@ fn run<C: cgroup::CgroupManager + 'static>(
 
     let cgroup_manager = make_cgroup(event_loop.handle())?;
 
-    // We don't support multi seat yet
     anyhow::ensure!(
-        config.settings.seats.len() == 1,
+        !config.settings.seats.is_empty(),
         "exactly one seat must be configured"
     );
     let seat_config = config
@@ -168,6 +177,8 @@ fn run<C: cgroup::CgroupManager + 'static>(
         .seats
         .get(&config.settings.default_seat)
         .ok_or_else(|| anyhow::anyhow!("configured `default-seat` not found"))?;
+
+    let vtbound = seat_config.kind == config::SeatKind::VtBound;
 
     let mut sessiond = Sessiond {
         next_session_id: session::SessionId::from_raw(1),
@@ -185,6 +196,7 @@ fn run<C: cgroup::CgroupManager + 'static>(
             resolve_user(&config.settings.management.user)?,
             resolve_group(&config.settings.management.group)?,
         ),
+        settings: config.settings,
         #[cfg(feature = "consolekit")]
         consolekit: consolekit::Server::start(),
         shutting_down: false,
@@ -192,11 +204,9 @@ fn run<C: cgroup::CgroupManager + 'static>(
         world: world::World::new(),
     };
 
-    let vtbound = seat_config.kind == config::SeatKind::VtBound;
-
     let seat_entity = ecs::insert_seat(
         &mut sessiond.world,
-        config.settings.default_seat.clone(),
+        sessiond.settings.default_seat.clone(),
         if vtbound {
             ecs::SeatKind::VtBound
         } else {
@@ -206,29 +216,35 @@ fn run<C: cgroup::CgroupManager + 'static>(
     );
     sessiond.seat_entities.push(seat_entity);
 
-    config
+    let lingering_users = sessiond
         .settings
         .users
         .iter()
         .filter(|(_, config)| config.linger)
-        .filter_map(|(name, _)| uzers::get_user_by_name(name))
-        .for_each(|user| {
-            user::create(
-                &mut sessiond.world,
-                &mut sessiond.user_entities,
-                &sessiond.session_entities,
-                user.uid(),
-                true,
+        .filter_map(|(name, config)| {
+            let user = uzers::get_user_by_name(name)?;
+            let uid = user.uid();
+            Some((uid, config.runtime_dir(uid)))
+        })
+        .collect::<Vec<_>>();
+
+    for (uid, runtime_dir) in lingering_users {
+        user::create(
+            &mut sessiond.world,
+            &mut sessiond.user_entities,
+            &sessiond.session_entities,
+            uid,
+            true,
+        );
+        user::create_runtime_dir(uid, &runtime_dir);
+        if let Err(e) = sessiond.cgroup_manager.ensure_user_cgroup(uid) {
+            log::error!(
+                uid,
+                error = e.to_string().as_str();
+                "failed to create user cgroup"
             );
-            user::create_runtime_dir(user.uid());
-            if let Err(e) = sessiond.cgroup_manager.ensure_user_cgroup(user.uid()) {
-                log::error!(
-                    uid = user.uid(),
-                    error = e.to_string().as_str();
-                    "failed to create user cgroup"
-                );
-            }
-        });
+        }
+    }
 
     let path = config.socket_path.as_path();
     let mut socket = server::Server::bind(&path)?;
@@ -236,6 +252,8 @@ fn run<C: cgroup::CgroupManager + 'static>(
 
     socket
         .add_implementation::<session_management_v1::SessionManagementV1Impl, _>(&mut sessiond, 1);
+    socket
+        .add_implementation::<session_management_v2::SessionManagementV2Impl, _>(&mut sessiond, 1);
     socket.add_implementation::<session_core_v1::SessionCoreV1Impl, _>(&mut sessiond, 1);
     socket.add_implementation::<seat_v1::SeatV1Impl, _>(&mut sessiond, 1);
 
@@ -377,9 +395,9 @@ fn main() -> anyhow::Result<()> {
     };
 
     if args.no_cgroup {
-        run(&config, |_| Ok(cgroup::DummyCgroupManager))
+        run(config, |_| Ok(cgroup::DummyCgroupManager))
     } else {
-        run(&config, cgroup::SystemCgroupManager::new)
+        run(config, cgroup::SystemCgroupManager::new)
     }
 }
 

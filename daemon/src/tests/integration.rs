@@ -1,6 +1,10 @@
 use crate::session_core_v1_client::{session_core_manager, session_core_session};
-use crate::session_management_v1_client::{session_management_session, session_manager};
+use crate::session_management_v1_client::session_manager as session_manager_v1;
+use crate::session_management_v2_client::{
+    session_management_session, session_manager as session_manager_v2,
+};
 use hyprwire::client;
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::{path, process};
 
@@ -63,19 +67,23 @@ impl Drop for DaemonGuard {
 }
 
 fn start_daemon(socket_path: path::PathBuf) -> DaemonGuard {
-    let uid = rustix::process::getuid().as_raw().to_string();
+    let raw_uid = rustix::process::getuid().as_raw();
+    let uid = raw_uid.to_string();
     let gid = rustix::process::getgid().as_raw().to_string();
+    let username = uzers::get_user_by_uid(raw_uid)
+        .map(|user| user.name().to_string_lossy().into_owned())
+        .expect("current user not found");
     let linger_dir = socket_path.with_extension("linger");
     let config_path = socket_path.with_extension("toml");
     std::fs::create_dir(&linger_dir).expect("failed to create test linger dir");
     std::fs::write(
         &config_path,
         format!(
-            "[management]\nuser = {uid:?}\ngroup = {gid:?}\n\n[seats.seat0]\nuser = {uid:?}\ngroup = {gid:?}\n"
+            "[management]\nuser = {uid:?}\ngroup = {gid:?}\n\n[users.{username}]\nenv.TEST = \"set\"\n\n[seats.seat0]\nuser = {uid:?}\ngroup = {gid:?}\n"
         ),
     )
     .expect("failed to write test config");
-    let child = process::Command::new(daemon_binary())
+    let mut child = process::Command::new(daemon_binary())
         .arg("--no-cgroup")
         .arg("--socket-path")
         .arg(&socket_path)
@@ -87,7 +95,13 @@ fn start_daemon(socket_path: path::PathBuf) -> DaemonGuard {
         .expect("failed to spawn daemon");
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while !socket_path.exists() {
+    loop {
+        if std::os::unix::net::UnixStream::connect(&socket_path).is_ok() {
+            break;
+        }
+        if let Some(status) = child.try_wait().expect("failed to poll daemon") {
+            panic!("daemon exited before accepting connections: {status}");
+        }
         assert!(std::time::Instant::now() < deadline, "daemon did not start");
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
@@ -98,19 +112,43 @@ fn start_daemon(socket_path: path::PathBuf) -> DaemonGuard {
 struct MgmtState {
     session_id: Option<u32>,
     seat: Option<String>,
+    env: BTreeMap<String, String>,
     done: bool,
 }
 
-impl hyprwire::Dispatch<session_manager::SessionManager> for MgmtState {
+impl hyprwire::Dispatch<session_manager_v1::SessionManager> for MgmtState {
     fn event(
         &mut self,
-        _: &session_manager::SessionManager,
-        event: <session_manager::SessionManager as hyprwire::Object>::Event<'_>,
+        _: &session_manager_v1::SessionManager,
+        event: <session_manager_v1::SessionManager as hyprwire::Object>::Event<'_>,
     ) {
-        let session_manager::Event::SessionCreated { session_id, seat } = event;
-        self.session_id = Some(session_id);
-        self.seat = Some(seat);
-        self.done = true;
+        match event {
+            session_manager_v1::Event::SessionId { session_id } => {
+                self.session_id = Some(session_id);
+            }
+            session_manager_v1::Event::Seat { seat } => {
+                self.seat = Some(seat);
+            }
+            session_manager_v1::Event::Env { name, value } => {
+                self.env.insert(name, value);
+            }
+            session_manager_v1::Event::Done => {
+                self.done = true;
+            }
+            session_manager_v1::Event::Error { code, message } => {
+                panic!("unsafe session creation failed: {code:?}: {message}");
+            }
+        }
+    }
+}
+
+impl hyprwire::Dispatch<session_manager_v2::SessionManager> for MgmtState {
+    fn event(
+        &mut self,
+        _: &session_manager_v2::SessionManager,
+        event: <session_manager_v2::SessionManager as hyprwire::Object>::Event<'_>,
+    ) {
+        let _ = event;
     }
 }
 
@@ -129,6 +167,9 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
             session_management_session::Event::Seat { seat } => {
                 self.seat = Some(seat);
             }
+            session_management_session::Event::Env { name, value } => {
+                self.env.insert(name, value);
+            }
             session_management_session::Event::Done => {
                 self.done = true;
             }
@@ -143,6 +184,7 @@ fn create_session(socket: &path::Path, uid: u32) -> u32 {
     let mut state = MgmtState {
         session_id: None,
         seat: None,
+        env: BTreeMap::new(),
         done: false,
     };
     let mut sock = client::Client::connect(socket).unwrap();
@@ -150,9 +192,9 @@ fn create_session(socket: &path::Path, uid: u32) -> u32 {
     sock.add_implementation::<crate::session_management_v1_client::SessionManagementV1Impl>();
     eq.wait_for_handshake(&mut state).unwrap();
     let manager = sock
-        .bind::<session_manager::SessionManager, _>(&eq, &mut state, 1)
+        .bind::<session_manager_v1::SessionManager, _>(&eq, &mut state, 1)
         .unwrap();
-    manager.send_create_session_unsafe(uid, 0, 1, "");
+    manager.send_create_session(uid, 0, 1, "");
     while !state.done {
         eq.dispatch_events(&mut state, true).unwrap();
     }
@@ -163,6 +205,7 @@ fn destroy_session(socket: &path::Path, session_id: u32) {
     let mut state = MgmtState {
         session_id: None,
         seat: None,
+        env: BTreeMap::new(),
         done: false,
     };
     let mut sock = client::Client::connect(socket).unwrap();
@@ -170,9 +213,9 @@ fn destroy_session(socket: &path::Path, session_id: u32) {
     sock.add_implementation::<crate::session_management_v1_client::SessionManagementV1Impl>();
     eq.wait_for_handshake(&mut state).unwrap();
     let manager = sock
-        .bind::<session_manager::SessionManager, _>(&eq, &mut state, 1)
+        .bind::<session_manager_v1::SessionManager, _>(&eq, &mut state, 1)
         .unwrap();
-    manager.send_destroy_session_unsafe(session_id);
+    manager.send_destroy_session(session_id);
 }
 
 struct CoreState {
@@ -244,14 +287,15 @@ fn create_owned_session_returns_id() {
     let mut state = MgmtState {
         session_id: None,
         seat: None,
+        env: BTreeMap::new(),
         done: false,
     };
     let mut sock = client::Client::connect(&socket).unwrap();
     let eq = sock.new_event_queue();
-    sock.add_implementation::<crate::session_management_v1_client::SessionManagementV1Impl>();
+    sock.add_implementation::<crate::session_management_v2_client::SessionManagementV2Impl>();
     eq.wait_for_handshake(&mut state).unwrap();
     let manager = sock
-        .bind::<session_manager::SessionManager, _>(&eq, &mut state, 1)
+        .bind::<session_manager_v2::SessionManager, _>(&eq, &mut state, 1)
         .unwrap();
     let session = manager.send_create_session::<MgmtState>(uid).unwrap();
 
@@ -262,6 +306,25 @@ fn create_owned_session_returns_id() {
 
     assert_eq!(state.session_id, Some(1));
     assert_eq!(state.seat.as_deref(), Some("seat0"));
+    let runtime_dir = format!("/run/user/{uid}");
+    let dbus_address = format!("unix:path={runtime_dir}/bus");
+    assert_eq!(
+        state
+            .env
+            .get("DBUS_SESSION_BUS_ADDRESS")
+            .map(String::as_str),
+        Some(dbus_address.as_str())
+    );
+    assert_eq!(state.env.get("TEST").map(String::as_str), Some("set"));
+    assert_eq!(
+        state.env.get("XDG_RUNTIME_DIR").map(String::as_str),
+        Some(runtime_dir.as_str())
+    );
+    assert_eq!(state.env.get("XDG_SEAT").map(String::as_str), Some("seat0"));
+    assert_eq!(
+        state.env.get("XDG_SESSION_ID").map(String::as_str),
+        Some("1")
+    );
     assert!(list_sessions(&socket).contains(&1));
 
     daemon.stop();
@@ -277,14 +340,15 @@ fn owned_session_is_destroyed_when_owner_disconnects() {
         let mut state = MgmtState {
             session_id: None,
             seat: None,
+            env: BTreeMap::new(),
             done: false,
         };
         let mut sock = client::Client::connect(&socket).unwrap();
         let eq = sock.new_event_queue();
-        sock.add_implementation::<crate::session_management_v1_client::SessionManagementV1Impl>();
+        sock.add_implementation::<crate::session_management_v2_client::SessionManagementV2Impl>();
         eq.wait_for_handshake(&mut state).unwrap();
         let manager = sock
-            .bind::<session_manager::SessionManager, _>(&eq, &mut state, 1)
+            .bind::<session_manager_v2::SessionManager, _>(&eq, &mut state, 1)
             .unwrap();
         let session = manager.send_create_session::<MgmtState>(uid).unwrap();
 

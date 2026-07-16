@@ -2,21 +2,20 @@ use crate::{ecs, session, session_core_user, session_core_v1, user};
 use bevy_ecs::{entity, world};
 use std::{fs, io};
 
-pub fn create_runtime_dir(uid: u32) {
-    let runtime_dir = format!("/run/user/{uid}");
-    if let Err(e) = fs::create_dir_all(&runtime_dir) {
+pub fn create_runtime_dir(uid: u32, path: &str) {
+    if let Err(e) = fs::create_dir_all(path) {
         log::error!(uid, error = e.to_string().as_str(); "failed to create runtime dir");
     }
-    if let Err(e) = rustix::fs::chown(&runtime_dir, Some(rustix::fs::Uid::from_raw(uid)), None) {
+    if let Err(e) = rustix::fs::chown(path, Some(rustix::fs::Uid::from_raw(uid)), None) {
         log::error!(uid, error = e.to_string().as_str(); "failed to chown runtime dir");
     }
-    if let Err(e) = rustix::fs::chmod(&runtime_dir, rustix::fs::Mode::from_bits_truncate(0o700)) {
+    if let Err(e) = rustix::fs::chmod(path, rustix::fs::Mode::from_bits_truncate(0o700)) {
         log::error!(uid, error = e.to_string().as_str(); "failed to chmod runtime dir");
     }
 }
 
-pub fn remove_runtime_dir(uid: u32) -> io::Result<()> {
-    match fs::remove_dir(format!("/run/user/{uid}")) {
+pub fn remove_runtime_dir(path: &str) -> io::Result<()> {
+    match fs::remove_dir(path) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e),

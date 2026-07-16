@@ -5,6 +5,7 @@ fn main() -> io::Result<()> {
         .with_targets(hyprwire_scanner::Targets::CLIENT)
         .compile(&[
             "../protocols/session_management_v1.xml",
+            "../protocols/session_management_v2.xml",
             "../protocols/session_core_v1.xml",
         ])?;
 

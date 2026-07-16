@@ -1,6 +1,9 @@
 use crate::session_core_v1::{session_core_manager, session_core_session};
-use crate::session_management_v1::{session_management_session, session_manager};
-use crate::{cgroup, ecs, seat, session_core_v1, session_management_v1, user};
+use crate::session_management_v1::session_manager as session_manager_v1;
+use crate::session_management_v2::{session_management_session, session_manager};
+use crate::{
+    cgroup, config, ecs, seat, session_core_v1, session_management_v1, session_management_v2, user,
+};
 use bevy_ecs::{entity, world};
 use rustix::system;
 use std::{fs, time};
@@ -257,12 +260,20 @@ impl<C: crate::cgroup::CgroupManager + 'static> crate::Sessiond<C> {
     }
 
     pub(crate) fn cleanup_user_runtime_dir(&self, uid: u32) {
+        let Some(user) = uzers::get_user_by_uid(uid) else {
+            return;
+        };
+
         if !self.cgroup_manager.has_uid_sessions(uid)
             && !user::is_lingering(&self.world, &self.user_entities, uid)
             && entities_by_uid(&self.world, &self.session_entities, uid)
                 .next()
                 .is_none()
-            && let Err(e) = user::remove_runtime_dir(uid)
+            && let Err(e) = user::remove_runtime_dir(
+                &self
+                    .user_config(&user.name().to_string_lossy())
+                    .runtime_dir(uid),
+            )
         {
             log::error!(uid, error = e.to_string().as_str(); "failed to remove runtime dir");
         }
@@ -360,6 +371,11 @@ impl<C: cgroup::CgroupManager + 'static> session_management_v1::SessionManagemen
 {
 }
 
+impl<C: cgroup::CgroupManager + 'static> session_management_v2::SessionManagementV2Handler
+    for crate::Sessiond<C>
+{
+}
+
 impl<C: cgroup::CgroupManager + 'static> session_core_v1::SessionCoreV1Handler
     for crate::Sessiond<C>
 {
@@ -393,6 +409,14 @@ impl<C: cgroup::CgroupManager + 'static> crate::Sessiond<C> {
                 .filter_map(|entity| self.world.get::<ecs::Uid>(entity))
                 .all(|session| session.0 == creds.uid.as_raw())
     }
+
+    pub fn user_config(&self, username: &str) -> config::UserConfig {
+        self.settings
+            .users
+            .get(username)
+            .cloned()
+            .unwrap_or_default()
+    }
 }
 
 impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager::SessionManager>
@@ -413,102 +437,6 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager::Ses
         }
 
         match event {
-            session_manager::Event::CreateSessionUnsafe {
-                uid,
-                vt,
-                is_local,
-                remote_host,
-            } => {
-                let session_id = self.next_session_id;
-                self.next_session_id = self.next_session_id.next();
-                let is_local = is_local != 0;
-                let username = uzers::get_user_by_uid(uid)
-                    .map(|user| user.name().to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                log::info!(session_id = session_id.as_raw(), uid, username = username.as_str(), vt, is_local, remote_host = remote_host.as_str(); "session created");
-
-                let leader_id = client.creds().pid.as_raw_pid();
-
-                if let Err(e) = self
-                    .cgroup_manager
-                    .create_session_cgroup(uid, session_id, leader_id)
-                {
-                    log::error!(session_id = session_id.as_raw(), error = e.to_string().as_str(); "failed to create session cgroup");
-                }
-
-                seat::refresh_current_vts(&mut self.world, &self.seat_entities);
-
-                let mut session_seat_entity = if vt != 0 {
-                    self.seat_entities.first().copied()
-                } else {
-                    None
-                };
-                let mut session_seat = session_seat_entity.and_then(|seat_entity| {
-                    self.world
-                        .get::<ecs::SeatName>(seat_entity)
-                        .map(|seat| seat.0.clone())
-                        .filter(|seat| !seat.is_empty())
-                });
-                let mut active_state = session_core_v1::ActiveState::Online;
-
-                user::create_runtime_dir(uid);
-
-                if let Some((seat_entity, seat)) =
-                    self.seat_entities.iter().copied().find_map(|seat_entity| {
-                        let mode = self.world.get::<ecs::SeatMode>(seat_entity)?;
-                        if mode.0 != ecs::SeatKind::VtBound {
-                            return None;
-                        }
-                        let current_vt = self.world.get::<ecs::CurrentVt>(seat_entity)?.0;
-                        (current_vt == vt).then(|| {
-                            self.world
-                                .get::<ecs::SeatName>(seat_entity)
-                                .map(|seat| (seat_entity, seat.0.clone()))
-                        })?
-                    })
-                {
-                    session_seat_entity = Some(seat_entity);
-                    session_seat = Some(seat);
-                    active_state = session_core_v1::ActiveState::Active;
-                }
-
-                let session_entity = ecs::insert_session(
-                    &mut self.world,
-                    session_id,
-                    uid,
-                    username,
-                    if vt == 0 { None } else { Some(vt) },
-                    session_seat.clone(),
-                    session_seat_entity,
-                    leader_id,
-                    if is_local { None } else { Some(remote_host) },
-                    active_state,
-                    None,
-                );
-
-                self.session_entities.push(session_entity);
-                #[cfg(feature = "consolekit")]
-                self.sync_consolekit_session(session_id, session_entity);
-                user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
-
-                object.send_session_created(
-                    session_id.as_raw(),
-                    session_seat.as_deref().unwrap_or_default(),
-                );
-
-                for manager in &self.info_managers {
-                    manager.send_session_added(session_id.as_raw());
-                }
-            }
-            session_manager::Event::DestroySessionUnsafe { session_id } => {
-                if let Some(entity) = entity(
-                    &self.world,
-                    &self.session_entities,
-                    SessionId::from_raw(session_id),
-                ) {
-                    self.terminate_session(entity);
-                }
-            }
             session_manager::Event::Destroy => {}
             session_manager::Event::CreateSession {
                 session_management_session,
@@ -532,7 +460,7 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager::Ses
 
                 seat::refresh_current_vts(&mut self.world, &self.seat_entities);
 
-                user::create_runtime_dir(uid);
+                user::create_runtime_dir(uid, &self.user_config(&username).runtime_dir(uid));
 
                 let session_entity = ecs::insert_session(
                     &mut self.world,
@@ -553,6 +481,135 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager::Ses
                 self.sync_consolekit_session(session_id, session_entity);
                 user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
             }
+        }
+    }
+}
+
+impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager_v1::SessionManager>
+    for crate::Sessiond<C>
+{
+    fn event(
+        &mut self,
+        object: &session_manager_v1::SessionManager,
+        event: <session_manager_v1::SessionManager as hyprwire::Object>::Event<'_>,
+    ) {
+        let Some(client) = object.client() else {
+            return;
+        };
+
+        if !self.management_access.allows(client.creds()) {
+            log::warn!(uid = client.creds().uid.as_raw(); "rejected request from non-root client");
+            return;
+        }
+
+        match event {
+            session_manager_v1::Event::CreateSession {
+                uid,
+                vt,
+                is_local,
+                remote_host,
+            } => {
+                let session_id = self.next_session_id;
+                self.next_session_id = self.next_session_id.next();
+                let username = uzers::get_user_by_uid(uid)
+                    .map(|user| user.name().to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                log::info!(session_id = session_id.as_raw(), uid, username = username.as_str(), vt, is_local, remote_host = remote_host.as_str(); "session created");
+
+                if let Err(e) = self.cgroup_manager.create_session_cgroup(
+                    uid,
+                    session_id,
+                    client.creds().pid.as_raw_pid(),
+                ) {
+                    log::error!(session_id = session_id.as_raw(), error = e.to_string().as_str(); "failed to create session cgroup");
+                }
+
+                seat::refresh_current_vts(&mut self.world, &self.seat_entities);
+
+                let mut session_seat_entity = if vt != 0 {
+                    self.seat_entities.first().copied()
+                } else {
+                    None
+                };
+                let mut session_seat = session_seat_entity.and_then(|seat_entity| {
+                    self.world
+                        .get::<ecs::SeatName>(seat_entity)
+                        .map(|seat| seat.0.clone())
+                        .filter(|seat| !seat.is_empty())
+                });
+                let mut active_state = session_core_v1::ActiveState::Online;
+
+                user::create_runtime_dir(uid, &self.user_config(&username).runtime_dir(uid));
+
+                if let Some((seat_entity, seat)) =
+                    self.seat_entities.iter().copied().find_map(|seat_entity| {
+                        let mode = self.world.get::<ecs::SeatMode>(seat_entity)?;
+                        if mode.0 != ecs::SeatKind::VtBound {
+                            return None;
+                        }
+                        let current_vt = self.world.get::<ecs::CurrentVt>(seat_entity)?.0;
+                        (current_vt == vt).then(|| {
+                            self.world
+                                .get::<ecs::SeatName>(seat_entity)
+                                .map(|seat| (seat_entity, seat.0.clone()))
+                        })?
+                    })
+                {
+                    session_seat_entity = Some(seat_entity);
+                    session_seat = Some(seat);
+                    active_state = session_core_v1::ActiveState::Active;
+                }
+
+                let env = self.user_config(&username).environment(
+                    uid,
+                    session_id.as_raw(),
+                    session_seat.as_deref(),
+                );
+
+                let session_entity = ecs::insert_session(
+                    &mut self.world,
+                    session_id,
+                    uid,
+                    username,
+                    if vt == 0 { None } else { Some(vt) },
+                    session_seat.clone(),
+                    session_seat_entity,
+                    client.creds().pid.as_raw_pid(),
+                    if is_local != 0 {
+                        None
+                    } else {
+                        Some(remote_host)
+                    },
+                    active_state,
+                    None,
+                );
+
+                self.session_entities.push(session_entity);
+                #[cfg(feature = "consolekit")]
+                self.sync_consolekit_session(session_id, session_entity);
+                user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
+
+                object.send_session_id(session_id.as_raw());
+                object.send_seat(session_seat.as_deref().unwrap_or_default());
+                for (name, value) in env {
+                    object.send_env(name.as_str(), value.as_str());
+                }
+                object.send_done();
+
+                for manager in &self.info_managers {
+                    manager.send_session_added(session_id.as_raw());
+                }
+            }
+            session_manager_v1::Event::DestroySession { session_id } => {
+                if let Some(entity) = entity(
+                    &self.world,
+                    &self.session_entities,
+                    SessionId::from_raw(session_id),
+                ) {
+                    self.terminate_session(entity);
+                }
+            }
+            session_manager_v1::Event::Destroy => {}
         }
     }
 }
@@ -588,6 +645,11 @@ impl<C: cgroup::CgroupManager + 'static>
                     .insert((ecs::RemoteHost(Some(remote_host)), ecs::IsLocal(false)));
             }
             session_management_session::Event::Done => {
+                let uid = self.world.get::<ecs::Uid>(entity).map(|uid| uid.0);
+                let username = self
+                    .world
+                    .get::<ecs::Username>(entity)
+                    .map(|username| username.0.clone());
                 let vt = self
                     .world
                     .get::<ecs::Vt>(entity)
@@ -649,6 +711,15 @@ impl<C: cgroup::CgroupManager + 'static>
 
                 object.send_session_id(session_id.as_raw());
                 object.send_seat(session_seat.as_deref().unwrap_or_default());
+                if let (Some(uid), Some(username)) = (uid, username) {
+                    for (name, value) in self.user_config(&username).environment(
+                        uid,
+                        session_id.as_raw(),
+                        session_seat.as_deref(),
+                    ) {
+                        object.send_env(name.as_str(), value.as_str());
+                    }
+                }
                 object.send_done();
 
                 for manager in &self.info_managers {

@@ -552,10 +552,6 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager::Ses
                 #[cfg(feature = "consolekit")]
                 self.sync_consolekit_session(session_id, session_entity);
                 user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
-
-                for manager in &self.info_managers {
-                    manager.send_session_added(session_id.as_raw());
-                }
             }
         }
     }
@@ -654,6 +650,10 @@ impl<C: cgroup::CgroupManager + 'static>
                 object.send_session_id(session_id.as_raw());
                 object.send_seat(session_seat.as_deref().unwrap_or_default());
                 object.send_done();
+
+                for manager in &self.info_managers {
+                    manager.send_session_added(session_id.as_raw());
+                }
             }
             session_management_session::Event::Destroy => {
                 self.terminate_session(entity);

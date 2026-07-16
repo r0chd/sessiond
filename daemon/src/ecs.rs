@@ -1,7 +1,7 @@
 use crate::session_core_v1::{
     session_core_seat, session_core_seat_client, session_core_seat_device,
 };
-use crate::session_management_v1::session_management_session;
+use crate::session_management_v2::session_management_session;
 use crate::{
     device, seat, seat_v1, session, session_core_session, session_core_user, session_core_v1,
 };

@@ -57,11 +57,68 @@ impl Default for ManagementConfig {
     }
 }
 
-#[derive(serde::Deserialize, Default)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct UserConfig {
     #[serde(default)]
     pub linger: bool,
+    #[serde(default = "default_runtime_dir")]
+    pub runtime_dir: String,
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+}
+
+impl Default for UserConfig {
+    fn default() -> Self {
+        Self {
+            linger: false,
+            runtime_dir: default_runtime_dir(),
+            env: BTreeMap::new(),
+        }
+    }
+}
+
+impl UserConfig {
+    pub fn runtime_dir(&self, uid: u32) -> String {
+        self.runtime_dir
+            .replace(concat!("{", "uid", "}"), &uid.to_string())
+    }
+
+    pub fn environment(
+        &self,
+        uid: u32,
+        session_id: u32,
+        seat: Option<&str>,
+    ) -> BTreeMap<String, String> {
+        let runtime_dir = self.runtime_dir(uid);
+        let mut env = BTreeMap::from([
+            ("XDG_RUNTIME_DIR".to_string(), runtime_dir.clone()),
+            (
+                "DBUS_SESSION_BUS_ADDRESS".to_string(),
+                format!("unix:path={runtime_dir}/bus"),
+            ),
+            ("XDG_SESSION_ID".to_string(), session_id.to_string()),
+        ]);
+
+        if let Some(seat) = seat.filter(|seat| !seat.is_empty()) {
+            env.insert("XDG_SEAT".to_string(), seat.to_string());
+        }
+
+        for (name, value) in &self.env {
+            env.insert(
+                name.clone(),
+                value
+                    .replace(concat!("{", "uid", "}"), &uid.to_string())
+                    .replace(concat!("{", "runtime-dir", "}"), &runtime_dir),
+            );
+        }
+
+        env
+    }
+}
+
+fn default_runtime_dir() -> String {
+    "/run/user/{uid}".to_string()
 }
 
 #[derive(serde::Deserialize)]

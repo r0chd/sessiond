@@ -8,8 +8,10 @@ use pamsm::{PamLibExt, PamServiceModule};
 use session_management_v1::session_manager;
 
 struct Session {
-    session_id: Option<u32>,
+    id: Option<u32>,
     seat: Option<String>,
+    env: Vec<(String, String)>,
+    done: bool,
 }
 
 impl hyprwire::Dispatch<session_manager::SessionManager> for Session {
@@ -18,9 +20,24 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Session {
         _: &session_manager::SessionManager,
         event: <session_manager::SessionManager as hyprwire::Object>::Event<'_>,
     ) {
-        let session_manager::Event::SessionCreated { session_id, seat } = event;
-        self.session_id = Some(session_id);
-        self.seat = Some(seat);
+        match event {
+            session_manager::Event::SessionId { session_id } => {
+                self.id = Some(session_id);
+            }
+            session_manager::Event::Seat { seat } => {
+                self.seat = Some(seat);
+            }
+            session_manager::Event::Env { name, value } => {
+                self.env.push((name, value));
+            }
+            session_manager::Event::Done => {
+                self.done = true;
+            }
+            session_manager::Event::Error { .. } => {
+                self.id = None;
+                self.done = true;
+            }
+        }
     }
 }
 
@@ -30,8 +47,10 @@ impl PamServiceModule for Pam {
     fn open_session(pamh: pamsm::Pam, _: pamsm::PamFlags, _: Vec<String>) -> pamsm::PamError {
         fn inner(pamh: &pamsm::Pam) -> Result<(), pamsm::PamError> {
             let mut session = Session {
-                session_id: None,
+                id: None,
                 seat: None,
+                env: Vec::new(),
+                done: false,
             };
 
             let mut socket = client::Client::connect("/run/sessiond.sock")
@@ -73,27 +92,20 @@ impl PamServiceModule for Pam {
                 .unwrap_or_default();
             let is_local = u32::from(remote_host.is_empty());
 
-            manager.send_create_session_unsafe(uid, vt, is_local, remote_host);
+            manager.send_create_session(uid, vt, is_local, remote_host);
 
-            while session.session_id.is_none() {
+            while !session.done {
                 event_queue
                     .dispatch_events(&mut session, true)
                     .map_err(|_| pamsm::PamError::SESSION_ERR)?;
             }
 
-            let session_id = session.session_id.ok_or(pamsm::PamError::SESSION_ERR)?;
+            let session_id = session.id.ok_or(pamsm::PamError::SESSION_ERR)?;
             pamh.send_bytes("sessiond", session_id.to_le_bytes().to_vec(), None)
                 .map_err(|_| pamsm::PamError::SESSION_ERR)?;
 
-            pamh.putenv(&format!("XDG_RUNTIME_DIR=/run/user/{uid}"))?;
-            pamh.putenv(&format!(
-                "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus"
-            ))?;
-            pamh.putenv(&format!("XDG_SESSION_ID={session_id}"))?;
-            if let Some(seat) = session.seat
-                && !seat.is_empty()
-            {
-                pamh.putenv(&format!("XDG_SEAT={seat}"))?;
+            for (name, value) in session.env {
+                pamh.putenv(&format!("{name}={value}"))?;
             }
 
             Ok(())
@@ -118,8 +130,10 @@ impl PamServiceModule for Pam {
                 })?;
 
             let mut session = Session {
-                session_id: None,
+                id: None,
                 seat: None,
+                env: Vec::new(),
+                done: false,
             };
 
             let mut socket = client::Client::connect("/run/sessiond.sock")
@@ -136,7 +150,7 @@ impl PamServiceModule for Pam {
                 .bind::<session_manager::SessionManager, _>(&event_queue, &mut session, 1)
                 .map_err(|_| pamsm::PamError::SESSION_ERR)?;
 
-            manager.send_destroy_session_unsafe(session_id);
+            manager.send_destroy_session(session_id);
 
             Ok(())
         }

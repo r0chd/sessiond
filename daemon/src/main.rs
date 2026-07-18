@@ -30,22 +30,6 @@ mod terminal;
 mod user;
 
 #[cfg(test)]
-mod session_management_v1_client {
-    hyprwire::include_protocol!("session_management_v1");
-    pub use client::*;
-}
-#[cfg(test)]
-mod session_management_v2_client {
-    hyprwire::include_protocol!("session_management_v2");
-    pub use client::*;
-}
-#[cfg(test)]
-mod session_core_v1_client {
-    hyprwire::include_protocol!("session_core_v1");
-    pub use client::*;
-}
-
-#[cfg(test)]
 mod tests;
 
 use bevy_ecs::{entity, world};
@@ -334,7 +318,6 @@ fn run<C: cgroup::CgroupManager + 'static>(
                                     {
                                         Some((entity, session_core_v1::ActiveState::Online))
                                     }
-                                    None => Some((entity, session_core_v1::ActiveState::Active)),
                                     _ => None,
                                 }
                             },

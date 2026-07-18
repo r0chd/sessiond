@@ -545,7 +545,9 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager_v1::
 
                 seat::refresh_current_vts(&mut self.world, &self.seat_entities);
 
-                let mut session_seat_entity = if vt != 0 {
+                let is_local = is_local != 0;
+                let session_vt = (vt != 0).then_some(vt);
+                let mut session_seat_entity = if session_vt.is_some() {
                     self.seat_entities.first().copied()
                 } else {
                     None
@@ -567,7 +569,7 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager_v1::
                             return None;
                         }
                         let current_vt = self.world.get::<ecs::CurrentVt>(seat_entity)?.0;
-                        (current_vt == vt).then(|| {
+                        (Some(current_vt) == session_vt && is_local).then(|| {
                             self.world
                                 .get::<ecs::SeatName>(seat_entity)
                                 .map(|seat| (seat_entity, seat.0.clone()))
@@ -596,11 +598,11 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager_v1::
                     session_id,
                     uid,
                     username,
-                    if vt == 0 { None } else { Some(vt) },
+                    session_vt,
                     session_seat.clone(),
                     session_seat_entity,
                     client.creds().pid.as_raw_pid(),
-                    if is_local != 0 {
+                    if is_local {
                         None
                     } else {
                         Some(remote_host)
@@ -690,14 +692,17 @@ impl<C: cgroup::CgroupManager + 'static>
                     .world
                     .get::<ecs::Username>(entity)
                     .map(|username| username.0.clone());
-                let vt = self
+                let session_vt = self
                     .world
                     .get::<ecs::Vt>(entity)
-                    .and_then(|vt| vt.0)
-                    .unwrap_or_default();
+                    .and_then(|vt| vt.0);
+                let is_local = self
+                    .world
+                    .get::<ecs::IsLocal>(entity)
+                    .is_none_or(|is_local| is_local.0);
                 seat::refresh_current_vts(&mut self.world, &self.seat_entities);
 
-                let mut session_seat_entity = if vt != 0 {
+                let mut session_seat_entity = if session_vt.is_some() {
                     self.seat_entities.first().copied()
                 } else {
                     None
@@ -716,7 +721,7 @@ impl<C: cgroup::CgroupManager + 'static>
                             return None;
                         }
                         let current_vt = self.world.get::<ecs::CurrentVt>(seat_entity)?.0;
-                        (current_vt == vt).then(|| {
+                        (Some(current_vt) == session_vt && is_local).then(|| {
                             self.world
                                 .get::<ecs::SeatName>(seat_entity)
                                 .map(|seat| (seat_entity, seat.0.clone()))

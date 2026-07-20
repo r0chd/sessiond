@@ -602,11 +602,7 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager_v1::
                     session_seat.clone(),
                     session_seat_entity,
                     client.creds().pid.as_raw_pid(),
-                    if is_local {
-                        None
-                    } else {
-                        Some(remote_host)
-                    },
+                    if is_local { None } else { Some(remote_host) },
                     active_state,
                     None,
                 );
@@ -692,10 +688,7 @@ impl<C: cgroup::CgroupManager + 'static>
                     .world
                     .get::<ecs::Username>(entity)
                     .map(|username| username.0.clone());
-                let session_vt = self
-                    .world
-                    .get::<ecs::Vt>(entity)
-                    .and_then(|vt| vt.0);
+                let session_vt = self.world.get::<ecs::Vt>(entity).and_then(|vt| vt.0);
                 let is_local = self
                     .world
                     .get::<ecs::IsLocal>(entity)

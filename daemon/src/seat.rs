@@ -674,8 +674,6 @@ impl<C: crate::cgroup::CgroupManager + 'static> hyprwire::Dispatch<seat_manager:
                     return;
                 };
 
-                self.client_entities.push(client_entity);
-
                 if let Some(session_id) = opener_session_id {
                     if let Some(entity) = session::entity(&self.world, session_id) {
                         if self
@@ -708,9 +706,7 @@ impl<C: crate::cgroup::CgroupManager + 'static> hyprwire::Dispatch<seat::Seat>
     for crate::Sessiond<C>
 {
     fn event(&mut self, object: &seat::Seat, event: <seat::Seat as hyprwire::Object>::Event<'_>) {
-        let Some(client_entity) =
-            client::entity_by_seat_object(&self.world, &self.client_entities, object)
-        else {
+        let Some(client_entity) = client::entity_by_seat_object(&self.world, object) else {
             return;
         };
         let Some(seat_entity) = self
@@ -766,8 +762,6 @@ impl<C: crate::cgroup::CgroupManager + 'static> hyprwire::Dispatch<seat::Seat>
                 if let Err(err) = remove_client(&mut self.world, seat_entity, client_entity) {
                     log::error!("Could not remove client from seat: {err}");
                 }
-                self.client_entities
-                    .retain(|entity| *entity != client_entity);
             }
         }
     }
@@ -792,9 +786,7 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_core_seat::S
                     session_core_seat_client.send_destroyed();
                     return;
                 };
-                let Some(client_entity) =
-                    client::entity_by_pid(&self.world, &self.client_entities, pid)
-                else {
+                let Some(client_entity) = client::entity_by_pid(&self.world, pid) else {
                     session_core_seat_client.send_destroyed();
                     return;
                 };

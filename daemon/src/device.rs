@@ -21,9 +21,7 @@ impl<C: crate::cgroup::CgroupManager + 'static> hyprwire::Dispatch<device::Devic
     ) {
         let device::Event::Destroy = event;
 
-        let Some(client_entity) =
-            client::entity_by_device_object(&self.world, &self.client_entities, object)
-        else {
+        let Some(client_entity) = client::entity_by_device_object(&self.world, object) else {
             return;
         };
 
@@ -42,9 +40,7 @@ impl<C: cgroup::CgroupManager + 'static>
         event: <session_core_seat_device::SessionCoreSeatDevice as hyprwire::Object>::Event<'_>,
     ) {
         let session_core_seat_device::Event::Destroy = event;
-        let Some(client_entity) = self.client_entities.iter().copied().find(|client_entity| {
-            entity_by_core_object(&self.world, *client_entity, object).is_some()
-        }) else {
+        let Some(client_entity) = client::entity_by_core_device_object(&self.world, object) else {
             return;
         };
         let Some(device_entity) = entity_by_core_object(&self.world, client_entity, object) else {

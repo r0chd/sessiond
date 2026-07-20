@@ -38,6 +38,7 @@ use clap::Parser;
 use hyprwire::server;
 use rustix::{net, process};
 use session_core_v1::{session_core_manager, session_core_session, session_core_user};
+use session_management_v1::session_manager;
 use std::collections::{BTreeMap, HashMap};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
@@ -96,12 +97,10 @@ impl Access {
 struct Sessiond<C: cgroup::CgroupManager + 'static> {
     next_session_id: session::SessionId,
     info_managers: Vec<session_core_manager::SessionCoreManager>,
-    session_manager_v1_envs:
-        HashMap<session_management_v1::session_manager::SessionManager, BTreeMap<String, String>>,
+    session_manager_v1_envs: HashMap<session_manager::SessionManager, BTreeMap<String, String>>,
     cgroup_manager: C,
     user_entities: Vec<Entity>,
     seat_entities: Vec<Entity>,
-    client_entities: Vec<Entity>,
     seat_access: Access,
     management_access: Access,
     settings: config::Config,
@@ -168,7 +167,6 @@ fn run<C: cgroup::CgroupManager + 'static>(
         cgroup_manager,
         user_entities: Vec::new(),
         seat_entities: Vec::new(),
-        client_entities: Vec::new(),
         seat_access: Access::new(
             resolve_user(&seat_config.user)?,
             resolve_group(&seat_config.group)?,
@@ -210,12 +208,7 @@ fn run<C: cgroup::CgroupManager + 'static>(
         .collect::<Vec<_>>();
 
     for (uid, runtime_dir) in lingering_users {
-        user::create(
-            &mut sessiond.world,
-            &mut sessiond.user_entities,
-            uid,
-            true,
-        );
+        user::create(&mut sessiond.world, &mut sessiond.user_entities, uid, true);
         user::create_runtime_dir(uid, &runtime_dir);
         if let Err(e) = sessiond.cgroup_manager.ensure_user_cgroup(uid) {
             log::error!(
@@ -296,35 +289,28 @@ fn run<C: cgroup::CgroupManager + 'static>(
                 let mut state_updates = Vec::new();
 
                 if active_state == session_core_v1::ActiveState::Active {
-                    state_updates.extend(
-                        session::entities(&state.world).filter_map(
-                            |entity| {
-                                let session_vt = state.world.get::<ecs::Vt>(entity)?.0;
-                                let session_state = state.world.get::<ecs::ActiveState>(entity)?.0;
+                    state_updates.extend(session::entities(&state.world).filter_map(|entity| {
+                        let session_vt = state.world.get::<ecs::Vt>(entity)?.0;
+                        let session_state = state.world.get::<ecs::ActiveState>(entity)?.0;
 
-                                match session_vt {
-                                    Some(session_vt)
-                                        if session_vt != vt
-                                            && session_state
-                                                == session_core_v1::ActiveState::Active =>
-                                    {
-                                        Some((entity, session_core_v1::ActiveState::Online))
-                                    }
-                                    _ => None,
-                                }
-                            },
-                        ),
-                    );
+                        match session_vt {
+                            Some(session_vt)
+                                if session_vt != vt
+                                    && session_state == session_core_v1::ActiveState::Active =>
+                            {
+                                Some((entity, session_core_v1::ActiveState::Online))
+                            }
+                            _ => None,
+                        }
+                    }));
                 }
 
-                state_updates.extend(
-                    session::entities(&state.world).filter_map(|entity| {
-                        let session_vt = state.world.get::<ecs::Vt>(entity)?.0;
-                        session_vt
-                            .is_some_and(|session_vt| session_vt == vt)
-                            .then_some((entity, active_state))
-                    }),
-                );
+                state_updates.extend(session::entities(&state.world).filter_map(|entity| {
+                    let session_vt = state.world.get::<ecs::Vt>(entity)?.0;
+                    session_vt
+                        .is_some_and(|session_vt| session_vt == vt)
+                        .then_some((entity, active_state))
+                }));
 
                 for (entity, active_state) in state_updates {
                     let Some(session_id) = session::id(&state.world, entity) else {

@@ -59,6 +59,7 @@ pub fn insert_user(
 ) -> Entity {
     world
         .spawn((
+            User,
             Uid(uid),
             Username(username),
             Lingering(lingering),
@@ -126,6 +127,9 @@ pub struct Session;
 
 #[derive(Component)]
 pub struct Client;
+
+#[derive(Component)]
+pub struct User;
 
 #[derive(Component)]
 pub struct Uid(pub u32);

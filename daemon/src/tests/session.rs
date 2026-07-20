@@ -1,18 +1,21 @@
-use crate::ecs;
-use crate::session::{self, SessionId};
-use crate::session_core_v1;
-use bevy_ecs::prelude::{Entity, World};
+use crate::{ecs, session, session_core_v1};
+use bevy_ecs::prelude::*;
 
 fn make_session_entity(world: &mut World, session_id: u32, uid: u32) -> Entity {
     world
-        .spawn((ecs::Session(SessionId::from_raw(session_id)), ecs::Uid(uid)))
+        .spawn((
+            ecs::Session,
+            ecs::SessionId(session::SessionId::from_raw(session_id)),
+            ecs::Uid(uid),
+        ))
         .id()
 }
 
 fn make_seated_session_entity(world: &mut World, session_id: u32, uid: u32, seat: &str) -> Entity {
     world
         .spawn((
-            ecs::Session(SessionId::from_raw(session_id)),
+            ecs::Session,
+            ecs::SessionId(session::SessionId::from_raw(session_id)),
             ecs::Uid(uid),
             ecs::SeatName(seat.to_string()),
         ))
@@ -27,7 +30,8 @@ fn make_active_session_entity(
 ) -> Entity {
     world
         .spawn((
-            ecs::Session(SessionId::from_raw(session_id)),
+            ecs::Session,
+            ecs::SessionId(session::SessionId::from_raw(session_id)),
             ecs::Uid(uid),
             ecs::ActiveState(state),
         ))
@@ -36,19 +40,19 @@ fn make_active_session_entity(
 
 #[test]
 fn session_id_round_trip() {
-    let id = SessionId::from_raw(42);
+    let id = session::SessionId::from_raw(42);
     assert_eq!(id.as_raw(), 42);
 }
 
 #[test]
 fn session_id_next() {
-    let id = SessionId::from_raw(1);
+    let id = session::SessionId::from_raw(1);
     assert_eq!(id.next().as_raw(), 2);
 }
 
 #[test]
 fn session_id_next_wraps_at_max() {
-    let id = SessionId::from_raw(u32::MAX);
+    let id = session::SessionId::from_raw(u32::MAX);
     assert_eq!(id.next().as_raw(), 0);
 }
 
@@ -56,17 +60,16 @@ fn session_id_next_wraps_at_max() {
 fn entities_returns_only_session_entities() {
     let mut world = World::new();
     let with_session = make_session_entity(&mut world, 1, 1000);
-    let without_session = world.spawn_empty().id();
-    let all = vec![with_session, without_session];
-    let result: Vec<_> = session::entities(&world, &all).collect();
+    world.spawn_empty();
+    let result: Vec<_> = session::entities(&world).collect();
     assert_eq!(result, vec![with_session]);
 }
 
 #[test]
 fn entities_empty_when_none_have_session() {
     let mut world = World::new();
-    let e = world.spawn_empty().id();
-    let result: Vec<_> = session::entities(&world, &[e]).collect();
+    world.spawn_empty();
+    let result: Vec<_> = session::entities(&world).collect();
     assert!(result.is_empty());
 }
 
@@ -74,7 +77,10 @@ fn entities_empty_when_none_have_session() {
 fn id_returns_session_id() {
     let mut world = World::new();
     let e = make_session_entity(&mut world, 42, 1000);
-    assert_eq!(session::id(&world, e), Some(SessionId::from_raw(42)));
+    assert_eq!(
+        session::id(&world, e),
+        Some(session::SessionId::from_raw(42))
+    );
 }
 
 #[test]
@@ -88,9 +94,8 @@ fn id_returns_none_without_session_component() {
 fn entity_finds_by_session_id() {
     let mut world = World::new();
     let e = make_session_entity(&mut world, 7, 1000);
-    let all = vec![e];
     assert_eq!(
-        session::entity(&world, &all, SessionId::from_raw(7)),
+        session::entity(&world, session::SessionId::from_raw(7)),
         Some(e)
     );
 }
@@ -98,34 +103,30 @@ fn entity_finds_by_session_id() {
 #[test]
 fn entity_returns_none_for_unknown_id() {
     let mut world = World::new();
-    let e = make_session_entity(&mut world, 1, 1000);
-    let all = vec![e];
-    assert!(session::entity(&world, &all, SessionId::from_raw(99)).is_none());
+    make_session_entity(&mut world, 1, 1000);
+    assert!(session::entity(&world, session::SessionId::from_raw(99)).is_none());
 }
 
 #[test]
 fn entity_by_uid_finds_matching() {
     let mut world = World::new();
     let e = make_session_entity(&mut world, 1, 1000);
-    let all = vec![e];
-    assert_eq!(session::entity_by_uid(&world, &all, 1000), Some(e));
+    assert_eq!(session::entity_by_uid(&world, 1000), Some(e));
 }
 
 #[test]
 fn entity_by_uid_returns_none_for_no_match() {
     let mut world = World::new();
-    let e = make_session_entity(&mut world, 1, 1000);
-    let all = vec![e];
-    assert!(session::entity_by_uid(&world, &all, 9999).is_none());
+    make_session_entity(&mut world, 1, 1000);
+    assert!(session::entity_by_uid(&world, 9999).is_none());
 }
 
 #[test]
 fn entity_by_uid_skips_non_session_entities() {
     let mut world = World::new();
-    let non_session = world.spawn(ecs::Uid(1000)).id();
+    world.spawn(ecs::Uid(1000));
     let session = make_session_entity(&mut world, 1, 1000);
-    let all = vec![non_session, session];
-    assert_eq!(session::entity_by_uid(&world, &all, 1000), Some(session));
+    assert_eq!(session::entity_by_uid(&world, 1000), Some(session));
 }
 
 #[test]
@@ -133,9 +134,8 @@ fn entity_by_uid_multiple_sessions_finds_correct() {
     let mut world = World::new();
     let e1 = make_session_entity(&mut world, 1, 1000);
     let e2 = make_session_entity(&mut world, 2, 2000);
-    let all = vec![e1, e2];
-    assert_eq!(session::entity_by_uid(&world, &all, 2000), Some(e2));
-    assert_eq!(session::entity_by_uid(&world, &all, 1000), Some(e1));
+    assert_eq!(session::entity_by_uid(&world, 2000), Some(e2));
+    assert_eq!(session::entity_by_uid(&world, 1000), Some(e1));
 }
 
 #[test]
@@ -143,9 +143,8 @@ fn entities_returns_multiple_session_entities() {
     let mut world = World::new();
     let e1 = make_session_entity(&mut world, 1, 1000);
     let e2 = make_session_entity(&mut world, 2, 2000);
-    let non = world.spawn_empty().id();
-    let all = vec![e1, non, e2];
-    let result: Vec<_> = session::entities(&world, &all).collect();
+    world.spawn_empty();
+    let result: Vec<_> = session::entities(&world).collect();
     assert_eq!(result, vec![e1, e2]);
 }
 
@@ -153,12 +152,11 @@ fn entities_returns_multiple_session_entities() {
 fn entities_by_seat_name_returns_matching_sessions() {
     let mut world = World::new();
     let e1 = make_seated_session_entity(&mut world, 1, 1000, "seat0");
-    let e2 = make_seated_session_entity(&mut world, 2, 2000, "seat1");
+    make_seated_session_entity(&mut world, 2, 2000, "seat1");
     let e3 = make_seated_session_entity(&mut world, 3, 3000, "seat0");
-    let non_session = world.spawn(ecs::SeatName("seat0".to_string())).id();
-    let all = vec![e1, e2, e3, non_session];
+    world.spawn(ecs::SeatName("seat0".to_string()));
 
-    let result: Vec<_> = session::entities_by_seat_name(&world, &all, "seat0").collect();
+    let result: Vec<_> = session::entities_by_seat_name(&world, "seat0").collect();
 
     assert_eq!(result, vec![e1, e3]);
 }
@@ -166,10 +164,9 @@ fn entities_by_seat_name_returns_matching_sessions() {
 #[test]
 fn entities_by_seat_name_returns_empty_without_match() {
     let mut world = World::new();
-    let e = make_seated_session_entity(&mut world, 1, 1000, "seat0");
-    let all = vec![e];
+    make_seated_session_entity(&mut world, 1, 1000, "seat0");
 
-    let result: Vec<_> = session::entities_by_seat_name(&world, &all, "seat1").collect();
+    let result: Vec<_> = session::entities_by_seat_name(&world, "seat1").collect();
 
     assert!(result.is_empty());
 }
@@ -177,11 +174,10 @@ fn entities_by_seat_name_returns_empty_without_match() {
 #[test]
 fn entity_finds_correct_among_multiple() {
     let mut world = World::new();
-    let e1 = make_session_entity(&mut world, 1, 1000);
     let e2 = make_session_entity(&mut world, 2, 2000);
-    let all = vec![e1, e2];
+    make_session_entity(&mut world, 1, 1000);
     assert_eq!(
-        session::entity(&world, &all, SessionId::from_raw(2)),
+        session::entity(&world, session::SessionId::from_raw(2)),
         Some(e2)
     );
 }
@@ -192,7 +188,7 @@ fn set_state_updates_active_state() {
     let e = make_active_session_entity(&mut world, 1, 1000, session_core_v1::ActiveState::Online);
     session::set_state(
         &mut world,
-        SessionId::from_raw(1),
+        session::SessionId::from_raw(1),
         e,
         session_core_v1::ActiveState::Active,
     );
@@ -208,7 +204,7 @@ fn set_state_to_closing() {
     let e = make_active_session_entity(&mut world, 1, 1000, session_core_v1::ActiveState::Active);
     session::set_state(
         &mut world,
-        SessionId::from_raw(1),
+        session::SessionId::from_raw(1),
         e,
         session_core_v1::ActiveState::Closing,
     );
@@ -224,7 +220,7 @@ fn set_state_without_active_state_component() {
     let e = make_session_entity(&mut world, 1, 1000);
     session::set_state(
         &mut world,
-        SessionId::from_raw(1),
+        session::SessionId::from_raw(1),
         e,
         session_core_v1::ActiveState::Active,
     );
@@ -237,7 +233,7 @@ fn set_state_with_vt_component() {
     world.entity_mut(e).insert(ecs::Vt(Some(3)));
     session::set_state(
         &mut world,
-        SessionId::from_raw(1),
+        session::SessionId::from_raw(1),
         e,
         session_core_v1::ActiveState::Active,
     );

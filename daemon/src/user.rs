@@ -49,12 +49,11 @@ pub fn entity_by_object(
 pub fn create(
     world: &mut world::World,
     entities: &mut Vec<entity::Entity>,
-    session_entities: &[entity::Entity],
     uid: u32,
     lingering: bool,
 ) -> Option<entity::Entity> {
     let user = uzers::get_user_by_uid(uid)?;
-    let state = compute_state(world, session_entities, uid, lingering);
+    let state = compute_state(world, uid, lingering);
     let entity = ecs::insert_user(
         world,
         uid,
@@ -68,11 +67,10 @@ pub fn create(
 
 fn compute_state(
     world: &world::World,
-    session_entities: &[entity::Entity],
     uid: u32,
     lingering: bool,
 ) -> session_core_v1::UserState {
-    let states = session::entities_by_uid(world, session_entities, uid)
+    let states = session::entities_by_uid(world, uid)
         .filter_map(|entity| world.get::<ecs::ActiveState>(entity).map(|state| state.0))
         .collect::<Vec<_>>();
 
@@ -98,24 +96,20 @@ fn compute_state(
     }
 }
 
-pub fn sync_all(
-    world: &mut world::World,
-    user_entities: &[entity::Entity],
-    session_entities: &[entity::Entity],
-) {
+pub fn sync_all(world: &mut world::World, user_entities: &[entity::Entity]) {
     for entity in user_entities.iter().copied() {
-        sync(world, session_entities, entity);
+        sync(world, entity);
     }
 }
 
-fn sync(world: &mut world::World, session_entities: &[entity::Entity], entity: entity::Entity) {
+fn sync(world: &mut world::World, entity: entity::Entity) {
     let Some(uid) = world.get::<ecs::Uid>(entity).map(|uid| uid.0) else {
         return;
     };
     let lingering = world
         .get::<ecs::Lingering>(entity)
         .is_some_and(|lingering| lingering.0);
-    let state = compute_state(world, session_entities, uid, lingering);
+    let state = compute_state(world, uid, lingering);
 
     let changed = world
         .get::<ecs::UserState>(entity)
@@ -198,13 +192,12 @@ impl<C: crate::cgroup::CgroupManager + 'static>
                     return;
                 }
 
-                let entities = session::entities_by_uid(&self.world, &self.session_entities, uid)
-                    .collect::<Vec<_>>();
+                let entities = session::entities_by_uid(&self.world, uid).collect::<Vec<_>>();
                 for entity in entities {
                     self.terminate_session(entity);
                 }
 
-                user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
+                user::sync_all(&mut self.world, &self.user_entities);
                 object.send_ok();
             }
             session_core_user::Event::Kill => {
@@ -219,13 +212,12 @@ impl<C: crate::cgroup::CgroupManager + 'static>
                     return;
                 }
 
-                let entities = session::entities_by_uid(&self.world, &self.session_entities, uid)
-                    .collect::<Vec<_>>();
+                let entities = session::entities_by_uid(&self.world, uid).collect::<Vec<_>>();
                 for entity in entities {
                     self.kill_session(entity);
                 }
 
-                user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
+                user::sync_all(&mut self.world, &self.user_entities);
                 object.send_ok();
             }
         }

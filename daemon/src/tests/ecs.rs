@@ -1,30 +1,32 @@
-use crate::ecs::{
-    self, ActiveState, CurrentVt, SeatClients, SeatKind, SeatMode, SeatName, Session, Uid,
-};
-use crate::session::SessionId;
 use crate::session_core_v1;
-use bevy_ecs::prelude::World;
+use crate::{ecs, session};
+use bevy_ecs::prelude::*;
 
 #[test]
 fn insert_seat_sets_expected_components() {
     let mut world = World::new();
-    let seat = ecs::insert_seat(&mut world, "seat0".to_string(), SeatKind::NonVtBound, 0);
+    let seat = ecs::insert_seat(
+        &mut world,
+        "seat0".to_string(),
+        ecs::SeatKind::NonVtBound,
+        0,
+    );
     assert_eq!(
-        world.get::<SeatName>(seat).map(|n| n.0.as_str()),
+        world.get::<ecs::SeatName>(seat).map(|n| n.0.as_str()),
         Some("seat0")
     );
     assert!(matches!(
-        world.get::<SeatMode>(seat).map(|m| m.0),
-        Some(SeatKind::NonVtBound)
+        world.get::<ecs::SeatMode>(seat).map(|m| m.0),
+        Some(ecs::SeatKind::NonVtBound)
     ));
-    assert_eq!(world.get::<CurrentVt>(seat).map(|v| v.0), Some(0));
-    assert!(world.get::<SeatClients>(seat).is_some());
+    assert_eq!(world.get::<ecs::CurrentVt>(seat).map(|v| v.0), Some(0));
+    assert!(world.get::<ecs::SeatClients>(seat).is_some());
 }
 
 #[test]
 fn insert_session_sets_expected_components() {
     let mut world = World::new();
-    let id = SessionId::from_raw(1);
+    let id = session::SessionId::from_raw(1);
     let entity = ecs::insert_session(
         &mut world,
         id,
@@ -38,11 +40,14 @@ fn insert_session_sets_expected_components() {
         session_core_v1::ActiveState::Active,
         None,
     );
-    assert_eq!(world.get::<Session>(entity).map(|s| s.0.as_raw()), Some(1));
-    assert_eq!(world.get::<Uid>(entity).map(|u| u.0), Some(1000));
+    assert_eq!(
+        world.get::<ecs::SessionId>(entity).map(|s| s.0.as_raw()),
+        Some(1)
+    );
+    assert_eq!(world.get::<ecs::Uid>(entity).map(|u| u.0), Some(1000));
     assert_eq!(world.get::<ecs::Vt>(entity).and_then(|v| v.0), Some(2));
     assert_eq!(
-        world.get::<ActiveState>(entity).map(|a| a.0),
+        world.get::<ecs::ActiveState>(entity).map(|a| a.0),
         Some(session_core_v1::ActiveState::Active)
     );
 }

@@ -48,7 +48,6 @@ pub fn add_object(
     world: &mut world::World,
     seat_entity: entity::Entity,
     object: session_core_seat::SessionCoreSeat,
-    session_entities: &[entity::Entity],
     management_access: &crate::Access,
 ) {
     if let Some(name) = world.get::<ecs::SeatName>(seat_entity) {
@@ -71,7 +70,6 @@ pub fn add_object(
         object.send_can_modify(u32::from(can_modify(
             world,
             seat_entity,
-            session_entities,
             client.creds(),
             management_access,
         )));
@@ -86,7 +84,6 @@ pub fn add_object(
 fn can_modify(
     world: &world::World,
     seat_entity: entity::Entity,
-    session_entities: &[entity::Entity],
     creds: &rustix::net::UCred,
     management_access: &crate::Access,
 ) -> bool {
@@ -98,7 +95,7 @@ fn can_modify(
         return false;
     };
 
-    session::entities_by_seat_name(world, session_entities, &name.0).all(|entity| {
+    session::entities_by_seat_name(world, &name.0).all(|entity| {
         world
             .get::<ecs::Uid>(entity)
             .is_some_and(|uid| uid.0 == creds.uid.as_raw())
@@ -177,7 +174,7 @@ pub fn set_next_session(
         .and_then(|clients| {
             clients.0.iter().copied().find(|candidate| {
                 world
-                    .get::<ecs::Session>(*candidate)
+                    .get::<ecs::SessionId>(*candidate)
                     .is_some_and(|candidate_session| candidate_session.0 == session)
             })
         })
@@ -211,7 +208,7 @@ pub fn remove_client(
     }
 
     let session_id = world
-        .get::<ecs::Session>(client_entity)
+        .get::<ecs::SessionId>(client_entity)
         .map(|session| session.0);
     let name = name(world, seat_entity)?;
 
@@ -334,11 +331,7 @@ pub fn handle_vt_signal(
     session_updates
 }
 
-pub fn sync_states(
-    world: &mut world::World,
-    seat_entities: &[entity::Entity],
-    session_entities: &[entity::Entity],
-) {
+pub fn sync_states(world: &mut world::World, seat_entities: &[entity::Entity]) {
     let active_vts = seat_entities
         .iter()
         .copied()
@@ -357,7 +350,7 @@ pub fn sync_states(
         return;
     }
 
-    let updates = session::entities(world, session_entities)
+    let updates = session::entities(world)
         .filter_map(|entity| {
             let active_state = world.get::<ecs::ActiveState>(entity)?.0;
             if matches!(
@@ -425,7 +418,7 @@ pub fn activate(world: &mut world::World, seat_entity: entity::Entity) -> anyhow
                     .map_or(0, |vt| vt.0);
                 let client = clients.iter().copied().find(|client| {
                     world
-                        .get::<ecs::Session>(*client)
+                        .get::<ecs::SessionId>(*client)
                         .is_some_and(|session| session.0.as_raw() == cur_vt)
                 });
                 if client.is_some() {
@@ -460,7 +453,7 @@ fn release_vt(
         .map_or(0, |vt| vt.0);
     let released_vt = world
         .get::<ecs::ActiveClient>(seat_entity)
-        .and_then(|client| world.get::<ecs::Session>(client.0))
+        .and_then(|client| world.get::<ecs::SessionId>(client.0))
         .map_or(cur_vt, |session| session.0.as_raw());
     log::debug!("Releasing VT");
 
@@ -684,9 +677,7 @@ impl<C: crate::cgroup::CgroupManager + 'static> hyprwire::Dispatch<seat_manager:
                 self.client_entities.push(client_entity);
 
                 if let Some(session_id) = opener_session_id {
-                    if let Some(entity) =
-                        session::entity(&self.world, &self.session_entities, session_id)
-                    {
+                    if let Some(entity) = session::entity(&self.world, session_id) {
                         if self
                             .world
                             .get::<ecs::SeatEntity>(entity)
@@ -840,8 +831,7 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_core_seat::S
                 };
 
                 let session_entities =
-                    session::entities_by_seat_name(&self.world, &self.session_entities, &name)
-                        .collect::<Vec<_>>();
+                    session::entities_by_seat_name(&self.world, &name).collect::<Vec<_>>();
 
                 log::info!(seat = name.as_str(), sessions = session_entities.len(); "seat terminate requested");
 
@@ -851,7 +841,6 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_core_seat::S
                 if !can_modify(
                     &self.world,
                     seat_entity,
-                    &self.session_entities,
                     client.creds(),
                     &self.management_access,
                 ) {
@@ -866,7 +855,7 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_core_seat::S
                     self.terminate_session(entity);
                 }
 
-                user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
+                user::sync_all(&mut self.world, &self.user_entities);
                 object.send_ok();
             }
             session_core_seat::Event::Destroy => {

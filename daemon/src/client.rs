@@ -26,7 +26,7 @@ pub fn session_id(
     client_entity: entity::Entity,
 ) -> anyhow::Result<session::SessionId> {
     world
-        .get::<ecs::Session>(client_entity)
+        .get::<ecs::SessionId>(client_entity)
         .map(|session| session.0)
         .ok_or_else(|| anyhow::anyhow!("client has no session id"))
 }
@@ -42,7 +42,7 @@ pub fn add_object(
         .and_then(|session| session.0)
         .or_else(|| {
             world
-                .get::<ecs::Session>(client_entity)
+                .get::<ecs::SessionId>(client_entity)
                 .map(|session| session.0)
         })
     {
@@ -278,7 +278,7 @@ pub fn add(
         log::error!("Could not add client: client is already a member of a seat");
         return Err(anyhow::anyhow!("client is already a member of a seat"));
     }
-    if world.get::<ecs::Session>(client_entity).is_some() {
+    if world.get::<ecs::SessionId>(client_entity).is_some() {
         log::error!("Could not add client: client cannot be reused");
         return Err(anyhow::anyhow!("client cannot be reused"));
     }
@@ -314,7 +314,7 @@ pub fn add(
                     .is_some_and(|clients| {
                         clients.0.iter().any(|client| {
                             world
-                                .get::<ecs::Session>(*client)
+                                .get::<ecs::SessionId>(*client)
                                 .is_some_and(|session| session.0.as_raw() == vt)
                         })
                     });
@@ -336,7 +336,7 @@ pub fn add(
                 .is_some_and(|clients| {
                     clients.0.iter().any(|client| {
                         world
-                            .get::<ecs::Session>(*client)
+                            .get::<ecs::SessionId>(*client)
                             .is_some_and(|session| session.0.as_raw() == next_session)
                     })
                 })
@@ -355,7 +355,7 @@ pub fn add(
     world.entity_mut(client_entity).insert((
         ecs::SeatName(name.clone()),
         ecs::SeatEntity(seat_entity),
-        ecs::Session(session_id),
+        ecs::SessionId(session_id),
         ecs::SeatState(seat::SeatState::Enabled),
     ));
     if let Some(mut clients) = world.get_mut::<ecs::SeatClients>(seat_entity) {

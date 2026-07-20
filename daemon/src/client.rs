@@ -1,5 +1,6 @@
-use crate::session_core_v1::session_core_seat_client;
+use crate::session_core_v1::{session_core_seat_client, session_core_seat_device};
 use crate::{cgroup, client, device, ecs, seat, seat_v1, session, session_core_v1};
+use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 
 pub const fn state_event(state: seat::SeatState) -> session_core_v1::SeatClientState {
@@ -78,52 +79,70 @@ pub fn add_object(
 
 pub fn entity_by_seat_object(
     world: &world::World,
-    entities: &[entity::Entity],
     object: &seat_v1::seat::Seat,
 ) -> Option<entity::Entity> {
-    entities.iter().copied().find(|entity| {
-        world
-            .get::<ecs::SeatObject>(*entity)
-            .is_some_and(|seat_object| seat_object.0 == *object)
-    })
+    let mut clients = world.try_query_filtered::<(Entity, &ecs::SeatObject), With<ecs::Client>>()?;
+    clients
+        .iter(world)
+        .find_map(|(entity, seat_object)| (seat_object.0 == *object).then_some(entity))
 }
 
 pub fn entity_by_core_object(
     world: &world::World,
-    entities: &[entity::Entity],
     object: &session_core_seat_client::SessionCoreSeatClient,
 ) -> Option<entity::Entity> {
-    entities.iter().copied().find(|entity| {
-        world
-            .get::<ecs::ClientObjects>(*entity)
-            .is_some_and(|objects| objects.0.iter().any(|candidate| candidate == object))
+    let mut clients =
+        world.try_query_filtered::<(Entity, &ecs::ClientObjects), With<ecs::Client>>()?;
+    clients.iter(world).find_map(|(entity, objects)| {
+        objects
+            .0
+            .iter()
+            .any(|candidate| candidate == object)
+            .then_some(entity)
     })
 }
 
-pub fn entity_by_pid(
-    world: &world::World,
-    entities: &[entity::Entity],
-    pid: u32,
-) -> Option<entity::Entity> {
-    entities.iter().copied().find(|entity| {
-        world
-            .get::<ecs::ClientPid>(*entity)
-            .is_some_and(|client_pid| client_pid.0 == pid)
-    })
+pub fn entity_by_pid(world: &world::World, pid: u32) -> Option<entity::Entity> {
+    let mut clients = world.try_query_filtered::<(Entity, &ecs::ClientPid), With<ecs::Client>>()?;
+    clients
+        .iter(world)
+        .find_map(|(entity, client_pid)| (client_pid.0 == pid).then_some(entity))
 }
 
 pub fn entity_by_device_object(
     world: &world::World,
-    entities: &[entity::Entity],
     object: &seat_v1::device::Device,
 ) -> Option<entity::Entity> {
-    entities.iter().copied().find(|entity| {
-        world.get::<ecs::Devices>(*entity).is_some_and(|devices| {
-            devices
-                .0
-                .iter()
-                .any(|device_entity| device::contains_object(world, *device_entity, object))
-        })
+    let mut clients = world.try_query_filtered::<(Entity, &ecs::Devices), With<ecs::Client>>()?;
+    clients.iter(world).find_map(|(entity, devices)| {
+        devices
+            .0
+            .iter()
+            .any(|device_entity| device::contains_object(world, *device_entity, object))
+            .then_some(entity)
+    })
+}
+
+pub fn entity_by_core_device_object(
+    world: &world::World,
+    object: &session_core_seat_device::SessionCoreSeatDevice,
+) -> Option<entity::Entity> {
+    let mut clients = world.try_query_filtered::<(Entity, &ecs::Devices), With<ecs::Client>>()?;
+    clients.iter(world).find_map(|(entity, devices)| {
+        devices
+            .0
+            .iter()
+            .any(|device_entity| {
+                world
+                    .get::<ecs::SeatDeviceObjects>(*device_entity)
+                    .is_some_and(|objects| {
+                        objects
+                            .0
+                            .iter()
+                            .any(|candidate| candidate.object == *object)
+                    })
+            })
+            .then_some(entity)
     })
 }
 
@@ -141,7 +160,7 @@ impl<C: cgroup::CgroupManager + 'static>
                 device_id,
             } => {
                 let Some(client_entity) =
-                    client::entity_by_core_object(&self.world, &self.client_entities, object)
+                    client::entity_by_core_object(&self.world, object)
                 else {
                     session_core_seat_device.send_destroyed();
                     return;
@@ -162,7 +181,7 @@ impl<C: cgroup::CgroupManager + 'static>
             }
             session_core_seat_client::Event::Destroy => {
                 if let Some(client_entity) =
-                    client::entity_by_core_object(&self.world, &self.client_entities, object)
+                    client::entity_by_core_object(&self.world, object)
                     && let Some(mut objects) =
                         self.world.get_mut::<ecs::ClientObjects>(client_entity)
                 {

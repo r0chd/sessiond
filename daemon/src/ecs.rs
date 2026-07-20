@@ -76,6 +76,7 @@ pub fn insert_client(
 ) -> Entity {
     world
         .spawn((
+            Client,
             SeatObject(object),
             ClientPid(pid),
             ClientSession(session),
@@ -122,6 +123,9 @@ pub fn insert_device(
 
 #[derive(Component)]
 pub struct Session;
+
+#[derive(Component)]
+pub struct Client;
 
 #[derive(Component)]
 pub struct Uid(pub u32);

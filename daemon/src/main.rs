@@ -97,9 +97,8 @@ impl Access {
 struct Sessiond<C: cgroup::CgroupManager + 'static> {
     next_session_id: session::SessionId,
     info_managers: Vec<session_core_manager::SessionCoreManager>,
-    session_manager_v1_envs: HashMap<session_manager::SessionManager, BTreeMap<String, String>>,
+    envs: HashMap<session_manager::SessionManager, BTreeMap<String, String>>,
     cgroup_manager: C,
-    user_entities: Vec<Entity>,
     seat_entities: Vec<Entity>,
     seat_access: Access,
     management_access: Access,
@@ -163,9 +162,8 @@ fn run<C: cgroup::CgroupManager + 'static>(
     let mut sessiond = Sessiond {
         next_session_id: session::SessionId::from_raw(1),
         info_managers: Vec::new(),
-        session_manager_v1_envs: HashMap::new(),
+        envs: HashMap::new(),
         cgroup_manager,
-        user_entities: Vec::new(),
         seat_entities: Vec::new(),
         seat_access: Access::new(
             resolve_user(&seat_config.user)?,
@@ -208,7 +206,7 @@ fn run<C: cgroup::CgroupManager + 'static>(
         .collect::<Vec<_>>();
 
     for (uid, runtime_dir) in lingering_users {
-        user::create(&mut sessiond.world, &mut sessiond.user_entities, uid, true);
+        user::create(&mut sessiond.world, uid, true);
         user::create_runtime_dir(uid, &runtime_dir);
         if let Err(e) = sessiond.cgroup_manager.ensure_user_cgroup(uid) {
             log::error!(
@@ -322,7 +320,7 @@ fn run<C: cgroup::CgroupManager + 'static>(
                 }
             }
 
-            user::sync_all(&mut state.world, &state.user_entities);
+            user::sync_all(&mut state.world);
         })?;
 
     event_loop.run(None, &mut sessiond, |_| {})?;

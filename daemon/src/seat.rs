@@ -847,7 +847,7 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_core_seat::S
                     self.terminate_session(entity);
                 }
 
-                user::sync_all(&mut self.world, &self.user_entities);
+                user::sync_all(&mut self.world);
                 object.send_ok();
             }
             session_core_seat::Event::Destroy => {

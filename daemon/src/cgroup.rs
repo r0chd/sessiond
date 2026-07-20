@@ -134,7 +134,7 @@ impl CgroupManager for SystemCgroupManager {
                     );
 
                     if !state.cgroup_manager.has_uid_sessions(uid)
-                        && !user::is_lingering(&state.world, &state.user_entities, uid)
+                        && !user::is_lingering(&state.world, uid)
                         && let Err(e) = state.cgroup_manager.remove_user_cgroup(uid)
                     {
                         log::error!(

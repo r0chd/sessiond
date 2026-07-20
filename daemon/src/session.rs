@@ -172,11 +172,11 @@ impl<C: crate::cgroup::CgroupManager + 'static>
         match event {
             session_core_session::Event::Terminate => {
                 self.terminate_session(entity);
-                user::sync_all(&mut self.world, &self.user_entities);
+                user::sync_all(&mut self.world);
             }
             session_core_session::Event::Kill => {
                 self.kill_session(entity);
-                user::sync_all(&mut self.world, &self.user_entities);
+                user::sync_all(&mut self.world);
             }
             session_core_session::Event::Lock => {
                 log::info!(session_id = session_id.as_raw(); "lock requested");
@@ -265,7 +265,7 @@ impl<C: crate::cgroup::CgroupManager + 'static> crate::Sessiond<C> {
             }
         }
         let _ = self.remove_session(session_id);
-        user::sync_all(&mut self.world, &self.user_entities);
+        user::sync_all(&mut self.world);
 
         self.cleanup_user_runtime_dir(uid);
     }
@@ -276,7 +276,7 @@ impl<C: crate::cgroup::CgroupManager + 'static> crate::Sessiond<C> {
         };
 
         if !self.cgroup_manager.has_uid_sessions(uid)
-            && !user::is_lingering(&self.world, &self.user_entities, uid)
+            && !user::is_lingering(&self.world, uid)
             && entities_by_uid(&self.world, uid).next().is_none()
             && let Err(e) = user::remove_runtime_dir(
                 &self
@@ -346,11 +346,10 @@ pub fn add_object(
 pub fn sync_vt_session_states(
     world: &mut world::World,
     seat_entities: &[entity::Entity],
-    user_entities: &[entity::Entity],
 ) {
     seat::refresh_current_vts(world, seat_entities);
     seat::sync_states(world, seat_entities);
-    user::sync_all(world, user_entities);
+    user::sync_all(world);
 }
 
 pub fn set_state(
@@ -388,7 +387,7 @@ impl<C: cgroup::CgroupManager + 'static> session_core_v1::SessionCoreV1Handler
     for crate::Sessiond<C>
 {
     fn bind(&mut self, object: session_core_manager::SessionCoreManager) {
-        sync_vt_session_states(&mut self.world, &self.seat_entities, &self.user_entities);
+        sync_vt_session_states(&mut self.world, &self.seat_entities);
 
         entities(&self.world)
             .filter_map(|entity| id(&self.world, entity))
@@ -481,7 +480,7 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager::Ses
 
                 #[cfg(feature = "consolekit")]
                 self.sync_consolekit_session(session_id, _session_entity);
-                user::sync_all(&mut self.world, &self.user_entities);
+                user::sync_all(&mut self.world);
             }
         }
     }
@@ -585,7 +584,7 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager_v1::
                     None,
                 );
 
-                if let Some(pending_env) = self.session_manager_v1_envs.remove(object)
+                if let Some(pending_env) = self.envs.remove(object)
                     && let Some(mut session_env) =
                         self.world.get_mut::<ecs::SessionEnv>(session_entity)
                 {
@@ -594,7 +593,7 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager_v1::
 
                 #[cfg(feature = "consolekit")]
                 self.sync_consolekit_session(session_id, session_entity);
-                user::sync_all(&mut self.world, &self.user_entities);
+                user::sync_all(&mut self.world);
 
                 object.send_session_id(session_id.as_raw());
                 object.send_seat(session_seat.as_deref().unwrap_or_default());
@@ -608,7 +607,7 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager_v1::
                 }
             }
             session_manager_v1::Event::Env { name, value } => {
-                self.session_manager_v1_envs
+                self.envs
                     .entry(object.clone())
                     .or_default()
                     .insert(name, value);
@@ -619,7 +618,7 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager_v1::
                 }
             }
             session_manager_v1::Event::Destroy => {
-                self.session_manager_v1_envs.remove(object);
+                self.envs.remove(object);
             }
         }
     }
@@ -716,7 +715,7 @@ impl<C: cgroup::CgroupManager + 'static>
                 set_state(&mut self.world, session_id, entity, active_state);
                 #[cfg(feature = "consolekit")]
                 self.sync_consolekit_session(session_id, entity);
-                user::sync_all(&mut self.world, &self.user_entities);
+                user::sync_all(&mut self.world);
 
                 object.send_session_id(session_id.as_raw());
                 object.send_seat(session_seat.as_deref().unwrap_or_default());
@@ -767,7 +766,7 @@ impl<C: cgroup::CgroupManager + 'static>
                 session_core_session,
                 session_id,
             } => {
-                sync_vt_session_states(&mut self.world, &self.seat_entities, &self.user_entities);
+                sync_vt_session_states(&mut self.world, &self.seat_entities);
 
                 let session_id = SessionId::from_raw(session_id);
                 if let Some(entity) = entity(&self.world, session_id) {
@@ -782,7 +781,7 @@ impl<C: cgroup::CgroupManager + 'static>
                 session_core_session,
                 pid,
             } => {
-                sync_vt_session_states(&mut self.world, &self.seat_entities, &self.user_entities);
+                sync_vt_session_states(&mut self.world, &self.seat_entities);
 
                 let Ok(Some(session_id)) = self.cgroup_manager.find_session_by_pid(pid) else {
                     log::warn!(pid; "get_session_by_pid: no session found for pid");
@@ -802,7 +801,7 @@ impl<C: cgroup::CgroupManager + 'static>
                 session_core_session,
                 uid,
             } => {
-                sync_vt_session_states(&mut self.world, &self.seat_entities, &self.user_entities);
+                sync_vt_session_states(&mut self.world, &self.seat_entities);
 
                 if let Some(entity) = entity_by_uid(&self.world, uid)
                     && let Some(session_id) = id(&self.world, entity)
@@ -818,8 +817,8 @@ impl<C: cgroup::CgroupManager + 'static>
                 session_core_user,
                 uid,
             } => {
-                let entity = user::entity_by_uid(&self.world, &self.user_entities, uid)
-                    .or_else(|| user::create(&mut self.world, &mut self.user_entities, uid, false));
+                let entity = user::entity_by_uid(&self.world, uid)
+                    .or_else(|| user::create(&mut self.world, uid, false));
                 let Some(entity) = entity else {
                     log::warn!(uid; "get_user requested for unknown user");
                     session_core_user.send_not_found();

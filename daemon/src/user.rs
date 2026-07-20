@@ -1,4 +1,5 @@
 use crate::{ecs, session, session_core_user, session_core_v1, user};
+use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 use std::{fs, io};
 
@@ -22,47 +23,37 @@ pub fn remove_runtime_dir(path: &str) -> io::Result<()> {
     }
 }
 
-pub fn entity_by_uid(
-    world: &world::World,
-    entities: &[entity::Entity],
-    uid: u32,
-) -> Option<entity::Entity> {
-    entities.iter().copied().find(|entity| {
-        world
-            .get::<ecs::Uid>(*entity)
-            .is_some_and(|entity_uid| entity_uid.0 == uid)
-    })
+pub fn entity_by_uid(world: &world::World, uid: u32) -> Option<entity::Entity> {
+    let mut users = world.try_query_filtered::<(Entity, &ecs::Uid), With<ecs::User>>()?;
+    users
+        .iter(world)
+        .find_map(|(entity, entity_uid)| (entity_uid.0 == uid).then_some(entity))
 }
 
 pub fn entity_by_object(
     world: &world::World,
-    entities: &[entity::Entity],
     object: &session_core_user::SessionCoreUser,
 ) -> Option<entity::Entity> {
-    entities.iter().copied().find(|entity| {
-        world
-            .get::<ecs::UserObjects>(*entity)
-            .is_some_and(|objects| objects.0.iter().any(|candidate| candidate == object))
+    let mut users = world.try_query_filtered::<(Entity, &ecs::UserObjects), With<ecs::User>>()?;
+    users.iter(world).find_map(|(entity, objects)| {
+        objects
+            .0
+            .iter()
+            .any(|candidate| candidate == object)
+            .then_some(entity)
     })
 }
 
-pub fn create(
-    world: &mut world::World,
-    entities: &mut Vec<entity::Entity>,
-    uid: u32,
-    lingering: bool,
-) -> Option<entity::Entity> {
+pub fn create(world: &mut world::World, uid: u32, lingering: bool) -> Option<entity::Entity> {
     let user = uzers::get_user_by_uid(uid)?;
     let state = compute_state(world, uid, lingering);
-    let entity = ecs::insert_user(
+    Some(ecs::insert_user(
         world,
         uid,
         user.name().to_string_lossy().into_owned(),
         lingering,
         state,
-    );
-    entities.push(entity);
-    Some(entity)
+    ))
 }
 
 fn compute_state(
@@ -96,8 +87,13 @@ fn compute_state(
     }
 }
 
-pub fn sync_all(world: &mut world::World, user_entities: &[entity::Entity]) {
-    for entity in user_entities.iter().copied() {
+pub fn sync_all(world: &mut world::World) {
+    let Some(mut users) = world.try_query_filtered::<Entity, With<ecs::User>>() else {
+        return;
+    };
+    let users = users.iter(world).collect::<Vec<_>>();
+
+    for entity in users {
         sync(world, entity);
     }
 }
@@ -167,7 +163,7 @@ impl<C: crate::cgroup::CgroupManager + 'static>
         object: &session_core_user::SessionCoreUser,
         event: <session_core_user::SessionCoreUser as hyprwire::Object>::Event<'_>,
     ) {
-        let Some(entity) = entity_by_object(&self.world, &self.user_entities, object) else {
+        let Some(entity) = entity_by_object(&self.world, object) else {
             return;
         };
         let Some(client) = object.client() else {
@@ -197,7 +193,7 @@ impl<C: crate::cgroup::CgroupManager + 'static>
                     self.terminate_session(entity);
                 }
 
-                user::sync_all(&mut self.world, &self.user_entities);
+                user::sync_all(&mut self.world);
                 object.send_ok();
             }
             session_core_user::Event::Kill => {
@@ -217,15 +213,15 @@ impl<C: crate::cgroup::CgroupManager + 'static>
                     self.kill_session(entity);
                 }
 
-                user::sync_all(&mut self.world, &self.user_entities);
+                user::sync_all(&mut self.world);
                 object.send_ok();
             }
         }
     }
 }
 
-pub fn is_lingering(world: &world::World, user_entities: &[entity::Entity], uid: u32) -> bool {
-    entity_by_uid(world, user_entities, uid)
+pub fn is_lingering(world: &world::World, uid: u32) -> bool {
+    entity_by_uid(world, uid)
         .and_then(|entity| world.get::<ecs::Lingering>(entity))
         .is_some_and(|lingering| lingering.0)
 }

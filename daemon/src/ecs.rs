@@ -91,6 +91,7 @@ pub fn insert_client(
 pub fn insert_seat(world: &mut World, name: String, mode: SeatKind, current_vt: u32) -> Entity {
     world
         .spawn((
+            Seat,
             SeatName(name),
             SeatMode(mode),
             CurrentVt(current_vt),
@@ -130,6 +131,9 @@ pub struct Client;
 
 #[derive(Component)]
 pub struct User;
+
+#[derive(Component)]
+pub struct Seat;
 
 #[derive(Component)]
 pub struct Uid(pub u32);

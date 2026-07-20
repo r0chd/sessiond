@@ -1,6 +1,7 @@
 use crate::seat_v1::{seat, seat_manager};
 use crate::session_core_v1::session_core_seat;
 use crate::{cgroup, client, device, ecs, seat_v1, session, session_core_v1, terminal, user};
+use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 use calloop::signals;
 use rustix::io;
@@ -15,26 +16,33 @@ pub enum SeatState {
 
 pub fn entity_by_core_object(
     world: &world::World,
-    entities: &[entity::Entity],
     object: &session_core_seat::SessionCoreSeat,
 ) -> Option<entity::Entity> {
-    entities.iter().copied().find(|entity| {
+    entities(world).find(|entity| {
         world
             .get::<ecs::SeatObjects>(*entity)
             .is_some_and(|objects| objects.0.iter().any(|candidate| candidate == object))
     })
 }
 
-pub fn entity_by_name(
-    world: &world::World,
-    entities: &[entity::Entity],
-    name: &str,
-) -> Option<entity::Entity> {
-    entities.iter().copied().find(|entity| {
+pub fn entity_by_name(world: &world::World, name: &str) -> Option<entity::Entity> {
+    entities(world).find(|entity| {
         world
             .get::<ecs::SeatName>(*entity)
             .is_some_and(|seat_name| seat_name.0 == name)
     })
+}
+
+pub fn entities(world: &world::World) -> impl Iterator<Item = entity::Entity> + use<> {
+    let Some(mut seats) = world.try_query_filtered::<Entity, With<ecs::Seat>>() else {
+        return Vec::new().into_iter();
+    };
+
+    seats.iter(world).collect::<Vec<_>>().into_iter()
+}
+
+pub fn first(world: &world::World) -> Option<entity::Entity> {
+    entities(world).next()
 }
 
 const fn mode_event(mode: ecs::SeatKind) -> session_core_v1::SeatMode {
@@ -272,35 +280,38 @@ pub fn remove_client(
     Ok(())
 }
 
-pub fn refresh_current_vts(world: &mut world::World, seat_entities: &[entity::Entity]) {
-    for seat_entity in seat_entities.iter().copied() {
-        if !is_vt_bound(world, seat_entity) {
-            continue;
-        }
+pub fn refresh_current_vt(world: &mut world::World, seat_entity: entity::Entity) {
+    if !is_vt_bound(world, seat_entity) {
+        return;
+    }
 
-        match current_vt() {
-            Ok(vt) => {
-                let changed = world
-                    .get::<ecs::CurrentVt>(seat_entity)
-                    .is_none_or(|current| current.0 != vt);
-                world.entity_mut(seat_entity).insert(ecs::CurrentVt(vt));
-                if changed {
-                    notify_current_vt(world, seat_entity);
-                }
+    match current_vt() {
+        Ok(vt) => {
+            let changed = world
+                .get::<ecs::CurrentVt>(seat_entity)
+                .is_none_or(|current| current.0 != vt);
+            world.entity_mut(seat_entity).insert(ecs::CurrentVt(vt));
+            if changed {
+                notify_current_vt(world, seat_entity);
             }
-            Err(err) => log::error!("Could not query active VT: {err}"),
         }
+        Err(err) => log::error!("Could not query active VT: {err}"),
+    }
+}
+
+pub fn refresh_current_vts(world: &mut world::World) {
+    for seat_entity in entities(world) {
+        refresh_current_vt(world, seat_entity);
     }
 }
 
 pub fn handle_vt_signal(
     world: &mut world::World,
-    seat_entities: &[entity::Entity],
     signal: signals::Signal,
 ) -> Vec<(u32, session_core_v1::ActiveState)> {
     let mut session_updates = Vec::new();
 
-    for seat_entity in seat_entities.iter().copied() {
+    for seat_entity in entities(world) {
         if !is_vt_bound(world, seat_entity) {
             continue;
         }
@@ -331,10 +342,8 @@ pub fn handle_vt_signal(
     session_updates
 }
 
-pub fn sync_states(world: &mut world::World, seat_entities: &[entity::Entity]) {
-    let active_vts = seat_entities
-        .iter()
-        .copied()
+pub fn sync_states(world: &mut world::World) {
+    let active_vts = entities(world)
         .filter_map(|seat_entity| {
             let mode = world.get::<ecs::SeatMode>(seat_entity)?;
             if mode.0 != ecs::SeatKind::VtBound {
@@ -447,7 +456,7 @@ fn release_vt(
     world: &mut world::World,
     seat_entity: entity::Entity,
 ) -> anyhow::Result<Option<u32>> {
-    refresh_current_vts(world, &[seat_entity]);
+    refresh_current_vt(world, seat_entity);
     let cur_vt = world
         .get::<ecs::CurrentVt>(seat_entity)
         .map_or(0, |vt| vt.0);
@@ -644,7 +653,7 @@ impl<C: crate::cgroup::CgroupManager + 'static> hyprwire::Dispatch<seat_manager:
                     }
                 };
 
-                let Some(seat_entity) = self.seat_entities.first().copied() else {
+                let Some(seat_entity) = first(&self.world) else {
                     log::error!("No seats configured");
                     seat.send_disabled();
                     return;
@@ -780,9 +789,7 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_core_seat::S
                 session_core_seat_client,
                 pid,
             } => {
-                let Some(seat_entity) =
-                    entity_by_core_object(&self.world, &self.seat_entities, object)
-                else {
+                let Some(seat_entity) = entity_by_core_object(&self.world, object) else {
                     session_core_seat_client.send_destroyed();
                     return;
                 };
@@ -807,9 +814,7 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_core_seat::S
                 );
             }
             session_core_seat::Event::Terminate => {
-                let Some(seat_entity) =
-                    entity_by_core_object(&self.world, &self.seat_entities, object)
-                else {
+                let Some(seat_entity) = entity_by_core_object(&self.world, object) else {
                     object.send_destroyed();
                     return;
                 };
@@ -851,8 +856,7 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_core_seat::S
                 object.send_ok();
             }
             session_core_seat::Event::Destroy => {
-                if let Some(seat_entity) =
-                    entity_by_core_object(&self.world, &self.seat_entities, object)
+                if let Some(seat_entity) = entity_by_core_object(&self.world, object)
                     && let Some(mut objects) = self.world.get_mut::<ecs::SeatObjects>(seat_entity)
                 {
                     objects.0.retain(|candidate| candidate != object);

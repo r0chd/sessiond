@@ -1,7 +1,7 @@
 use crate::seat_v1::device;
 use crate::session_core_v1;
 use crate::session_core_v1::session_core_seat_device;
-use crate::{cgroup, client, ecs, seat, seat_v1};
+use crate::{client, ecs, seat, seat_v1};
 use bevy_ecs::{entity, world};
 use rustix::{io, ioctl};
 use std::ffi::c_int;
@@ -11,9 +11,7 @@ use std::{fs, path};
 
 const MAX_SEAT_DEVICES: u8 = 128;
 
-impl<C: crate::cgroup::CgroupManager + 'static> hyprwire::Dispatch<device::Device>
-    for crate::Sessiond<C>
-{
+impl hyprwire::Dispatch<device::Device> for crate::Sessiond {
     fn event(
         &mut self,
         object: &device::Device,
@@ -31,9 +29,7 @@ impl<C: crate::cgroup::CgroupManager + 'static> hyprwire::Dispatch<device::Devic
     }
 }
 
-impl<C: cgroup::CgroupManager + 'static>
-    hyprwire::Dispatch<session_core_seat_device::SessionCoreSeatDevice> for crate::Sessiond<C>
-{
+impl hyprwire::Dispatch<session_core_seat_device::SessionCoreSeatDevice> for crate::Sessiond {
     fn event(
         &mut self,
         object: &session_core_seat_device::SessionCoreSeatDevice,

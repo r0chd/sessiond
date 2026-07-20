@@ -48,11 +48,6 @@ use std::{env, fs, path};
 struct Args {
     #[arg(long, default_value = "/run/sessiond.sock")]
     socket_path: path::PathBuf,
-    #[arg(
-        long,
-        help = "Disable cgroup management (useful for running without root)"
-    )]
-    no_cgroup: bool,
     #[arg(short, long, help = "Path to configuration file")]
     config: Option<path::PathBuf>,
 }
@@ -94,11 +89,11 @@ impl Access {
     }
 }
 
-struct Sessiond<C: cgroup::CgroupManager + 'static> {
+struct Sessiond {
     next_session_id: session::SessionId,
     info_managers: Vec<session_core_manager::SessionCoreManager>,
     envs: HashMap<session_manager::SessionManager, BTreeMap<String, String>>,
-    cgroup_manager: C,
+    cgroup_manager: cgroup::CgroupManager,
     seat_access: Access,
     management_access: Access,
     settings: config::Config,
@@ -109,7 +104,7 @@ struct Sessiond<C: cgroup::CgroupManager + 'static> {
     world: World,
 }
 
-impl<C: cgroup::CgroupManager + 'static> Sessiond<C> {
+impl Sessiond {
     fn remove_session(&mut self, session_id: session::SessionId) -> Option<Entity> {
         let entity = session::entity(&self.world, session_id)?;
         self.world.despawn(entity);
@@ -131,10 +126,7 @@ struct DaemonConfig {
     socket_path: path::PathBuf,
 }
 
-fn run<C: cgroup::CgroupManager + 'static>(
-    config: DaemonConfig,
-    make_cgroup: impl FnOnce(calloop::LoopHandle<'static, Sessiond<C>>) -> anyhow::Result<C>,
-) -> anyhow::Result<()> {
+fn run(config: DaemonConfig) -> anyhow::Result<()> {
     let mut event_loop = calloop::EventLoop::try_new()?;
     let loop_signal = event_loop.get_signal();
     let signals = signals::Signals::new(&[
@@ -143,8 +135,6 @@ fn run<C: cgroup::CgroupManager + 'static>(
         signals::Signal::SIGTERM,
         signals::Signal::SIGINT,
     ])?;
-
-    let cgroup_manager = make_cgroup(event_loop.handle())?;
 
     anyhow::ensure!(
         !config.settings.seats.is_empty(),
@@ -162,7 +152,7 @@ fn run<C: cgroup::CgroupManager + 'static>(
         next_session_id: session::SessionId::from_raw(1),
         info_managers: Vec::new(),
         envs: HashMap::new(),
-        cgroup_manager,
+        cgroup_manager: cgroup::CgroupManager::new(event_loop.handle())?,
         seat_access: Access::new(
             resolve_user(&seat_config.user)?,
             resolve_group(&seat_config.group)?,
@@ -350,11 +340,7 @@ fn main() -> anyhow::Result<()> {
         socket_path: args.socket_path,
     };
 
-    if args.no_cgroup {
-        run(config, |_| Ok(cgroup::DummyCgroupManager))
-    } else {
-        run(config, cgroup::SystemCgroupManager::new)
-    }
+    run(config)
 }
 
 fn resolve_user(user: &str) -> anyhow::Result<process::Uid> {

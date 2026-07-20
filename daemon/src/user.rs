@@ -56,11 +56,7 @@ pub fn create(world: &mut world::World, uid: u32, lingering: bool) -> Option<ent
     ))
 }
 
-fn compute_state(
-    world: &world::World,
-    uid: u32,
-    lingering: bool,
-) -> session_core_v1::UserState {
+fn compute_state(world: &world::World, uid: u32, lingering: bool) -> session_core_v1::UserState {
     let states = session::entities_by_uid(world, uid)
         .filter_map(|entity| world.get::<ecs::ActiveState>(entity).map(|state| state.0))
         .collect::<Vec<_>>();
@@ -155,9 +151,7 @@ pub fn add_object(
     }
 }
 
-impl<C: crate::cgroup::CgroupManager + 'static>
-    hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond<C>
-{
+impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond {
     fn event(
         &mut self,
         object: &session_core_user::SessionCoreUser,

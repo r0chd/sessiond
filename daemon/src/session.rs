@@ -4,6 +4,7 @@ use crate::session_management_v2::{session_management_session, session_manager};
 use crate::{
     cgroup, config, ecs, seat, session_core_v1, session_management_v1, session_management_v2, user,
 };
+use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 use rustix::system;
 use std::collections::BTreeMap;
@@ -26,95 +27,87 @@ impl SessionId {
     }
 }
 
-pub fn entities<'a>(
-    world: &'a world::World,
-    entities: &'a [entity::Entity],
-) -> impl Iterator<Item = entity::Entity> + 'a {
-    entities
-        .iter()
-        .copied()
-        .filter(|entity| world.get::<ecs::Session>(*entity).is_some())
+pub fn entities(world: &world::World) -> impl Iterator<Item = entity::Entity> {
+    let Some(mut sessions) = world.try_query_filtered::<Entity, With<ecs::Session>>() else {
+        return Vec::new().into_iter();
+    };
+
+    sessions.iter(world).collect::<Vec<_>>().into_iter()
 }
 
 pub fn id(world: &world::World, entity: entity::Entity) -> Option<SessionId> {
-    world.get::<ecs::Session>(entity).map(|session| session.0)
+    world.get::<ecs::SessionId>(entity).map(|session| session.0)
 }
 
-pub fn entity(
-    world: &world::World,
-    entities: &[entity::Entity],
-    session_id: SessionId,
-) -> Option<entity::Entity> {
-    entities.iter().copied().find(|entity| {
-        world
-            .get::<ecs::Session>(*entity)
-            .is_some_and(|session| session.0 == session_id)
-    })
+pub fn entity(world: &world::World, session_id: SessionId) -> Option<entity::Entity> {
+    let mut sessions =
+        world.try_query_filtered::<(Entity, &ecs::SessionId), With<ecs::Session>>()?;
+    sessions
+        .iter(world)
+        .find_map(|(entity, id)| (id.0 == session_id).then_some(entity))
 }
 
-pub fn entity_by_uid(
-    world: &world::World,
-    entities: &[entity::Entity],
-    uid: u32,
-) -> Option<entity::Entity> {
-    self::entities(world, entities).find(|entity| {
-        world
-            .get::<ecs::Uid>(*entity)
-            .is_some_and(|session_uid| session_uid.0 == uid)
-    })
+pub fn entity_by_uid(world: &world::World, uid: u32) -> Option<entity::Entity> {
+    let mut sessions = world.try_query_filtered::<(Entity, &ecs::Uid), With<ecs::Session>>()?;
+    sessions
+        .iter(world)
+        .find_map(|(entity, session_uid)| (session_uid.0 == uid).then_some(entity))
 }
 
-pub fn entities_by_uid<'a>(
-    world: &'a world::World,
-    entities: &'a [entity::Entity],
-    uid: u32,
-) -> impl Iterator<Item = entity::Entity> + 'a {
-    self::entities(world, entities).filter(move |entity| {
-        world
-            .get::<ecs::Uid>(*entity)
-            .is_some_and(|session_uid| session_uid.0 == uid)
-    })
+pub fn entities_by_uid(world: &world::World, uid: u32) -> impl Iterator<Item = entity::Entity> {
+    let Some(mut sessions) = world.try_query_filtered::<(Entity, &ecs::Uid), With<ecs::Session>>()
+    else {
+        return Vec::new().into_iter();
+    };
+
+    sessions
+        .iter(world)
+        .filter_map(move |(entity, session_uid)| (session_uid.0 == uid).then_some(entity))
+        .collect::<Vec<_>>()
+        .into_iter()
 }
 
 pub fn entities_by_seat_name<'a>(
     world: &'a world::World,
-    entities: &'a [entity::Entity],
     name: &'a str,
 ) -> impl Iterator<Item = entity::Entity> + 'a {
-    self::entities(world, entities).filter(move |entity| {
-        world
-            .get::<ecs::SeatName>(*entity)
-            .is_some_and(|session_seat| session_seat.0 == name)
-    })
+    let Some(mut sessions) =
+        world.try_query_filtered::<(Entity, &ecs::SeatName), With<ecs::Session>>()
+    else {
+        return Vec::new().into_iter();
+    };
+
+    sessions
+        .iter(world)
+        .filter_map(move |(entity, session_seat)| (session_seat.0 == name).then_some(entity))
+        .collect::<Vec<_>>()
+        .into_iter()
 }
 
 pub fn entity_by_object(
     world: &world::World,
-    entities: &[entity::Entity],
     object: &session_core_session::SessionCoreSession,
 ) -> Option<entity::Entity> {
-    self::entities(world, entities).find(|entity| {
-        world
-            .get::<ecs::SessionObjects>(*entity)
-            .is_some_and(|objects| {
-                objects
-                    .0
-                    .iter()
-                    .any(|session_object| session_object == object)
-            })
+    let mut sessions =
+        world.try_query_filtered::<(Entity, &ecs::SessionObjects), With<ecs::Session>>()?;
+    sessions.iter(world).find_map(|(entity, objects)| {
+        objects
+            .0
+            .iter()
+            .any(|session_object| session_object == object)
+            .then_some(entity)
     })
 }
 
 pub fn entity_by_management_object(
     world: &world::World,
-    entities: &[entity::Entity],
     object: &session_management_session::SessionManagementSession,
 ) -> Option<entity::Entity> {
-    self::entities(world, entities).find(|entity| {
-        world
-            .get::<ecs::SessionObject>(*entity)
-            .is_some_and(|session_object| session_object.0 == *object)
-    })
+    let mut sessions =
+        world.try_query_filtered::<(Entity, &ecs::SessionObject), With<ecs::Session>>()?;
+    sessions
+        .iter(world)
+        .find_map(|(entity, session_object)| (session_object.0 == *object).then_some(entity))
 }
 
 pub fn can_modify(
@@ -128,12 +121,11 @@ pub fn can_modify(
 
 pub fn session_envs_by_uid(
     world: &world::World,
-    entities: &[entity::Entity],
     uid: u32,
     exclude: Option<entity::Entity>,
 ) -> BTreeMap<String, String> {
     let mut env = BTreeMap::new();
-    for entity in entities_by_uid(world, entities, uid) {
+    for entity in entities_by_uid(world, uid) {
         if Some(entity) == exclude {
             continue;
         }
@@ -152,7 +144,7 @@ impl<C: crate::cgroup::CgroupManager + 'static>
         object: &session_core_session::SessionCoreSession,
         event: <session_core_session::SessionCoreSession as hyprwire::Object>::Event<'_>,
     ) {
-        let Some(entity) = entity_by_object(&self.world, &self.session_entities, object) else {
+        let Some(entity) = entity_by_object(&self.world, object) else {
             return;
         };
         let Some(session_id) = id(&self.world, entity) else {
@@ -180,11 +172,11 @@ impl<C: crate::cgroup::CgroupManager + 'static>
         match event {
             session_core_session::Event::Terminate => {
                 self.terminate_session(entity);
-                user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
+                user::sync_all(&mut self.world, &self.user_entities);
             }
             session_core_session::Event::Kill => {
                 self.kill_session(entity);
-                user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
+                user::sync_all(&mut self.world, &self.user_entities);
             }
             session_core_session::Event::Lock => {
                 log::info!(session_id = session_id.as_raw(); "lock requested");
@@ -255,7 +247,7 @@ impl<C: crate::cgroup::CgroupManager + 'static> crate::Sessiond<C> {
     }
 
     fn finish_session_destroy(&mut self, session_id: SessionId) {
-        let Some(entity) = entity(&self.world, &self.session_entities, session_id) else {
+        let Some(entity) = entity(&self.world, session_id) else {
             log::warn!(session_id = session_id.as_raw(); "destroy requested for unknown session");
             return;
         };
@@ -273,7 +265,7 @@ impl<C: crate::cgroup::CgroupManager + 'static> crate::Sessiond<C> {
             }
         }
         let _ = self.remove_session(session_id);
-        user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
+        user::sync_all(&mut self.world, &self.user_entities);
 
         self.cleanup_user_runtime_dir(uid);
     }
@@ -285,9 +277,7 @@ impl<C: crate::cgroup::CgroupManager + 'static> crate::Sessiond<C> {
 
         if !self.cgroup_manager.has_uid_sessions(uid)
             && !user::is_lingering(&self.world, &self.user_entities, uid)
-            && entities_by_uid(&self.world, &self.session_entities, uid)
-                .next()
-                .is_none()
+            && entities_by_uid(&self.world, uid).next().is_none()
             && let Err(e) = user::remove_runtime_dir(
                 &self
                     .user_config(&user.name().to_string_lossy())
@@ -356,12 +346,11 @@ pub fn add_object(
 pub fn sync_vt_session_states(
     world: &mut world::World,
     seat_entities: &[entity::Entity],
-    session_entities: &[entity::Entity],
     user_entities: &[entity::Entity],
 ) {
     seat::refresh_current_vts(world, seat_entities);
-    seat::sync_states(world, seat_entities, session_entities);
-    user::sync_all(world, user_entities, session_entities);
+    seat::sync_states(world, seat_entities);
+    user::sync_all(world, user_entities);
 }
 
 pub fn set_state(
@@ -399,14 +388,9 @@ impl<C: cgroup::CgroupManager + 'static> session_core_v1::SessionCoreV1Handler
     for crate::Sessiond<C>
 {
     fn bind(&mut self, object: session_core_manager::SessionCoreManager) {
-        sync_vt_session_states(
-            &mut self.world,
-            &self.seat_entities,
-            &self.session_entities,
-            &self.user_entities,
-        );
+        sync_vt_session_states(&mut self.world, &self.seat_entities, &self.user_entities);
 
-        entities(&self.world, &self.session_entities)
+        entities(&self.world)
             .filter_map(|entity| id(&self.world, entity))
             .for_each(|session_id| {
                 object.send_session_added(session_id.as_raw());
@@ -424,7 +408,7 @@ impl<C: cgroup::CgroupManager + 'static> crate::Sessiond<C> {
     // if no other sessions are active or user has root permissions
     fn can_control_power(&self, creds: &rustix::net::UCred) -> bool {
         self.management_access.allows(creds)
-            || entities(&self.world, &self.session_entities)
+            || entities(&self.world)
                 .filter_map(|entity| self.world.get::<ecs::Uid>(entity))
                 .all(|session| session.0 == creds.uid.as_raw())
     }
@@ -481,7 +465,7 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager::Ses
 
                 user::create_runtime_dir(uid, &self.user_config(&username).runtime_dir(uid));
 
-                let session_entity = ecs::insert_session(
+                let _session_entity = ecs::insert_session(
                     &mut self.world,
                     session_id,
                     uid,
@@ -495,10 +479,9 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager::Ses
                     Some(session_management_session),
                 );
 
-                self.session_entities.push(session_entity);
                 #[cfg(feature = "consolekit")]
-                self.sync_consolekit_session(session_id, session_entity);
-                user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
+                self.sync_consolekit_session(session_id, _session_entity);
+                user::sync_all(&mut self.world, &self.user_entities);
             }
         }
     }
@@ -586,12 +569,7 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager_v1::
                     session_id.as_raw(),
                     session_seat.as_deref(),
                 );
-                env.extend(session_envs_by_uid(
-                    &self.world,
-                    &self.session_entities,
-                    uid,
-                    None,
-                ));
+                env.extend(session_envs_by_uid(&self.world, uid, None));
 
                 let session_entity = ecs::insert_session(
                     &mut self.world,
@@ -614,10 +592,9 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager_v1::
                     session_env.0 = pending_env;
                 }
 
-                self.session_entities.push(session_entity);
                 #[cfg(feature = "consolekit")]
                 self.sync_consolekit_session(session_id, session_entity);
-                user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
+                user::sync_all(&mut self.world, &self.user_entities);
 
                 object.send_session_id(session_id.as_raw());
                 object.send_seat(session_seat.as_deref().unwrap_or_default());
@@ -637,11 +614,7 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager_v1::
                     .insert(name, value);
             }
             session_manager_v1::Event::DestroySession { session_id } => {
-                if let Some(entity) = entity(
-                    &self.world,
-                    &self.session_entities,
-                    SessionId::from_raw(session_id),
-                ) {
+                if let Some(entity) = entity(&self.world, SessionId::from_raw(session_id)) {
                     self.terminate_session(entity);
                 }
             }
@@ -663,8 +636,7 @@ impl<C: cgroup::CgroupManager + 'static>
             '_,
         >,
     ) {
-        let Some(entity) = entity_by_management_object(&self.world, &self.session_entities, object)
-        else {
+        let Some(entity) = entity_by_management_object(&self.world, object) else {
             return;
         };
         let Some(session_id) = id(&self.world, entity) else {
@@ -744,7 +716,7 @@ impl<C: cgroup::CgroupManager + 'static>
                 set_state(&mut self.world, session_id, entity, active_state);
                 #[cfg(feature = "consolekit")]
                 self.sync_consolekit_session(session_id, entity);
-                user::sync_all(&mut self.world, &self.user_entities, &self.session_entities);
+                user::sync_all(&mut self.world, &self.user_entities);
 
                 object.send_session_id(session_id.as_raw());
                 object.send_seat(session_seat.as_deref().unwrap_or_default());
@@ -754,12 +726,7 @@ impl<C: cgroup::CgroupManager + 'static>
                         session_id.as_raw(),
                         session_seat.as_deref(),
                     );
-                    env.extend(session_envs_by_uid(
-                        &self.world,
-                        &self.session_entities,
-                        uid,
-                        Some(entity),
-                    ));
+                    env.extend(session_envs_by_uid(&self.world, uid, Some(entity)));
 
                     for (name, value) in env {
                         object.send_env(name.as_str(), value.as_str());
@@ -800,15 +767,10 @@ impl<C: cgroup::CgroupManager + 'static>
                 session_core_session,
                 session_id,
             } => {
-                sync_vt_session_states(
-                    &mut self.world,
-                    &self.seat_entities,
-                    &self.session_entities,
-                    &self.user_entities,
-                );
+                sync_vt_session_states(&mut self.world, &self.seat_entities, &self.user_entities);
 
                 let session_id = SessionId::from_raw(session_id);
-                if let Some(entity) = entity(&self.world, &self.session_entities, session_id) {
+                if let Some(entity) = entity(&self.world, session_id) {
                     add_object(&mut self.world, session_id, entity, session_core_session);
                     return;
                 }
@@ -820,12 +782,7 @@ impl<C: cgroup::CgroupManager + 'static>
                 session_core_session,
                 pid,
             } => {
-                sync_vt_session_states(
-                    &mut self.world,
-                    &self.seat_entities,
-                    &self.session_entities,
-                    &self.user_entities,
-                );
+                sync_vt_session_states(&mut self.world, &self.seat_entities, &self.user_entities);
 
                 let Ok(Some(session_id)) = self.cgroup_manager.find_session_by_pid(pid) else {
                     log::warn!(pid; "get_session_by_pid: no session found for pid");
@@ -833,7 +790,7 @@ impl<C: cgroup::CgroupManager + 'static>
                     return;
                 };
 
-                if let Some(entity) = entity(&self.world, &self.session_entities, session_id) {
+                if let Some(entity) = entity(&self.world, session_id) {
                     add_object(&mut self.world, session_id, entity, session_core_session);
                     return;
                 }
@@ -845,14 +802,9 @@ impl<C: cgroup::CgroupManager + 'static>
                 session_core_session,
                 uid,
             } => {
-                sync_vt_session_states(
-                    &mut self.world,
-                    &self.seat_entities,
-                    &self.session_entities,
-                    &self.user_entities,
-                );
+                sync_vt_session_states(&mut self.world, &self.seat_entities, &self.user_entities);
 
-                if let Some(entity) = entity_by_uid(&self.world, &self.session_entities, uid)
+                if let Some(entity) = entity_by_uid(&self.world, uid)
                     && let Some(session_id) = id(&self.world, entity)
                 {
                     add_object(&mut self.world, session_id, entity, session_core_session);
@@ -866,16 +818,8 @@ impl<C: cgroup::CgroupManager + 'static>
                 session_core_user,
                 uid,
             } => {
-                let entity =
-                    user::entity_by_uid(&self.world, &self.user_entities, uid).or_else(|| {
-                        user::create(
-                            &mut self.world,
-                            &mut self.user_entities,
-                            &self.session_entities,
-                            uid,
-                            false,
-                        )
-                    });
+                let entity = user::entity_by_uid(&self.world, &self.user_entities, uid)
+                    .or_else(|| user::create(&mut self.world, &mut self.user_entities, uid, false));
                 let Some(entity) = entity else {
                     log::warn!(uid; "get_user requested for unknown user");
                     session_core_user.send_not_found();
@@ -895,7 +839,7 @@ impl<C: cgroup::CgroupManager + 'static>
                 };
 
                 // let user reboot only if there are no other user sessions active
-                let foreign_session_count = entities(&self.world, &self.session_entities)
+                let foreign_session_count = entities(&self.world)
                     .filter_map(|entity| self.world.get::<ecs::Uid>(entity))
                     .filter(|session| session.0 != client.creds().uid.as_raw())
                     .count();
@@ -911,8 +855,8 @@ impl<C: cgroup::CgroupManager + 'static>
 
                 log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "reboot accepted");
 
-                for session_id in entities(&self.world, &self.session_entities)
-                    .filter_map(|entity| self.world.get::<ecs::Session>(entity))
+                for session_id in entities(&self.world)
+                    .filter_map(|entity| self.world.get::<ecs::SessionId>(entity))
                 {
                     if let Err(err) = self.cgroup_manager.terminate_session(session_id.0) {
                         log::error!(session_id = session_id.0.as_raw(), error = err.to_string().as_str(); "failed to terminate session before reboot");
@@ -946,7 +890,7 @@ impl<C: cgroup::CgroupManager + 'static>
                 };
 
                 // let user poweroff only if there are no other user sessions active
-                let foreign_session_count = entities(&self.world, &self.session_entities)
+                let foreign_session_count = entities(&self.world)
                     .filter_map(|entity| self.world.get::<ecs::Uid>(entity))
                     .filter(|session| session.0 != client.creds().uid.as_raw())
                     .count();
@@ -962,8 +906,8 @@ impl<C: cgroup::CgroupManager + 'static>
 
                 log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "poweroff accepted");
 
-                for session_id in entities(&self.world, &self.session_entities)
-                    .filter_map(|entity| self.world.get::<ecs::Session>(entity))
+                for session_id in entities(&self.world)
+                    .filter_map(|entity| self.world.get::<ecs::SessionId>(entity))
                 {
                     if let Err(err) = self.cgroup_manager.terminate_session(session_id.0) {
                         log::error!(session_id = session_id.0.as_raw(), error = err.to_string().as_str(); "failed to terminate session before poweroff");
@@ -997,7 +941,7 @@ impl<C: cgroup::CgroupManager + 'static>
                 };
 
                 // let user suspend only if there are no other user sessions active
-                let foreign_session_count = entities(&self.world, &self.session_entities)
+                let foreign_session_count = entities(&self.world)
                     .filter_map(|entity| self.world.get::<ecs::Uid>(entity))
                     .filter(|session| session.0 != client.creds().uid.as_raw())
                     .count();
@@ -1032,7 +976,7 @@ impl<C: cgroup::CgroupManager + 'static>
                 };
 
                 // let user hibernate only if there are no other user sessions active
-                let foreign_session_count = entities(&self.world, &self.session_entities)
+                let foreign_session_count = entities(&self.world)
                     .filter_map(|entity| self.world.get::<ecs::Uid>(entity))
                     .filter(|session| session.0 != client.creds().uid.as_raw())
                     .count();
@@ -1075,7 +1019,6 @@ impl<C: cgroup::CgroupManager + 'static>
                     &mut self.world,
                     seat_entity,
                     session_core_seat,
-                    &self.session_entities,
                     &self.management_access,
                 );
             }

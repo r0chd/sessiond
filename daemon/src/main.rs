@@ -32,7 +32,7 @@ mod user;
 #[cfg(test)]
 mod tests;
 
-use bevy_ecs::{entity, world};
+use bevy_ecs::prelude::*;
 use calloop::{generic, signals};
 use clap::Parser;
 use hyprwire::server;
@@ -99,10 +99,9 @@ struct Sessiond<C: cgroup::CgroupManager + 'static> {
     session_manager_v1_envs:
         HashMap<session_management_v1::session_manager::SessionManager, BTreeMap<String, String>>,
     cgroup_manager: C,
-    session_entities: Vec<entity::Entity>,
-    user_entities: Vec<entity::Entity>,
-    seat_entities: Vec<entity::Entity>,
-    client_entities: Vec<entity::Entity>,
+    user_entities: Vec<Entity>,
+    seat_entities: Vec<Entity>,
+    client_entities: Vec<Entity>,
     seat_access: Access,
     management_access: Access,
     settings: config::Config,
@@ -110,17 +109,12 @@ struct Sessiond<C: cgroup::CgroupManager + 'static> {
     consolekit: consolekit::Server,
     shutting_down: bool,
     loop_signal: calloop::LoopSignal,
-    world: world::World,
+    world: World,
 }
 
 impl<C: cgroup::CgroupManager + 'static> Sessiond<C> {
-    fn remove_session(&mut self, session_id: session::SessionId) -> Option<entity::Entity> {
-        let idx = self.session_entities.iter().position(|entity| {
-            self.world
-                .get::<ecs::Session>(*entity)
-                .is_some_and(|session| session.0 == session_id)
-        })?;
-        let entity = self.session_entities.remove(idx);
+    fn remove_session(&mut self, session_id: session::SessionId) -> Option<Entity> {
+        let entity = session::entity(&self.world, session_id)?;
         self.world.despawn(entity);
         #[cfg(feature = "consolekit")]
         self.consolekit.remove_session(session_id);
@@ -128,7 +122,7 @@ impl<C: cgroup::CgroupManager + 'static> Sessiond<C> {
     }
 
     #[cfg(feature = "consolekit")]
-    fn sync_consolekit_session(&self, session_id: session::SessionId, entity: entity::Entity) {
+    fn sync_consolekit_session(&self, session_id: session::SessionId, entity: Entity) {
         if let Some(info) = consolekit::SessionInfo::from_world(&self.world, entity, session_id) {
             self.consolekit.upsert_session(info);
         }
@@ -172,7 +166,6 @@ fn run<C: cgroup::CgroupManager + 'static>(
         info_managers: Vec::new(),
         session_manager_v1_envs: HashMap::new(),
         cgroup_manager,
-        session_entities: Vec::new(),
         user_entities: Vec::new(),
         seat_entities: Vec::new(),
         client_entities: Vec::new(),
@@ -189,7 +182,7 @@ fn run<C: cgroup::CgroupManager + 'static>(
         consolekit: consolekit::Server::start(),
         shutting_down: false,
         loop_signal,
-        world: world::World::new(),
+        world: World::new(),
     };
 
     let seat_entity = ecs::insert_seat(
@@ -220,7 +213,6 @@ fn run<C: cgroup::CgroupManager + 'static>(
         user::create(
             &mut sessiond.world,
             &mut sessiond.user_entities,
-            &sessiond.session_entities,
             uid,
             true,
         );
@@ -279,8 +271,8 @@ fn run<C: cgroup::CgroupManager + 'static>(
 
                     state.shutting_down = true;
 
-                    for session_id in session::entities(&state.world, &state.session_entities)
-                        .filter_map(|entity| state.world.get::<ecs::Session>(entity))
+                    for session_id in session::entities(&state.world)
+                        .filter_map(|entity| state.world.get::<ecs::SessionId>(entity))
                     {
                         if let Err(err) = state.cgroup_manager.terminate_session(session_id.0) {
                             log::error!(
@@ -305,7 +297,7 @@ fn run<C: cgroup::CgroupManager + 'static>(
 
                 if active_state == session_core_v1::ActiveState::Active {
                     state_updates.extend(
-                        session::entities(&state.world, &state.session_entities).filter_map(
+                        session::entities(&state.world).filter_map(
                             |entity| {
                                 let session_vt = state.world.get::<ecs::Vt>(entity)?.0;
                                 let session_state = state.world.get::<ecs::ActiveState>(entity)?.0;
@@ -326,7 +318,7 @@ fn run<C: cgroup::CgroupManager + 'static>(
                 }
 
                 state_updates.extend(
-                    session::entities(&state.world, &state.session_entities).filter_map(|entity| {
+                    session::entities(&state.world).filter_map(|entity| {
                         let session_vt = state.world.get::<ecs::Vt>(entity)?.0;
                         session_vt
                             .is_some_and(|session_vt| session_vt == vt)
@@ -344,11 +336,7 @@ fn run<C: cgroup::CgroupManager + 'static>(
                 }
             }
 
-            user::sync_all(
-                &mut state.world,
-                &state.user_entities,
-                &state.session_entities,
-            );
+            user::sync_all(&mut state.world, &state.user_entities);
         })?;
 
     event_loop.run(None, &mut sessiond, |_| {})?;

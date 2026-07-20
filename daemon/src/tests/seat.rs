@@ -1,16 +1,16 @@
-use crate::client;
-use crate::ecs::{self, SeatKind, SeatState as EcsSeatState};
-use crate::seat::{self, SeatState};
-use crate::session::SessionId;
-use bevy_ecs::prelude::{Entity, World};
+use crate::{client, ecs, seat, session};
+use bevy_ecs::prelude::*;
 
 fn make_seat(world: &mut World) -> Entity {
-    ecs::insert_seat(world, "seat0".to_string(), SeatKind::NonVtBound, 0)
+    ecs::insert_seat(world, "seat0".to_string(), ecs::SeatKind::NonVtBound, 0)
 }
 
 fn make_client(world: &mut World) -> Entity {
     world
-        .spawn((ecs::Devices(Vec::new()), EcsSeatState(SeatState::New)))
+        .spawn((
+            ecs::Devices(Vec::new()),
+            ecs::SeatState(seat::SeatState::New),
+        ))
         .id()
 }
 
@@ -21,7 +21,7 @@ fn add_assigns_session_id_1() {
     let client = make_client(&mut world);
     client::add(&mut world, seat, client).unwrap();
     assert_eq!(
-        world.get::<ecs::Session>(client).map(|s| s.0.as_raw()),
+        world.get::<ecs::SessionId>(client).map(|s| s.0.as_raw()),
         Some(1)
     );
 }
@@ -34,8 +34,14 @@ fn add_assigns_sequential_ids() {
     let c2 = make_client(&mut world);
     client::add(&mut world, seat, c1).unwrap();
     client::add(&mut world, seat, c2).unwrap();
-    assert_eq!(world.get::<ecs::Session>(c1).map(|s| s.0.as_raw()), Some(1));
-    assert_eq!(world.get::<ecs::Session>(c2).map(|s| s.0.as_raw()), Some(2));
+    assert_eq!(
+        world.get::<ecs::SessionId>(c1).map(|s| s.0.as_raw()),
+        Some(1)
+    );
+    assert_eq!(
+        world.get::<ecs::SessionId>(c2).map(|s| s.0.as_raw()),
+        Some(2)
+    );
 }
 
 #[test]
@@ -45,8 +51,8 @@ fn add_sets_enabled_state() {
     let client = make_client(&mut world);
     client::add(&mut world, seat, client).unwrap();
     assert_eq!(
-        world.get::<EcsSeatState>(client).map(|s| s.0),
-        Some(SeatState::Enabled)
+        world.get::<ecs::SeatState>(client).map(|s| s.0),
+        Some(seat::SeatState::Enabled)
     );
 }
 
@@ -98,8 +104,8 @@ fn disable_sets_pending_disabled() {
     client::add(&mut world, seat, client).unwrap();
     client::disable(&mut world, seat, client).unwrap();
     assert_eq!(
-        world.get::<EcsSeatState>(client).map(|s| s.0),
-        Some(SeatState::PendingDisabled)
+        world.get::<ecs::SeatState>(client).map(|s| s.0),
+        Some(seat::SeatState::PendingDisabled)
     );
 }
 
@@ -124,8 +130,8 @@ fn ack_disable_sets_disabled() {
     client::disable(&mut world, seat, c2).unwrap();
     client::ack_disable(&mut world, seat, c2).unwrap();
     assert_eq!(
-        world.get::<EcsSeatState>(c2).map(|s| s.0),
-        Some(SeatState::Disabled)
+        world.get::<ecs::SeatState>(c2).map(|s| s.0),
+        Some(seat::SeatState::Disabled)
     );
 }
 
@@ -148,7 +154,7 @@ fn ack_disable_activates_next_queued_client() {
     let c2 = make_client(&mut world);
     world
         .entity_mut(c2)
-        .insert(ecs::Session(SessionId::from_raw(2)));
+        .insert(ecs::SessionId(session::SessionId::from_raw(2)));
     world
         .entity_mut(c2)
         .insert(ecs::SeatName("seat0".to_string()));
@@ -167,7 +173,7 @@ fn set_next_session_switches_to_self_is_noop() {
     let seat = make_seat(&mut world);
     let client = make_client(&mut world);
     client::add(&mut world, seat, client).unwrap();
-    let session_id = world.get::<ecs::Session>(client).unwrap().0.as_raw();
+    let session_id = world.get::<ecs::SessionId>(client).unwrap().0.as_raw();
     seat::set_next_session(&mut world, seat, client, session_id).unwrap();
     assert!(world.get::<ecs::NextClient>(seat).is_none());
 }
@@ -189,7 +195,7 @@ fn set_next_session_queues_switch() {
     let c2 = make_client(&mut world);
     client::add(&mut world, seat, c1).unwrap();
     client::add(&mut world, seat, c2).unwrap();
-    let c1_session = world.get::<ecs::Session>(c1).unwrap().0.as_raw();
+    let c1_session = world.get::<ecs::SessionId>(c1).unwrap().0.as_raw();
     seat::set_next_session(&mut world, seat, c2, c1_session).unwrap();
     assert_eq!(world.get::<ecs::NextClient>(seat).map(|n| n.0), Some(c1));
 }

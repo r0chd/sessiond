@@ -86,7 +86,7 @@ fn close(
     object: &seat_v1::device::Device,
 ) -> anyhow::Result<()> {
     let session_id = world
-        .get::<ecs::Session>(client_entity)
+        .get::<ecs::SessionId>(client_entity)
         .map(|session| session.0)
         .ok_or_else(|| anyhow::anyhow!("client has no session id"))?;
     let name = world

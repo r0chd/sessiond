@@ -25,7 +25,8 @@ pub fn insert_session(
     session_object: Option<session_management_session::SessionManagementSession>,
 ) -> Entity {
     let mut cmd = world.spawn((
-        Session(session_id),
+        Session,
+        SessionId(session_id),
         Uid(uid),
         Username(username),
         Vt(vt),
@@ -120,6 +121,9 @@ pub fn insert_device(
 }
 
 #[derive(Component)]
+pub struct Session;
+
+#[derive(Component)]
 pub struct Uid(pub u32);
 
 #[derive(Component)]
@@ -165,7 +169,7 @@ pub struct SessionObjects(pub Vec<session_core_session::SessionCoreSession>);
 pub struct ActiveState(pub session_core_v1::ActiveState);
 
 #[derive(Component)]
-pub struct Session(pub session::SessionId);
+pub struct SessionId(pub session::SessionId);
 
 #[derive(Component)]
 pub struct SeatObject(pub seat_v1::seat::Seat);

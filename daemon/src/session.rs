@@ -343,12 +343,9 @@ pub fn add_object(
     }
 }
 
-pub fn sync_vt_session_states(
-    world: &mut world::World,
-    seat_entities: &[entity::Entity],
-) {
-    seat::refresh_current_vts(world, seat_entities);
-    seat::sync_states(world, seat_entities);
+pub fn sync_vt_session_states(world: &mut world::World) {
+    seat::refresh_current_vts(world);
+    seat::sync_states(world);
     user::sync_all(world);
 }
 
@@ -387,7 +384,7 @@ impl<C: cgroup::CgroupManager + 'static> session_core_v1::SessionCoreV1Handler
     for crate::Sessiond<C>
 {
     fn bind(&mut self, object: session_core_manager::SessionCoreManager) {
-        sync_vt_session_states(&mut self.world, &self.seat_entities);
+        sync_vt_session_states(&mut self.world);
 
         entities(&self.world)
             .filter_map(|entity| id(&self.world, entity))
@@ -460,7 +457,7 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager::Ses
                     log::error!(session_id = session_id.as_raw(), error = e.to_string().as_str(); "failed to create session cgroup");
                 }
 
-                seat::refresh_current_vts(&mut self.world, &self.seat_entities);
+                seat::refresh_current_vts(&mut self.world);
 
                 user::create_runtime_dir(uid, &self.user_config(&username).runtime_dir(uid));
 
@@ -525,12 +522,12 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager_v1::
                     log::error!(session_id = session_id.as_raw(), error = e.to_string().as_str(); "failed to create session cgroup");
                 }
 
-                seat::refresh_current_vts(&mut self.world, &self.seat_entities);
+                seat::refresh_current_vts(&mut self.world);
 
                 let is_local = is_local != 0;
                 let session_vt = (vt != 0).then_some(vt);
                 let mut session_seat_entity = if session_vt.is_some() {
-                    self.seat_entities.first().copied()
+                    seat::first(&self.world)
                 } else {
                     None
                 };
@@ -545,7 +542,7 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager_v1::
                 user::create_runtime_dir(uid, &self.user_config(&username).runtime_dir(uid));
 
                 if let Some((seat_entity, seat)) =
-                    self.seat_entities.iter().copied().find_map(|seat_entity| {
+                    seat::entities(&self.world).find_map(|seat_entity| {
                         let mode = self.world.get::<ecs::SeatMode>(seat_entity)?;
                         if mode.0 != ecs::SeatKind::VtBound {
                             return None;
@@ -664,10 +661,10 @@ impl<C: cgroup::CgroupManager + 'static>
                     .world
                     .get::<ecs::IsLocal>(entity)
                     .is_none_or(|is_local| is_local.0);
-                seat::refresh_current_vts(&mut self.world, &self.seat_entities);
+                seat::refresh_current_vts(&mut self.world);
 
                 let mut session_seat_entity = if session_vt.is_some() {
-                    self.seat_entities.first().copied()
+                    seat::first(&self.world)
                 } else {
                     None
                 };
@@ -679,7 +676,7 @@ impl<C: cgroup::CgroupManager + 'static>
                 });
 
                 let active_state = if let Some((seat_entity, seat)) =
-                    self.seat_entities.iter().copied().find_map(|seat_entity| {
+                    seat::entities(&self.world).find_map(|seat_entity| {
                         let mode = self.world.get::<ecs::SeatMode>(seat_entity)?;
                         if mode.0 != ecs::SeatKind::VtBound {
                             return None;
@@ -766,7 +763,7 @@ impl<C: cgroup::CgroupManager + 'static>
                 session_core_session,
                 session_id,
             } => {
-                sync_vt_session_states(&mut self.world, &self.seat_entities);
+                sync_vt_session_states(&mut self.world);
 
                 let session_id = SessionId::from_raw(session_id);
                 if let Some(entity) = entity(&self.world, session_id) {
@@ -781,7 +778,7 @@ impl<C: cgroup::CgroupManager + 'static>
                 session_core_session,
                 pid,
             } => {
-                sync_vt_session_states(&mut self.world, &self.seat_entities);
+                sync_vt_session_states(&mut self.world);
 
                 let Ok(Some(session_id)) = self.cgroup_manager.find_session_by_pid(pid) else {
                     log::warn!(pid; "get_session_by_pid: no session found for pid");
@@ -801,7 +798,7 @@ impl<C: cgroup::CgroupManager + 'static>
                 session_core_session,
                 uid,
             } => {
-                sync_vt_session_states(&mut self.world, &self.seat_entities);
+                sync_vt_session_states(&mut self.world);
 
                 if let Some(entity) = entity_by_uid(&self.world, uid)
                     && let Some(session_id) = id(&self.world, entity)
@@ -1008,9 +1005,7 @@ impl<C: cgroup::CgroupManager + 'static>
                 session_core_seat,
                 seat,
             } => {
-                let Some(seat_entity) =
-                    seat::entity_by_name(&self.world, &self.seat_entities, &seat)
-                else {
+                let Some(seat_entity) = seat::entity_by_name(&self.world, &seat) else {
                     session_core_seat.send_destroyed();
                     return;
                 };

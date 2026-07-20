@@ -99,7 +99,6 @@ struct Sessiond<C: cgroup::CgroupManager + 'static> {
     info_managers: Vec<session_core_manager::SessionCoreManager>,
     envs: HashMap<session_manager::SessionManager, BTreeMap<String, String>>,
     cgroup_manager: C,
-    seat_entities: Vec<Entity>,
     seat_access: Access,
     management_access: Access,
     settings: config::Config,
@@ -164,7 +163,6 @@ fn run<C: cgroup::CgroupManager + 'static>(
         info_managers: Vec::new(),
         envs: HashMap::new(),
         cgroup_manager,
-        seat_entities: Vec::new(),
         seat_access: Access::new(
             resolve_user(&seat_config.user)?,
             resolve_group(&seat_config.group)?,
@@ -181,7 +179,7 @@ fn run<C: cgroup::CgroupManager + 'static>(
         world: World::new(),
     };
 
-    let seat_entity = ecs::insert_seat(
+    ecs::insert_seat(
         &mut sessiond.world,
         sessiond.settings.default_seat.clone(),
         if vtbound {
@@ -191,7 +189,6 @@ fn run<C: cgroup::CgroupManager + 'static>(
         },
         0,
     );
-    sessiond.seat_entities.push(seat_entity);
 
     let lingering_users = sessiond
         .settings
@@ -253,7 +250,7 @@ fn run<C: cgroup::CgroupManager + 'static>(
         .insert_source(signals, move |event, (), state| {
             let session_updates = match event.signal() {
                 signals::Signal::SIGUSR1 | signals::Signal::SIGUSR2 => {
-                    seat::handle_vt_signal(&mut state.world, &state.seat_entities, event.signal())
+                    seat::handle_vt_signal(&mut state.world, event.signal())
                 }
                 signals::Signal::SIGTERM | signals::Signal::SIGINT => {
                     if state.shutting_down {

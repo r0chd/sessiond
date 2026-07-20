@@ -303,7 +303,7 @@ pub fn add(
     }
 
     let name = seat::name(world, seat_entity)?;
-    seat::refresh_current_vts(world, &[seat_entity]);
+    seat::refresh_current_vt(world, seat_entity);
 
     let mode = seat::mode(world, seat_entity)?;
     let session_id = match mode {

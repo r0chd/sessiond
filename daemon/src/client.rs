@@ -1,5 +1,5 @@
 use crate::session_core_v1::{session_core_seat_client, session_core_seat_device};
-use crate::{cgroup, client, device, ecs, seat, seat_v1, session, session_core_v1};
+use crate::{client, device, ecs, seat, seat_v1, session, session_core_v1};
 use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 
@@ -81,7 +81,8 @@ pub fn entity_by_seat_object(
     world: &world::World,
     object: &seat_v1::seat::Seat,
 ) -> Option<entity::Entity> {
-    let mut clients = world.try_query_filtered::<(Entity, &ecs::SeatObject), With<ecs::Client>>()?;
+    let mut clients =
+        world.try_query_filtered::<(Entity, &ecs::SeatObject), With<ecs::Client>>()?;
     clients
         .iter(world)
         .find_map(|(entity, seat_object)| (seat_object.0 == *object).then_some(entity))
@@ -146,9 +147,7 @@ pub fn entity_by_core_device_object(
     })
 }
 
-impl<C: cgroup::CgroupManager + 'static>
-    hyprwire::Dispatch<session_core_seat_client::SessionCoreSeatClient> for crate::Sessiond<C>
-{
+impl hyprwire::Dispatch<session_core_seat_client::SessionCoreSeatClient> for crate::Sessiond {
     fn event(
         &mut self,
         object: &session_core_seat_client::SessionCoreSeatClient,
@@ -159,9 +158,7 @@ impl<C: cgroup::CgroupManager + 'static>
                 session_core_seat_device,
                 device_id,
             } => {
-                let Some(client_entity) =
-                    client::entity_by_core_object(&self.world, object)
-                else {
+                let Some(client_entity) = client::entity_by_core_object(&self.world, object) else {
                     session_core_seat_device.send_destroyed();
                     return;
                 };
@@ -180,8 +177,7 @@ impl<C: cgroup::CgroupManager + 'static>
                 );
             }
             session_core_seat_client::Event::Destroy => {
-                if let Some(client_entity) =
-                    client::entity_by_core_object(&self.world, object)
+                if let Some(client_entity) = client::entity_by_core_object(&self.world, object)
                     && let Some(mut objects) =
                         self.world.get_mut::<ecs::ClientObjects>(client_entity)
                 {

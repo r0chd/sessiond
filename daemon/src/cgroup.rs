@@ -6,54 +6,39 @@ use std::io::{Read, Seek};
 use std::os::fd::AsRawFd;
 use std::{fs, io, path};
 
-pub trait CgroupManager {
-    fn ensure_user_cgroup(&self, uid: u32) -> anyhow::Result<path::PathBuf>;
-    fn remove_user_cgroup(&self, uid: u32) -> anyhow::Result<()>;
-    fn create_session_cgroup(
-        &mut self,
-        uid: u32,
-        session_id: session::SessionId,
-        leader_pid: i32,
-    ) -> anyhow::Result<()>;
-    fn poll_destroy(&self, session_id: session::SessionId) -> anyhow::Result<()>;
-    fn kill_session(&self, session_id: session::SessionId) -> anyhow::Result<()>;
-    fn terminate_session(&self, session_id: session::SessionId) -> anyhow::Result<()>;
-    fn find_session_by_pid(&self, pid: u32) -> anyhow::Result<Option<session::SessionId>>;
-    fn take_cgroup(&mut self, session_id: session::SessionId) -> Option<(u32, path::PathBuf)>;
-    fn has_uid_sessions(&self, uid: u32) -> bool;
-    fn is_empty(&self) -> bool;
-}
-
-pub struct SystemCgroupManager {
-    root_path: &'static path::Path,
+pub struct CgroupManager {
+    root_path: Option<&'static path::Path>,
     cgroups: Vec<Cgroup>,
-    loop_handle: calloop::LoopHandle<'static, crate::Sessiond<Self>>,
+    loop_handle: calloop::LoopHandle<'static, crate::Sessiond>,
 }
 
-impl SystemCgroupManager {
-    pub fn new(
-        loop_handle: calloop::LoopHandle<'static, crate::Sessiond<Self>>,
-    ) -> anyhow::Result<Self> {
+impl CgroupManager {
+    pub fn new(loop_handle: calloop::LoopHandle<'static, crate::Sessiond>) -> anyhow::Result<Self> {
         let root_path = path::Path::new("/sys/fs/cgroup/sessiond");
         fs::create_dir_all(root_path)
             .with_context(|| format!("failed to create cgroup root at {}", root_path.display()))?;
         log::info!(root = root_path.to_str(); "cgroup manager init");
 
         Ok(Self {
-            root_path,
+            root_path: Some(root_path),
             cgroups: Vec::new(),
             loop_handle,
         })
     }
 
-    fn user_cgroup_path(&self, uid: u32) -> path::PathBuf {
-        self.root_path.join(format!("user-{uid}"))
+    fn user_cgroup_path(&self, uid: u32) -> anyhow::Result<path::PathBuf> {
+        Ok(self
+            .root_path
+            .context("cgroup manager is disabled")?
+            .join(format!("user-{uid}")))
     }
-}
 
-impl CgroupManager for SystemCgroupManager {
-    fn remove_user_cgroup(&self, uid: u32) -> anyhow::Result<()> {
-        match fs::remove_dir(self.user_cgroup_path(uid)) {
+    pub(crate) fn remove_user_cgroup(&self, uid: u32) -> anyhow::Result<()> {
+        let Ok(user_cgroup_path) = self.user_cgroup_path(uid) else {
+            return Ok(());
+        };
+
+        match fs::remove_dir(user_cgroup_path) {
             Ok(()) => {
                 log::info!(uid; "user cgroup destroyed");
                 Ok(())
@@ -63,8 +48,12 @@ impl CgroupManager for SystemCgroupManager {
         }
     }
 
-    fn ensure_user_cgroup(&self, uid: u32) -> anyhow::Result<path::PathBuf> {
-        let user_cgroup_path = self.user_cgroup_path(uid);
+    pub(crate) fn ensure_user_cgroup(&self, uid: u32) -> anyhow::Result<path::PathBuf> {
+        if self.root_path.is_none() {
+            return Ok(path::PathBuf::new());
+        }
+
+        let user_cgroup_path = self.user_cgroup_path(uid)?;
         if !user_cgroup_path.exists() {
             fs::create_dir(&user_cgroup_path)?;
         }
@@ -72,12 +61,16 @@ impl CgroupManager for SystemCgroupManager {
         Ok(user_cgroup_path)
     }
 
-    fn create_session_cgroup(
+    pub(crate) fn create_session_cgroup(
         &mut self,
         uid: u32,
         session_id: session::SessionId,
         leader_pid: i32,
     ) -> anyhow::Result<()> {
+        if self.root_path.is_none() {
+            return Ok(());
+        }
+
         let user_cgroup_path = self.ensure_user_cgroup(uid)?;
         let session_cgroup_path = user_cgroup_path.join(format!("session-{}", session_id.as_raw()));
         fs::create_dir(&session_cgroup_path)?;
@@ -170,7 +163,11 @@ impl CgroupManager for SystemCgroupManager {
         Ok(())
     }
 
-    fn kill_session(&self, session_id: session::SessionId) -> anyhow::Result<()> {
+    pub(crate) fn kill_session(&self, session_id: session::SessionId) -> anyhow::Result<()> {
+        if self.root_path.is_none() {
+            return Ok(());
+        }
+
         let cgroup = self
             .cgroups
             .iter()
@@ -181,7 +178,11 @@ impl CgroupManager for SystemCgroupManager {
         Ok(())
     }
 
-    fn terminate_session(&self, session_id: session::SessionId) -> anyhow::Result<()> {
+    pub(crate) fn terminate_session(&self, session_id: session::SessionId) -> anyhow::Result<()> {
+        if self.root_path.is_none() {
+            return Ok(());
+        }
+
         let cgroup = self
             .cgroups
             .iter()
@@ -199,7 +200,14 @@ impl CgroupManager for SystemCgroupManager {
         Ok(())
     }
 
-    fn find_session_by_pid(&self, pid: u32) -> anyhow::Result<Option<session::SessionId>> {
+    pub(crate) fn find_session_by_pid(
+        &self,
+        pid: u32,
+    ) -> anyhow::Result<Option<session::SessionId>> {
+        if self.root_path.is_none() {
+            return Ok(None);
+        }
+
         for cgroup in &self.cgroups {
             let procs = fs::read_to_string(cgroup.path.join("cgroup.procs"))?;
 
@@ -222,61 +230,12 @@ impl CgroupManager for SystemCgroupManager {
             .map(|c| (c.uid, c.path))
     }
 
-    fn has_uid_sessions(&self, uid: u32) -> bool {
+    pub(crate) fn has_uid_sessions(&self, uid: u32) -> bool {
         self.cgroups.iter().any(|c| c.uid == uid)
     }
 
-    fn is_empty(&self) -> bool {
+    pub(crate) const fn is_empty(&self) -> bool {
         self.cgroups.is_empty()
-    }
-}
-
-pub struct DummyCgroupManager;
-
-impl CgroupManager for DummyCgroupManager {
-    fn ensure_user_cgroup(&self, _uid: u32) -> anyhow::Result<path::PathBuf> {
-        Ok(path::PathBuf::new())
-    }
-
-    fn remove_user_cgroup(&self, _uid: u32) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    fn create_session_cgroup(
-        &mut self,
-        _uid: u32,
-        _session_id: session::SessionId,
-        _leader_pid: i32,
-    ) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    fn poll_destroy(&self, _session_id: session::SessionId) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    fn kill_session(&self, _session_id: session::SessionId) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    fn terminate_session(&self, _session_id: session::SessionId) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    fn find_session_by_pid(&self, _pid: u32) -> anyhow::Result<Option<session::SessionId>> {
-        Ok(None)
-    }
-
-    fn take_cgroup(&mut self, _session_id: session::SessionId) -> Option<(u32, path::PathBuf)> {
-        None
-    }
-
-    fn has_uid_sessions(&self, _uid: u32) -> bool {
-        false
-    }
-
-    fn is_empty(&self) -> bool {
-        true
     }
 }
 

@@ -2,7 +2,7 @@ use crate::session_core_v1::{session_core_manager, session_core_session};
 use crate::session_management_v1::session_manager as session_manager_v1;
 use crate::session_management_v2::{session_management_session, session_manager};
 use crate::{
-    cgroup, config, ecs, seat, session_core_v1, session_management_v1, session_management_v2, user,
+    config, ecs, seat, session_core_v1, session_management_v1, session_management_v2, user,
 };
 use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
@@ -136,9 +136,7 @@ pub fn session_envs_by_uid(
     env
 }
 
-impl<C: crate::cgroup::CgroupManager + 'static>
-    hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Sessiond<C>
-{
+impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Sessiond {
     fn event(
         &mut self,
         object: &session_core_session::SessionCoreSession,
@@ -201,7 +199,7 @@ impl<C: crate::cgroup::CgroupManager + 'static>
     }
 }
 
-impl<C: crate::cgroup::CgroupManager + 'static> crate::Sessiond<C> {
+impl crate::Sessiond {
     pub fn kill_session(&mut self, entity: entity::Entity) {
         let Some(session_id) = id(&self.world, entity) else {
             return;
@@ -370,19 +368,11 @@ pub fn set_state(
     }
 }
 
-impl<C: cgroup::CgroupManager + 'static> session_management_v1::SessionManagementV1Handler
-    for crate::Sessiond<C>
-{
-}
+impl session_management_v1::SessionManagementV1Handler for crate::Sessiond {}
 
-impl<C: cgroup::CgroupManager + 'static> session_management_v2::SessionManagementV2Handler
-    for crate::Sessiond<C>
-{
-}
+impl session_management_v2::SessionManagementV2Handler for crate::Sessiond {}
 
-impl<C: cgroup::CgroupManager + 'static> session_core_v1::SessionCoreV1Handler
-    for crate::Sessiond<C>
-{
+impl session_core_v1::SessionCoreV1Handler for crate::Sessiond {
     fn bind(&mut self, object: session_core_manager::SessionCoreManager) {
         sync_vt_session_states(&mut self.world);
 
@@ -399,7 +389,7 @@ impl<C: cgroup::CgroupManager + 'static> session_core_v1::SessionCoreV1Handler
     }
 }
 
-impl<C: cgroup::CgroupManager + 'static> crate::Sessiond<C> {
+impl crate::Sessiond {
     // Allows to manage power commands (power off, reboot) only
     // if no other sessions are active or user has root permissions
     fn can_control_power(&self, creds: &rustix::net::UCred) -> bool {
@@ -418,9 +408,7 @@ impl<C: cgroup::CgroupManager + 'static> crate::Sessiond<C> {
     }
 }
 
-impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager::SessionManager>
-    for crate::Sessiond<C>
-{
+impl hyprwire::Dispatch<session_manager::SessionManager> for crate::Sessiond {
     fn event(
         &mut self,
         object: &session_manager::SessionManager,
@@ -483,9 +471,7 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager::Ses
     }
 }
 
-impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager_v1::SessionManager>
-    for crate::Sessiond<C>
-{
+impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond {
     fn event(
         &mut self,
         object: &session_manager_v1::SessionManager,
@@ -621,10 +607,7 @@ impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_manager_v1::
     }
 }
 
-impl<C: cgroup::CgroupManager + 'static>
-    hyprwire::Dispatch<session_management_session::SessionManagementSession>
-    for crate::Sessiond<C>
-{
+impl hyprwire::Dispatch<session_management_session::SessionManagementSession> for crate::Sessiond {
     fn event(
         &mut self,
         object: &session_management_session::SessionManagementSession,
@@ -675,8 +658,8 @@ impl<C: cgroup::CgroupManager + 'static>
                         .filter(|seat| !seat.is_empty())
                 });
 
-                let active_state = if let Some((seat_entity, seat)) =
-                    seat::entities(&self.world).find_map(|seat_entity| {
+                let active_state = if let Some((seat_entity, seat)) = seat::entities(&self.world)
+                    .find_map(|seat_entity| {
                         let mode = self.world.get::<ecs::SeatMode>(seat_entity)?;
                         if mode.0 != ecs::SeatKind::VtBound {
                             return None;
@@ -750,9 +733,7 @@ impl<C: cgroup::CgroupManager + 'static>
     }
 }
 
-impl<C: cgroup::CgroupManager + 'static>
-    hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Sessiond<C>
-{
+impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Sessiond {
     fn event(
         &mut self,
         object: &session_core_manager::SessionCoreManager,

@@ -1,6 +1,6 @@
 use crate::seat_v1::{seat, seat_manager};
 use crate::session_core_v1::session_core_seat;
-use crate::{cgroup, client, device, ecs, seat_v1, session, session_core_v1, terminal, user};
+use crate::{client, device, ecs, seat_v1, session, session_core_v1, terminal, user};
 use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 use calloop::signals;
@@ -580,7 +580,7 @@ pub fn state(world: &world::World, client_entity: entity::Entity) -> anyhow::Res
         .ok_or_else(|| anyhow::anyhow!("client has no seat state"))
 }
 
-impl<C: crate::cgroup::CgroupManager + 'static> seat_v1::SeatV1Handler for crate::Sessiond<C> {
+impl seat_v1::SeatV1Handler for crate::Sessiond {
     fn bind(&mut self, object: seat_manager::SeatManager) {
         let Some(client) = object.client() else {
             object.error(
@@ -608,9 +608,7 @@ impl<C: crate::cgroup::CgroupManager + 'static> seat_v1::SeatV1Handler for crate
     }
 }
 
-impl<C: crate::cgroup::CgroupManager + 'static> hyprwire::Dispatch<seat_manager::SeatManager>
-    for crate::Sessiond<C>
-{
+impl hyprwire::Dispatch<seat_manager::SeatManager> for crate::Sessiond {
     fn event(
         &mut self,
         object: &seat_manager::SeatManager,
@@ -711,9 +709,7 @@ impl<C: crate::cgroup::CgroupManager + 'static> hyprwire::Dispatch<seat_manager:
     }
 }
 
-impl<C: crate::cgroup::CgroupManager + 'static> hyprwire::Dispatch<seat::Seat>
-    for crate::Sessiond<C>
-{
+impl hyprwire::Dispatch<seat::Seat> for crate::Sessiond {
     fn event(&mut self, object: &seat::Seat, event: <seat::Seat as hyprwire::Object>::Event<'_>) {
         let Some(client_entity) = client::entity_by_seat_object(&self.world, object) else {
             return;
@@ -776,9 +772,7 @@ impl<C: crate::cgroup::CgroupManager + 'static> hyprwire::Dispatch<seat::Seat>
     }
 }
 
-impl<C: cgroup::CgroupManager + 'static> hyprwire::Dispatch<session_core_seat::SessionCoreSeat>
-    for crate::Sessiond<C>
-{
+impl hyprwire::Dispatch<session_core_seat::SessionCoreSeat> for crate::Sessiond {
     fn event(
         &mut self,
         object: &session_core_seat::SessionCoreSeat,

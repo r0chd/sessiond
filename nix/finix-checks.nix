@@ -20,6 +20,8 @@ let
 
   checks = prefixAttrs "finix" {
     basic = pkgs.callPackage ./tests/finix/basic.nix testArgs;
+    vt-switch = pkgs.callPackage ./tests/finix/vt-switch.nix testArgs;
+    termination = pkgs.callPackage ./tests/finix/termination.nix testArgs;
     linger = pkgs.callPackage ./tests/finix/linger.nix testArgs;
     consolekit = pkgs.callPackage ./tests/finix/consolekit.nix testArgs;
   };

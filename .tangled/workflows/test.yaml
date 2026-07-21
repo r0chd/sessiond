@@ -12,6 +12,7 @@ dependencies:
     - gcc
     - linux-pam
     - pkg-config
+    - nix
 
 steps:
   - name: cargo test
@@ -20,3 +21,10 @@ steps:
       rustup default stable
       cargo build --package daemon
       cargo test --package daemon
+
+  - name: finix vm tests
+    command: |
+      nix --extra-experimental-features 'nix-command flakes' --option system-features 'benchmark big-parallel nixos-test uid-range kvm' build -L .#checks.x86_64-linux.finix-basic
+      nix --extra-experimental-features 'nix-command flakes' --option system-features 'benchmark big-parallel nixos-test uid-range kvm' build -L .#checks.x86_64-linux.finix-vt-switch
+      nix --extra-experimental-features 'nix-command flakes' --option system-features 'benchmark big-parallel nixos-test uid-range kvm' build -L .#checks.x86_64-linux.finix-termination
+      nix --extra-experimental-features 'nix-command flakes' --option system-features 'benchmark big-parallel nixos-test uid-range kvm' build -L .#checks.x86_64-linux.finix-linger

@@ -4,6 +4,9 @@
   sessiondModule,
   sessiondPackage,
 }:
+let
+  virtualTerminals = builtins.genList (index: "tty${toString (index + 1)}") 9;
+in
 sessiondTest {
   name = "sessiond-basic-finix";
 
@@ -11,7 +14,10 @@ sessiondTest {
     imports = [ sessiondModule ];
 
     environment = {
-      systemPackages = [ pkgs.jq ];
+      systemPackages = [
+        pkgs.jq
+        pkgs.kbd
+      ];
       etc."profile.d/sessiond-test-login-ready.sh".text = ''
         case "''${USER:-}" in
           user_1|user_2)
@@ -27,14 +33,15 @@ sessiondTest {
     services.getty = {
       enable = true;
       package = pkgs.writeShellScriptBin "agetty" ''
-        exec ${pkgs.util-linux}/bin/agetty "$@"
+        for arg in "$@"; do
+          if [ "$arg" = tty1 ]; then
+            exec ${pkgs.util-linux}/bin/agetty --autologin user_1 --noclear "$@"
+          fi
+        done
+
+        exec ${pkgs.util-linux}/bin/agetty --noclear "$@"
       '';
-      extraArgs = [
-        "--autologin"
-        "user_1"
-        "--noclear"
-      ];
-      ttys = [ "ttyS0" ];
+      ttys = virtualTerminals;
     };
     services.sessiond = {
       enable = true;
@@ -48,6 +55,16 @@ sessiondTest {
         };
       };
     };
+    virtualisation.qemu.extraArgs = [
+      "-display"
+      "none"
+      "-device"
+      "virtio-vga"
+      "-global"
+      "isa-fdc.fdtypeA=none"
+      "-global"
+      "isa-fdc.fdtypeB=none"
+    ];
 
     users.users = {
       user_1 = {
@@ -57,16 +74,11 @@ sessiondTest {
         createHome = true;
         extraGroups = [ "wheel" ];
       };
-      user_2 = {
-        isNormalUser = true;
-        password = "";
-        createHome = true;
-        extraGroups = [ "wheel" ];
-      };
     };
   };
 
   testScript = ''
+    os.environ["DISPLAY"] = ":0"
     machine.start()
 
     machine.wait_for_console_text("finix - stage 1")
@@ -77,21 +89,21 @@ sessiondTest {
     machine.succeed("test -x ${sessiondPackage}/bin/sessiond")
     machine.succeed("pam_path=$(awk '/pam_sessiond.so/ {print $3}' /etc/pam.d/login); test -e \"$pam_path\"")
 
-    machine.wait_for_console_text("__SESSIOND_TEST_LOGIN_READY__:user_1")
-    machine.wait_for_console_text("__SESSIOND_TEST_ENV__:user_1:/tmp/1000:set:unix:path=/tmp/1000/bus:1")
+    machine.succeed("chvt 1")
+    machine.wait_until_succeeds("fgconsole | grep -qx 1")
+    machine.wait_until_succeeds("sessionctl session list --json > /tmp/sessions.json && jq -e '.sessions | length == 1' /tmp/sessions.json >/dev/null")
     machine.wait_until_succeeds("test -d /tmp/1000")
     machine.succeed("test \"$(stat -c %U:%G:%a /tmp/1000)\" = user_1:root:700")
-    machine.succeed("sessionctl session list --json > /tmp/sessions.json")
-    machine.succeed("jq -e '.sessions | length == 1' /tmp/sessions.json >/dev/null")
-    machine.succeed("jq -e '.sessions[0].active == \"online\"' /tmp/sessions.json >/dev/null")
-    machine.succeed("jq -e '.sessions[0].id == 1' /tmp/sessions.json >/dev/null")
-    machine.succeed("jq -e '.sessions[0] | has(\"seat\") | not' /tmp/sessions.json >/dev/null")
-    machine.succeed("jq -e '.sessions[0].uid == 1000' /tmp/sessions.json >/dev/null")
-    machine.succeed("jq -e '.sessions[0].username == \"user_1\"' /tmp/sessions.json >/dev/null")
-    machine.succeed("jq -e '.sessions[0] | has(\"vt\") | not' /tmp/sessions.json >/dev/null")
-    machine.succeed("jq -e '.sessions[0] | has(\"tty\") | not' /tmp/sessions.json >/dev/null")
-    machine.succeed("jq -e '.sessions[0].leader > 0' /tmp/sessions.json >/dev/null")
-    machine.succeed("jq -e '.sessions[0].timestamp > 0' /tmp/sessions.json >/dev/null")
+    machine.succeed("jq -e '[.sessions[] | select(.active == \"active\")] | length == 1' /tmp/sessions.json >/dev/null")
+    machine.succeed("jq -e '.sessions[] | select(.active == \"active\" and .vt == 1 and .tty == \"tty1\")' /tmp/sessions.json >/dev/null")
+    machine.succeed("jq -e 'all(.sessions[]; .seat == \"seat0\" and .uid == 1000 and .username == \"user_1\" and .leader > 0 and .timestamp > 0)' /tmp/sessions.json >/dev/null")
+    machine.succeed("sessionctl seat status --json > /tmp/seat.json")
+    machine.succeed("jq -e '.seat.name == \"seat0\"' /tmp/seat.json >/dev/null")
+    machine.succeed("jq -e '.seat.mode == \"vt-bound\"' /tmp/seat.json >/dev/null")
+    machine.succeed("jq -e '.seat.current_vt == 1' /tmp/seat.json >/dev/null")
+
+    machine.succeed("test -d /sys/fs/cgroup/sessiond/user-1000")
+    machine.succeed("test -d /sys/fs/cgroup/sessiond/user-1000/session-1")
 
     machine.shutdown()
   '';

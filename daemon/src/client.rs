@@ -61,12 +61,10 @@ pub fn add_object(
     if let Some(pid) = world.get::<ecs::ClientPid>(client_entity) {
         object.send_pid(pid.0);
     }
-    if let Some(devices) = world.get::<ecs::Devices>(client_entity) {
-        for device_entity in &devices.0 {
-            if let Some(objects) = world.get::<ecs::DeviceObjects>(*device_entity) {
-                for device_object in &objects.0 {
-                    object.send_device_added(device_object.id);
-                }
+    for device_entity in device::devices(world, client_entity) {
+        if let Some(objects) = world.get::<ecs::DeviceObjects>(device_entity) {
+            for device_object in &objects.0 {
+                object.send_device_added(device_object.id);
             }
         }
     }
@@ -114,13 +112,10 @@ pub fn entity_by_device_object(
     world: &world::World,
     object: &seat_v1::device::Device,
 ) -> Option<entity::Entity> {
-    let mut clients = world.try_query_filtered::<(Entity, &ecs::Devices), With<ecs::Client>>()?;
-    clients.iter(world).find_map(|(entity, devices)| {
-        devices
-            .0
-            .iter()
-            .any(|device_entity| device::contains_object(world, *device_entity, object))
-            .then_some(entity)
+    let mut devices =
+        world.try_query_filtered::<(&ecs::OwnerClient, Entity), With<ecs::Device>>()?;
+    devices.iter(world).find_map(|(client, device_entity)| {
+        device::contains_object(world, device_entity, object).then_some(client.0)
     })
 }
 
@@ -128,22 +123,18 @@ pub fn entity_by_core_device_object(
     world: &world::World,
     object: &session_core_seat_device::SessionCoreSeatDevice,
 ) -> Option<entity::Entity> {
-    let mut clients = world.try_query_filtered::<(Entity, &ecs::Devices), With<ecs::Client>>()?;
-    clients.iter(world).find_map(|(entity, devices)| {
-        devices
-            .0
-            .iter()
-            .any(|device_entity| {
-                world
-                    .get::<ecs::SeatDeviceObjects>(*device_entity)
-                    .is_some_and(|objects| {
-                        objects
-                            .0
-                            .iter()
-                            .any(|candidate| candidate.object == *object)
-                    })
+    let mut devices =
+        world.try_query_filtered::<(&ecs::OwnerClient, Entity), With<ecs::Device>>()?;
+    devices.iter(world).find_map(|(client, device_entity)| {
+        world
+            .get::<ecs::SeatDeviceObjects>(device_entity)
+            .is_some_and(|objects| {
+                objects
+                    .0
+                    .iter()
+                    .any(|candidate| candidate.object == *object)
             })
-            .then_some(entity)
+            .then_some(client.0)
     })
 }
 
@@ -248,39 +239,25 @@ pub fn notify_destroyed(world: &world::World, client_entity: entity::Entity) {
 }
 
 pub fn deactivate_devices(world: &mut world::World, client_entity: entity::Entity) {
-    let Some(devices) = world
-        .get::<ecs::Devices>(client_entity)
-        .map(|devices| devices.0.clone())
-    else {
-        return;
-    };
+    let devices = device::devices(world, client_entity).collect::<Vec<_>>();
 
-    let mut retained_devices = Vec::new();
     for device_entity in devices {
         if let Err(err) = device::deactivate(world, device_entity) {
             let path = device::path_display(world, device_entity);
             log::error!("Could not deactivate {path}: {err}");
-            retained_devices.push(device_entity);
             continue;
         }
 
         match device::kind(world, device_entity) {
-            Ok(device::DeviceKind::Drm | device::DeviceKind::Wscons) => {
-                retained_devices.push(device_entity);
-            }
+            Ok(device::DeviceKind::Drm | device::DeviceKind::Wscons) => {}
             Ok(device::DeviceKind::Evdev | device::DeviceKind::Hidraw) => {
                 device::notify_removed(world, client_entity, device_entity);
                 world.despawn(device_entity);
             }
             Err(err) => {
                 log::error!("Could not determine device kind: {err}");
-                retained_devices.push(device_entity);
             }
         }
-    }
-
-    if let Some(mut devices) = world.get_mut::<ecs::Devices>(client_entity) {
-        devices.0 = retained_devices;
     }
 }
 
@@ -323,16 +300,11 @@ pub fn add(
                 return Err(anyhow::anyhow!("could not determine VT for client"));
             }
 
-            let already_pending =
+            let already_pending = seat::clients(world, seat_entity).any(|client| {
                 world
-                    .get::<ecs::SeatClients>(seat_entity)
-                    .is_some_and(|clients| {
-                        clients.0.iter().any(|client| {
-                            world
-                                .get::<ecs::SessionId>(*client)
-                                .is_some_and(|session| session.0.as_raw() == vt)
-                        })
-                    });
+                    .get::<ecs::SessionId>(client)
+                    .is_some_and(|session| session.0.as_raw() == vt)
+            });
             if world.get::<ecs::ActiveClient>(seat_entity).is_some() && already_pending {
                 log::error!(
                     "Could not add client: seat is VT-bound and already has pending client"
@@ -346,16 +318,11 @@ pub fn add(
         }
         ecs::SeatKind::NonVtBound => {
             let mut next_session = 1;
-            while world
-                .get::<ecs::SeatClients>(seat_entity)
-                .is_some_and(|clients| {
-                    clients.0.iter().any(|client| {
-                        world
-                            .get::<ecs::SessionId>(*client)
-                            .is_some_and(|session| session.0.as_raw() == next_session)
-                    })
-                })
-            {
+            while seat::clients(world, seat_entity).any(|client| {
+                world
+                    .get::<ecs::SessionId>(client)
+                    .is_some_and(|session| session.0.as_raw() == next_session)
+            }) {
                 next_session += 1;
             }
 
@@ -369,13 +336,10 @@ pub fn add(
 
     world.entity_mut(client_entity).insert((
         ecs::SeatName(name.clone()),
-        ecs::SeatEntity(seat_entity),
+        ecs::ClientSeat(seat_entity),
         ecs::SessionId(session_id),
         ecs::SeatState(seat::SeatState::Enabled),
     ));
-    if let Some(mut clients) = world.get_mut::<ecs::SeatClients>(seat_entity) {
-        clients.0.push(client_entity);
-    }
     world
         .entity_mut(seat_entity)
         .insert(ecs::ActiveClient(client_entity));
@@ -428,12 +392,10 @@ pub fn open(
         seat::vt_open(session_id.as_raw())?;
     }
 
-    if let Some(devices) = world.get_mut::<ecs::Devices>(client_entity) {
-        for device_entity in devices.0.clone() {
-            if let Err(err) = device::activate(world, device_entity) {
-                let path = device::path_display(world, device_entity);
-                log::error!("Could not activate {path}: {err}");
-            }
+    for device_entity in device::devices(world, client_entity) {
+        if let Err(err) = device::activate(world, device_entity) {
+            let path = device::path_display(world, device_entity);
+            log::error!("Could not activate {path}: {err}");
         }
     }
 

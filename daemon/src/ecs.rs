@@ -18,7 +18,7 @@ pub fn insert_session(
     username: String,
     vt: Option<u32>,
     seat: Option<String>,
-    seat_entity: Option<Entity>,
+    session_seat: Option<Entity>,
     leader_id: i32,
     remote_host: Option<String>,
     active_state: session_core_v1::ActiveState,
@@ -41,8 +41,8 @@ pub fn insert_session(
     if let Some(name) = seat {
         cmd.insert(SeatName(name));
     }
-    if let Some(entity) = seat_entity {
-        cmd.insert(SeatEntity(entity));
+    if let Some(entity) = session_seat {
+        cmd.insert(SessionSeat(entity));
     }
     if let Some(session_object) = session_object {
         cmd.insert(SessionObject(session_object));
@@ -82,7 +82,6 @@ pub fn insert_client(
             ClientPid(pid),
             ClientSession(session),
             ClientObjects(Vec::new()),
-            Devices(Vec::new()),
             SeatState(seat::SeatState::New),
         ))
         .id()
@@ -95,12 +94,12 @@ pub fn insert_seat(world: &mut World, name: String, mode: SeatKind, current_vt: 
             SeatName(name),
             SeatMode(mode),
             CurrentVt(current_vt),
-            SeatClients(Vec::new()),
             SeatObjects(Vec::new()),
         ))
         .id()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn insert_device(
     world: &mut World,
     object: seat_v1::device::Device,
@@ -109,9 +108,11 @@ pub fn insert_device(
     id: u32,
     active: bool,
     fd: fd::OwnedFd,
+    owner: Entity,
 ) -> Entity {
     world
         .spawn((
+            Device,
             DeviceObjects(vec![DeviceObject { object, id }]),
             SeatDeviceObjects(Vec::new()),
             DevicePath(path),
@@ -119,6 +120,7 @@ pub fn insert_device(
             DeviceKind(kind),
             DeviceActive(active),
             DeviceFd(fd),
+            OwnerClient(owner),
         ))
         .id()
 }
@@ -134,6 +136,9 @@ pub struct User;
 
 #[derive(Component)]
 pub struct Seat;
+
+#[derive(Component)]
+pub struct Device;
 
 #[derive(Component)]
 pub struct Uid(pub u32);
@@ -157,7 +162,10 @@ pub struct Vt(pub Option<u32>);
 pub struct SeatName(pub String);
 
 #[derive(Component)]
-pub struct SeatEntity(pub Entity);
+pub struct ClientSeat(pub Entity);
+
+#[derive(Component)]
+pub struct SessionSeat(pub Entity);
 
 #[derive(Component)]
 pub struct Timestamp(pub time::SystemTime);
@@ -196,9 +204,6 @@ pub struct ClientSession(pub Option<session::SessionId>);
 pub struct ClientObjects(pub Vec<session_core_seat_client::SessionCoreSeatClient>);
 
 #[derive(Component)]
-pub struct Devices(pub Vec<Entity>);
-
-#[derive(Component)]
 pub struct DeviceObjects(pub Vec<DeviceObject>);
 
 #[derive(Component)]
@@ -230,6 +235,9 @@ pub struct DeviceActive(pub bool);
 pub struct DeviceFd(pub fd::OwnedFd);
 
 #[derive(Component)]
+pub struct OwnerClient(pub Entity);
+
+#[derive(Component)]
 pub struct SeatState(pub seat::SeatState);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -243,9 +251,6 @@ pub struct SeatMode(pub SeatKind);
 
 #[derive(Component)]
 pub struct CurrentVt(pub u32);
-
-#[derive(Component)]
-pub struct SeatClients(pub Vec<Entity>);
 
 #[derive(Component)]
 pub struct SeatObjects(pub Vec<session_core_seat::SessionCoreSeat>);

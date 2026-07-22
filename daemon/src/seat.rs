@@ -41,6 +41,23 @@ pub fn entities(world: &world::World) -> impl Iterator<Item = entity::Entity> + 
     seats.iter(world).collect::<Vec<_>>().into_iter()
 }
 
+pub fn clients(
+    world: &world::World,
+    seat_entity: entity::Entity,
+) -> impl Iterator<Item = entity::Entity> + use<> {
+    let Some(mut clients) =
+        world.try_query_filtered::<(Entity, &ecs::ClientSeat), With<ecs::Client>>()
+    else {
+        return Vec::new().into_iter();
+    };
+
+    clients
+        .iter(world)
+        .filter_map(move |(client_entity, seat)| (seat.0 == seat_entity).then_some(client_entity))
+        .collect::<Vec<_>>()
+        .into_iter()
+}
+
 pub fn first(world: &world::World) -> Option<entity::Entity> {
     entities(world).next()
 }
@@ -67,11 +84,9 @@ pub fn add_object(
     if let Some(vt) = world.get::<ecs::CurrentVt>(seat_entity) {
         object.send_current_vt(vt.0);
     }
-    if let Some(clients) = world.get::<ecs::SeatClients>(seat_entity) {
-        for client_entity in &clients.0 {
-            if let Some(pid) = world.get::<ecs::ClientPid>(*client_entity) {
-                object.send_client_added(pid.0);
-            }
+    for client_entity in clients(world, seat_entity) {
+        if let Some(pid) = world.get::<ecs::ClientPid>(client_entity) {
+            object.send_client_added(pid.0);
         }
     }
     if let Some(client) = object.client() {
@@ -177,16 +192,11 @@ pub fn set_next_session(
         return Ok(());
     }
 
-    let Some(target) = world
-        .get::<ecs::SeatClients>(seat_entity)
-        .and_then(|clients| {
-            clients.0.iter().copied().find(|candidate| {
-                world
-                    .get::<ecs::SessionId>(*candidate)
-                    .is_some_and(|candidate_session| candidate_session.0 == session)
-            })
-        })
-    else {
+    let Some(target) = clients(world, seat_entity).find(|candidate| {
+        world
+            .get::<ecs::SessionId>(*candidate)
+            .is_some_and(|candidate_session| candidate_session.0 == session)
+    }) else {
         log::error!("Could not set next session: no such client");
         return Err(anyhow::anyhow!("no such client"));
     };
@@ -220,22 +230,13 @@ pub fn remove_client(
         .map(|session| session.0);
     let name = name(world, seat_entity)?;
 
-    if let Some(mut clients) = world.get_mut::<ecs::SeatClients>(seat_entity) {
-        clients.0.retain(|client| *client != client_entity);
-    }
-
-    if let Some(devices) = world.get::<ecs::Devices>(client_entity) {
-        for device_entity in devices.0.clone() {
-            if let Err(err) = device::deactivate(world, device_entity) {
-                let path = device::path_display(world, device_entity);
-                log::error!("Could not deactivate {path}: {err}");
-            }
-            device::notify_removed(world, client_entity, device_entity);
-            world.despawn(device_entity);
+    for device_entity in device::devices(world, client_entity) {
+        if let Err(err) = device::deactivate(world, device_entity) {
+            let path = device::path_display(world, device_entity);
+            log::error!("Could not deactivate {path}: {err}");
         }
-    }
-    if let Some(mut devices) = world.get_mut::<ecs::Devices>(client_entity) {
-        devices.0.clear();
+        device::notify_removed(world, client_entity, device_entity);
+        world.despawn(device_entity);
     }
 
     let was_current = client::is_active(world, seat_entity, client_entity);
@@ -389,12 +390,8 @@ pub fn sync_states(world: &mut world::World) {
 }
 
 fn send_session_switched(world: &world::World, seat_entity: entity::Entity, session: u32) {
-    let Some(clients) = world.get::<ecs::SeatClients>(seat_entity) else {
-        return;
-    };
-
-    for client in &clients.0 {
-        if let Some(object) = world.get::<ecs::SeatObject>(*client) {
+    for client in clients(world, seat_entity) {
+        if let Some(object) = world.get::<ecs::SeatObject>(client) {
             object.0.send_session_switched(session);
         }
     }
@@ -412,10 +409,7 @@ pub fn activate(world: &mut world::World, seat_entity: entity::Entity) -> anyhow
             client::notify_next(world, next_client.0, false);
             Some(next_client.0)
         } else {
-            let clients = world
-                .get::<ecs::SeatClients>(seat_entity)
-                .map(|clients| clients.0.clone())
-                .unwrap_or_default();
+            let clients = clients(world, seat_entity).collect::<Vec<_>>();
             if clients.is_empty() {
                 log::info!("No clients on {name} to activate");
                 return Err(anyhow::anyhow!("No clients on {name} to activate"));
@@ -506,9 +500,7 @@ fn activate_vt(
     notify_current_vt(world, seat_entity);
 
     if world.get::<ecs::ActiveClient>(seat_entity).is_none() {
-        let has_clients = world
-            .get::<ecs::SeatClients>(seat_entity)
-            .is_some_and(|clients| !clients.0.is_empty());
+        let has_clients = clients(world, seat_entity).next().is_some();
         if has_clients {
             activate(world, seat_entity)?;
         } else {
@@ -685,13 +677,13 @@ impl hyprwire::Dispatch<seat_manager::SeatManager> for crate::Sessiond {
                     if let Some(entity) = session::entity(&self.world, session_id) {
                         if self
                             .world
-                            .get::<ecs::SeatEntity>(entity)
+                            .get::<ecs::SessionSeat>(entity)
                             .is_none_or(|seat| seat.0 != seat_entity)
                         {
                             log::info!(session_id = session_id.as_raw(), seat = name.as_str(); "session seat changed");
                             self.world.entity_mut(entity).insert((
                                 ecs::SeatName(name.clone()),
-                                ecs::SeatEntity(seat_entity),
+                                ecs::SessionSeat(seat_entity),
                             ));
                         }
                         if let Some(objects) = self.world.get::<ecs::SessionObjects>(entity) {
@@ -716,7 +708,7 @@ impl hyprwire::Dispatch<seat::Seat> for crate::Sessiond {
         };
         let Some(seat_entity) = self
             .world
-            .get::<ecs::SeatEntity>(client_entity)
+            .get::<ecs::ClientSeat>(client_entity)
             .map(|seat| seat.0)
         else {
             log::error!("Seat client has no seat entity");
@@ -793,7 +785,7 @@ impl hyprwire::Dispatch<session_core_seat::SessionCoreSeat> for crate::Sessiond 
                 };
                 if self
                     .world
-                    .get::<ecs::SeatEntity>(client_entity)
+                    .get::<ecs::ClientSeat>(client_entity)
                     .is_none_or(|seat| seat.0 != seat_entity)
                 {
                     session_core_seat_client.send_destroyed();

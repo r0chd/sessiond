@@ -2,6 +2,7 @@ use crate::seat_v1::device;
 use crate::session_core_v1;
 use crate::session_core_v1::session_core_seat_device;
 use crate::{client, ecs, seat, seat_v1};
+use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 use rustix::{io, ioctl};
 use std::ffi::c_int;
@@ -72,6 +73,25 @@ pub fn remove_id_objects(world: &mut world::World, device_entity: entity::Entity
     }
 }
 
+pub fn devices(
+    world: &world::World,
+    client_entity: entity::Entity,
+) -> impl Iterator<Item = entity::Entity> + use<> {
+    let Some(mut devices) =
+        world.try_query_filtered::<(Entity, &ecs::OwnerClient), With<ecs::Device>>()
+    else {
+        return Vec::new().into_iter();
+    };
+
+    devices
+        .iter(world)
+        .filter_map(move |(device_entity, client)| {
+            (client.0 == client_entity).then_some(device_entity)
+        })
+        .collect::<Vec<_>>()
+        .into_iter()
+}
+
 fn close(
     world: &mut world::World,
     client_entity: entity::Entity,
@@ -85,16 +105,9 @@ fn close(
         .get::<ecs::SeatName>(client_entity)
         .map(|seat| seat.0.clone())
         .ok_or_else(|| anyhow::anyhow!("client has no seat"))?;
-    let devices = world
-        .get::<ecs::Devices>(client_entity)
-        .ok_or_else(|| anyhow::anyhow!("client has no devices"))?;
-    let idx = devices
-        .0
-        .iter()
-        .position(|device_entity| contains_object(world, *device_entity, object))
+    let device_entity = devices(world, client_entity)
+        .find(|device_entity| contains_object(world, *device_entity, object))
         .ok_or_else(|| anyhow::anyhow!("device not found"))?;
-
-    let device_entity = devices.0[idx];
     let device_id = world
         .get::<ecs::DeviceObjects>(device_entity)
         .and_then(|objects| {
@@ -130,9 +143,6 @@ fn close(
         );
     }
 
-    if let Some(mut devices) = world.get_mut::<ecs::Devices>(client_entity) {
-        devices.0.remove(idx);
-    }
     notify_destroyed(world, device_entity);
     world.despawn(device_entity);
 
@@ -186,17 +196,7 @@ pub fn open(
         return;
     };
 
-    let Some(device_entities) = world
-        .get::<ecs::Devices>(client_entity)
-        .map(|devices| devices.0.clone())
-    else {
-        device.send_failed(
-            seat_v1::DeviceError::OpenFailed,
-            io::Errno::INVAL.raw_os_error().cast_unsigned(),
-            "client has no device storage",
-        );
-        return;
-    };
+    let device_entities = devices(world, client_entity).collect::<Vec<_>>();
 
     let open_handle_count = device_entities
         .iter()
@@ -272,6 +272,7 @@ pub fn open(
         device_id,
         matches!(kind, DeviceKind::Evdev | DeviceKind::Hidraw),
         fd,
+        client_entity,
     );
 
     if let Err(err) = activate(world, device_entity) {
@@ -295,9 +296,6 @@ pub fn open(
 
     if let Err(err) = send_opened(world, device_entity) {
         log::error!("Could not send opened device event: {err}");
-    }
-    if let Some(mut devices) = world.get_mut::<ecs::Devices>(client_entity) {
-        devices.0.push(device_entity);
     }
     client::notify_device_added(world, client_entity, device_id);
 }
@@ -560,16 +558,11 @@ pub fn entity_by_id(
     client_entity: entity::Entity,
     device_id: u32,
 ) -> Option<entity::Entity> {
-    world
-        .get::<ecs::Devices>(client_entity)?
-        .0
-        .iter()
-        .copied()
-        .find(|device_entity| {
-            world
-                .get::<ecs::DeviceObjects>(*device_entity)
-                .is_some_and(|objects| objects.0.iter().any(|object| object.id == device_id))
-        })
+    devices(world, client_entity).find(|device_entity| {
+        world
+            .get::<ecs::DeviceObjects>(*device_entity)
+            .is_some_and(|objects| objects.0.iter().any(|object| object.id == device_id))
+    })
 }
 
 pub fn entity_by_core_object(
@@ -577,21 +570,16 @@ pub fn entity_by_core_object(
     client_entity: entity::Entity,
     object: &session_core_seat_device::SessionCoreSeatDevice,
 ) -> Option<entity::Entity> {
-    world
-        .get::<ecs::Devices>(client_entity)?
-        .0
-        .iter()
-        .copied()
-        .find(|device_entity| {
-            world
-                .get::<ecs::SeatDeviceObjects>(*device_entity)
-                .is_some_and(|objects| {
-                    objects
-                        .0
-                        .iter()
-                        .any(|candidate| candidate.object == *object)
-                })
-        })
+    devices(world, client_entity).find(|device_entity| {
+        world
+            .get::<ecs::SeatDeviceObjects>(*device_entity)
+            .is_some_and(|objects| {
+                objects
+                    .0
+                    .iter()
+                    .any(|candidate| candidate.object == *object)
+            })
+    })
 }
 
 pub const fn kind_event(kind: DeviceKind) -> session_core_v1::SeatDeviceKind {

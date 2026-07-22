@@ -20,7 +20,6 @@ fn insert_seat_sets_expected_components() {
         Some(ecs::SeatKind::NonVtBound)
     ));
     assert_eq!(world.get::<ecs::CurrentVt>(seat).map(|v| v.0), Some(0));
-    assert!(world.get::<ecs::SeatClients>(seat).is_some());
 }
 
 #[test]

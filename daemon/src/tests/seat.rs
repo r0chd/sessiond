@@ -7,10 +7,7 @@ fn make_seat(world: &mut World) -> Entity {
 
 fn make_client(world: &mut World) -> Entity {
     world
-        .spawn((
-            ecs::Devices(Vec::new()),
-            ecs::SeatState(seat::SeatState::New),
-        ))
+        .spawn((ecs::Client, ecs::SeatState(seat::SeatState::New)))
         .id()
 }
 
@@ -158,7 +155,7 @@ fn ack_disable_activates_next_queued_client() {
     world
         .entity_mut(c2)
         .insert(ecs::SeatName("seat0".to_string()));
-    world.entity_mut(c2).insert(ecs::SeatEntity(seat));
+    world.entity_mut(c2).insert(ecs::ClientSeat(seat));
     world.entity_mut(seat).insert(ecs::NextClient(c2));
 
     client::disable(&mut world, seat, c1).unwrap();
@@ -208,9 +205,5 @@ fn remove_client_cleans_up() {
     client::add(&mut world, seat, client).unwrap();
     seat::remove_client(&mut world, seat, client).unwrap();
     assert!(world.get::<ecs::ActiveClient>(seat).is_none());
-    assert!(
-        world
-            .get::<ecs::SeatClients>(seat)
-            .is_some_and(|c| c.0.is_empty())
-    );
+    assert!(seat::clients(&world, seat).next().is_none());
 }

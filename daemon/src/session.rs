@@ -686,9 +686,9 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                         session.remove::<ecs::SeatName>();
                     }
                     if let Some(seat_entity) = session_seat_entity {
-                        session.insert(ecs::SeatEntity(seat_entity));
+                        session.insert(ecs::SessionSeat(seat_entity));
                     } else {
-                        session.remove::<ecs::SeatEntity>();
+                        session.remove::<ecs::SessionSeat>();
                     }
                 }
 

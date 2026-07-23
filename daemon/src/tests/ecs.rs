@@ -1,11 +1,11 @@
 use crate::session_core_v1;
-use crate::{ecs, session};
+use crate::{ecs, seat, session};
 use bevy_ecs::prelude::*;
 
 #[test]
-fn insert_seat_sets_expected_components() {
+fn spawn_seat_sets_expected_components() {
     let mut world = World::new();
-    let seat = ecs::insert_seat(
+    let seat = seat::spawn(
         &mut world,
         "seat0".to_string(),
         ecs::SeatKind::NonVtBound,
@@ -23,10 +23,10 @@ fn insert_seat_sets_expected_components() {
 }
 
 #[test]
-fn insert_session_sets_expected_components() {
+fn spawn_session_sets_expected_components() {
     let mut world = World::new();
     let id = session::SessionId::from_raw(1);
-    let entity = ecs::insert_session(
+    let entity = session::spawn(
         &mut world,
         id,
         1000,

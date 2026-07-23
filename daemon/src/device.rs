@@ -12,6 +12,35 @@ use std::{fs, path};
 
 const MAX_SEAT_DEVICES: u8 = 128;
 
+#[allow(clippy::too_many_arguments)]
+pub fn spawn(
+    world: &mut world::World,
+    object: seat_v1::device::Device,
+    path: path::PathBuf,
+    kind: DeviceKind,
+    id: u32,
+    active: bool,
+    fd: fd::OwnedFd,
+    owner: entity::Entity,
+) -> entity::Entity {
+    let mut cmd = world.spawn(ecs::DeviceBundle {
+        marker: ecs::Device,
+        objects: ecs::DeviceObjects(vec![ecs::DeviceObject { object, id }]),
+        seat_objects: ecs::SeatDeviceObjects(Vec::new()),
+        path: ecs::DevicePath(path),
+        ref_count: ecs::DeviceRefCount(1),
+        kind: ecs::DeviceKind(kind),
+        fd: ecs::DeviceFd(fd),
+        owner: ecs::OwnerClient(owner),
+    });
+
+    if active {
+        cmd.insert(ecs::DeviceActive);
+    }
+
+    cmd.id()
+}
+
 impl hyprwire::Dispatch<device::Device> for crate::Sessiond {
     fn event(
         &mut self,
@@ -264,7 +293,7 @@ pub fn open(
         }
     };
 
-    let device_entity = ecs::insert_device(
+    let device_entity = spawn(
         world,
         device,
         sanitized_path,

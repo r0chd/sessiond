@@ -27,6 +27,51 @@ impl SessionId {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn spawn(
+    world: &mut world::World,
+    session_id: SessionId,
+    uid: u32,
+    username: String,
+    vt: Option<u32>,
+    seat: Option<String>,
+    session_seat: Option<entity::Entity>,
+    leader_id: i32,
+    remote_host: Option<String>,
+    active_state: session_core_v1::ActiveState,
+    session_object: Option<session_management_session::SessionManagementSession>,
+) -> entity::Entity {
+    let mut cmd = world.spawn(ecs::SessionBundle {
+        marker: ecs::Session,
+        id: ecs::SessionId(session_id),
+        uid: ecs::Uid(uid),
+        username: ecs::Username(username),
+        timestamp: ecs::Timestamp(time::SystemTime::now()),
+        leader_id: ecs::LeaderId(leader_id),
+        env: ecs::SessionEnv(BTreeMap::new()),
+        objects: ecs::SessionObjects(Vec::new()),
+        active_state: ecs::ActiveState(active_state),
+    });
+    if let Some(vt) = vt.and_then(num::NonZeroU32::new) {
+        cmd.insert(ecs::Vt(vt));
+    }
+    if let Some(remote_host) = remote_host {
+        cmd.insert(ecs::RemoteHost(remote_host));
+    } else {
+        cmd.insert(ecs::IsLocal);
+    }
+    if let Some(name) = seat {
+        cmd.insert(ecs::SeatName(name));
+    }
+    if let Some(entity) = session_seat {
+        cmd.insert(ecs::SessionSeat(entity));
+    }
+    if let Some(session_object) = session_object {
+        cmd.insert(ecs::SessionObject(session_object));
+    }
+    cmd.id()
+}
+
 pub fn entities(world: &world::World) -> impl Iterator<Item = entity::Entity> {
     let Some(mut sessions) = world.try_query_filtered::<Entity, With<ecs::Session>>() else {
         return Vec::new().into_iter();
@@ -449,7 +494,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for crate::Sessiond {
 
                 user::create_runtime_dir(uid, &self.user_config(&username).runtime_dir(uid));
 
-                let _session_entity = ecs::insert_session(
+                let _session_entity = spawn(
                     &mut self.world,
                     session_id,
                     uid,
@@ -553,7 +598,7 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                 );
                 env.extend(session_envs_by_uid(&self.world, uid, None));
 
-                let session_entity = ecs::insert_session(
+                let session_entity = spawn(
                     &mut self.world,
                     session_id,
                     uid,

@@ -38,9 +38,7 @@ impl SessionInfo {
                 .get::<ecs::SeatName>(entity)
                 .map_or_else(|| "seat0".to_string(), |seat| seat.0.clone()),
             timestamp: world.get::<ecs::Timestamp>(entity)?.0,
-            is_local: world
-                .get::<ecs::IsLocal>(entity)
-                .is_none_or(|local| local.0),
+            is_local: world.get::<ecs::IsLocal>(entity).is_some(),
             active: world.get::<ecs::ActiveState>(entity)?.0,
         })
     }

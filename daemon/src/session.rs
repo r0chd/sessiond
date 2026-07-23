@@ -8,7 +8,7 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 use rustix::system;
 use std::collections::BTreeMap;
-use std::{fs, time};
+use std::{fs, num, time};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct SessionId(u32);
@@ -302,7 +302,7 @@ pub fn add_object(
     if let Some(username) = world.get::<ecs::Username>(entity) {
         object.send_username(&username.0);
     }
-    if let Some(vt) = world.get::<ecs::Vt>(entity).and_then(|vt| vt.0) {
+    if let Some(vt) = world.get::<ecs::Vt>(entity).map(|vt| vt.0.get()) {
         object.send_vt(vt);
     }
     if let Some(active_state) = world.get::<ecs::ActiveState>(entity) {
@@ -326,13 +326,13 @@ pub fn add_object(
         let timestamp = u32::try_from(timestamp_secs).unwrap_or(u32::MAX);
         object.send_timestamp(timestamp);
     }
-    if let Some(is_local) = world.get::<ecs::IsLocal>(entity) {
-        object.send_is_local(u32::from(is_local.0));
+    if world.get::<ecs::IsLocal>(entity).is_some() {
+        object.send_is_local(1);
+    } else {
+        object.send_is_local(0);
     }
-    if let Some(remote_host) = world.get::<ecs::RemoteHost>(entity)
-        && let Some(remote_host) = remote_host.0.as_ref()
-    {
-        object.send_remote_host(remote_host);
+    if let Some(remote_host) = world.get::<ecs::RemoteHost>(entity) {
+        object.send_remote_host(&remote_host.0);
     }
     object.send_done();
 
@@ -355,7 +355,7 @@ pub fn set_state(
 ) {
     let vt = world
         .get::<ecs::Vt>(entity)
-        .and_then(|vt| vt.0)
+        .map(|vt| vt.0.get())
         .unwrap_or_default();
     log::info!(session_id = session_id.as_raw(), vt; "session state changed");
     if let Some(mut active_state) = world.get_mut::<ecs::ActiveState>(entity) {
@@ -511,7 +511,7 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                 seat::refresh_current_vts(&mut self.world);
 
                 let is_local = is_local != 0;
-                let session_vt = (vt != 0).then_some(vt);
+                let session_vt = num::NonZeroU32::new(vt);
                 let mut session_seat_entity = if session_vt.is_some() {
                     seat::first(&self.world)
                 } else {
@@ -558,7 +558,7 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                     session_id,
                     uid,
                     username,
-                    session_vt,
+                    session_vt.map(num::NonZeroU32::get),
                     session_seat.clone(),
                     session_seat_entity,
                     client.creds().pid.as_raw_pid(),
@@ -624,14 +624,15 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
 
         match event {
             session_management_session::Event::Vt { vt } => {
-                self.world
-                    .entity_mut(entity)
-                    .insert(ecs::Vt((vt != 0).then_some(vt)));
+                if let Some(vt) = num::NonZeroU32::new(vt) {
+                    self.world.entity_mut(entity).insert(ecs::Vt(vt));
+                }
             }
             session_management_session::Event::RemoteHost { remote_host } => {
                 self.world
                     .entity_mut(entity)
-                    .insert((ecs::RemoteHost(Some(remote_host)), ecs::IsLocal(false)));
+                    .insert(ecs::RemoteHost(remote_host));
+                self.world.entity_mut(entity).remove::<ecs::IsLocal>();
             }
             session_management_session::Event::Done => {
                 let uid = self.world.get::<ecs::Uid>(entity).map(|uid| uid.0);
@@ -639,11 +640,8 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                     .world
                     .get::<ecs::Username>(entity)
                     .map(|username| username.0.clone());
-                let session_vt = self.world.get::<ecs::Vt>(entity).and_then(|vt| vt.0);
-                let is_local = self
-                    .world
-                    .get::<ecs::IsLocal>(entity)
-                    .is_none_or(|is_local| is_local.0);
+                let session_vt = self.world.get::<ecs::Vt>(entity).map(|vt| vt.0);
+                let is_local = self.world.get::<ecs::IsLocal>(entity).is_some();
                 seat::refresh_current_vts(&mut self.world);
 
                 let mut session_seat_entity = if session_vt.is_some() {

@@ -275,26 +275,22 @@ fn run(config: DaemonConfig) -> anyhow::Result<()> {
 
                 if active_state == session_core_v1::ActiveState::Active {
                     state_updates.extend(session::entities(&state.world).filter_map(|entity| {
-                        let session_vt = state.world.get::<ecs::Vt>(entity)?.0;
+                        let session_vt = state.world.get::<ecs::Vt>(entity)?.0.get();
                         let session_state = state.world.get::<ecs::ActiveState>(entity)?.0;
 
-                        match session_vt {
-                            Some(session_vt)
-                                if session_vt != vt
-                                    && session_state == session_core_v1::ActiveState::Active =>
-                            {
-                                Some((entity, session_core_v1::ActiveState::Online))
-                            }
-                            _ => None,
+                        if session_vt != vt.get()
+                            && session_state == session_core_v1::ActiveState::Active
+                        {
+                            return Some((entity, session_core_v1::ActiveState::Online));
                         }
+
+                        None
                     }));
                 }
 
                 state_updates.extend(session::entities(&state.world).filter_map(|entity| {
-                    let session_vt = state.world.get::<ecs::Vt>(entity)?.0;
-                    session_vt
-                        .is_some_and(|session_vt| session_vt == vt)
-                        .then_some((entity, active_state))
+                    let session_vt = state.world.get::<ecs::Vt>(entity)?.0.get();
+                    (session_vt == vt.get()).then_some((entity, active_state))
                 }));
 
                 for (entity, active_state) in state_updates {

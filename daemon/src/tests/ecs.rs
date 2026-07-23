@@ -19,7 +19,7 @@ fn insert_seat_sets_expected_components() {
         world.get::<ecs::SeatMode>(seat).map(|m| m.0),
         Some(ecs::SeatKind::NonVtBound)
     ));
-    assert_eq!(world.get::<ecs::CurrentVt>(seat).map(|v| v.0), Some(0));
+    assert!(world.get::<ecs::CurrentVt>(seat).is_none());
 }
 
 #[test]
@@ -44,7 +44,7 @@ fn insert_session_sets_expected_components() {
         Some(1)
     );
     assert_eq!(world.get::<ecs::Uid>(entity).map(|u| u.0), Some(1000));
-    assert_eq!(world.get::<ecs::Vt>(entity).and_then(|v| v.0), Some(2));
+    assert_eq!(world.get::<ecs::Vt>(entity).map(|v| v.0.get()), Some(2));
     assert_eq!(
         world.get::<ecs::ActiveState>(entity).map(|a| a.0),
         Some(session_core_v1::ActiveState::Active)

@@ -8,7 +8,7 @@ use crate::{
 use bevy_ecs::prelude::*;
 use std::collections::BTreeMap;
 use std::os::fd;
-use std::{path, time};
+use std::{num, path, time};
 
 #[allow(clippy::too_many_arguments)]
 pub fn insert_session(
@@ -29,15 +29,20 @@ pub fn insert_session(
         SessionId(session_id),
         Uid(uid),
         Username(username),
-        Vt(vt),
         Timestamp(time::SystemTime::now()),
         LeaderId(leader_id),
-        IsLocal(remote_host.is_none()),
-        RemoteHost(remote_host),
         SessionEnv(BTreeMap::new()),
         SessionObjects(Vec::new()),
         ActiveState(active_state),
     ));
+    if let Some(vt) = vt.and_then(num::NonZeroU32::new) {
+        cmd.insert(Vt(vt));
+    }
+    if let Some(remote_host) = remote_host {
+        cmd.insert(RemoteHost(remote_host));
+    } else {
+        cmd.insert(IsLocal);
+    }
     if let Some(name) = seat {
         cmd.insert(SeatName(name));
     }
@@ -57,16 +62,19 @@ pub fn insert_user(
     lingering: bool,
     state: session_core_v1::UserState,
 ) -> Entity {
-    world
-        .spawn((
-            User,
-            Uid(uid),
-            Username(username),
-            Lingering(lingering),
-            UserState(state),
-            UserObjects(Vec::new()),
-        ))
-        .id()
+    let mut cmd = world.spawn((
+        User,
+        Uid(uid),
+        Username(username),
+        UserState(state),
+        UserObjects(Vec::new()),
+    ));
+
+    if lingering {
+        cmd.insert(Lingering);
+    }
+
+    cmd.id()
 }
 
 pub fn insert_client(
@@ -75,28 +83,34 @@ pub fn insert_client(
     pid: u32,
     session: Option<session::SessionId>,
 ) -> Entity {
-    world
-        .spawn((
-            Client,
-            SeatObject(object),
-            ClientPid(pid),
-            ClientSession(session),
-            ClientObjects(Vec::new()),
-            SeatState(seat::SeatState::New),
-        ))
-        .id()
+    let mut cmd = world.spawn((
+        Client,
+        SeatObject(object),
+        ClientPid(pid),
+        ClientObjects(Vec::new()),
+        SeatState(seat::SeatState::New),
+    ));
+
+    if let Some(session) = session {
+        cmd.insert(ClientSession(session));
+    }
+
+    cmd.id()
 }
 
 pub fn insert_seat(world: &mut World, name: String, mode: SeatKind, current_vt: u32) -> Entity {
-    world
-        .spawn((
-            Seat,
-            SeatName(name),
-            SeatMode(mode),
-            CurrentVt(current_vt),
-            SeatObjects(Vec::new()),
-        ))
-        .id()
+    let mut cmd = world.spawn((
+        Seat,
+        SeatName(name),
+        SeatMode(mode),
+        SeatObjects(Vec::new()),
+    ));
+
+    if let Some(current_vt) = num::NonZeroU32::new(current_vt) {
+        cmd.insert(CurrentVt(current_vt));
+    }
+
+    cmd.id()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -110,19 +124,22 @@ pub fn insert_device(
     fd: fd::OwnedFd,
     owner: Entity,
 ) -> Entity {
-    world
-        .spawn((
-            Device,
-            DeviceObjects(vec![DeviceObject { object, id }]),
-            SeatDeviceObjects(Vec::new()),
-            DevicePath(path),
-            DeviceRefCount(1),
-            DeviceKind(kind),
-            DeviceActive(active),
-            DeviceFd(fd),
-            OwnerClient(owner),
-        ))
-        .id()
+    let mut cmd = world.spawn((
+        Device,
+        DeviceObjects(vec![DeviceObject { object, id }]),
+        SeatDeviceObjects(Vec::new()),
+        DevicePath(path),
+        DeviceRefCount(1),
+        DeviceKind(kind),
+        DeviceFd(fd),
+        OwnerClient(owner),
+    ));
+
+    if active {
+        cmd.insert(DeviceActive);
+    }
+
+    cmd.id()
 }
 
 #[derive(Component)]
@@ -147,7 +164,7 @@ pub struct Uid(pub u32);
 pub struct Username(pub String);
 
 #[derive(Component)]
-pub struct Lingering(pub bool);
+pub struct Lingering;
 
 #[derive(Component)]
 pub struct UserState(pub session_core_v1::UserState);
@@ -156,7 +173,7 @@ pub struct UserState(pub session_core_v1::UserState);
 pub struct UserObjects(pub Vec<session_core_user::SessionCoreUser>);
 
 #[derive(Component)]
-pub struct Vt(pub Option<u32>);
+pub struct Vt(pub num::NonZeroU32);
 
 #[derive(Component)]
 pub struct SeatName(pub String);
@@ -174,10 +191,10 @@ pub struct Timestamp(pub time::SystemTime);
 pub struct LeaderId(pub i32);
 
 #[derive(Component)]
-pub struct IsLocal(pub bool);
+pub struct IsLocal;
 
 #[derive(Component)]
-pub struct RemoteHost(pub Option<String>);
+pub struct RemoteHost(pub String);
 
 #[derive(Component)]
 pub struct SessionEnv(pub BTreeMap<String, String>);
@@ -198,7 +215,7 @@ pub struct SeatObject(pub seat_v1::seat::Seat);
 pub struct ClientPid(pub u32);
 
 #[derive(Component)]
-pub struct ClientSession(pub Option<session::SessionId>);
+pub struct ClientSession(pub session::SessionId);
 
 #[derive(Component)]
 pub struct ClientObjects(pub Vec<session_core_seat_client::SessionCoreSeatClient>);
@@ -229,7 +246,7 @@ pub struct DeviceRefCount(pub usize);
 pub struct DeviceKind(pub device::DeviceKind);
 
 #[derive(Component)]
-pub struct DeviceActive(pub bool);
+pub struct DeviceActive;
 
 #[derive(Component)]
 pub struct DeviceFd(pub fd::OwnedFd);
@@ -250,7 +267,7 @@ pub enum SeatKind {
 pub struct SeatMode(pub SeatKind);
 
 #[derive(Component)]
-pub struct CurrentVt(pub u32);
+pub struct CurrentVt(pub num::NonZeroU32);
 
 #[derive(Component)]
 pub struct SeatObjects(pub Vec<session_core_seat::SessionCoreSeat>);

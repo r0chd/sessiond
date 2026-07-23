@@ -1,14 +1,62 @@
 use crate::session_core_v1::{
-    session_core_seat, session_core_seat_client, session_core_seat_device,
+    session_core_manager, session_core_seat, session_core_seat_client, session_core_seat_device,
 };
+use crate::session_management_v1::session_manager;
 use crate::session_management_v2::session_management_session;
 use crate::{
-    device, seat, seat_v1, session, session_core_session, session_core_user, session_core_v1,
+    config, device, seat, seat_v1, session, session_core_session, session_core_user,
+    session_core_v1,
 };
 use bevy_ecs::prelude::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::os::fd;
 use std::{num, path, time};
+
+// Resources
+
+#[derive(Resource)]
+pub struct AccessRules {
+    pub seat: crate::Access,
+    pub management: crate::Access,
+}
+
+#[derive(Resource)]
+pub struct DaemonConfig(pub config::Config);
+
+#[derive(Resource, Default)]
+pub struct SessionInfoManagers(pub Vec<session_core_manager::SessionCoreManager>);
+
+#[derive(Resource)]
+pub struct NextSessionId(pub session::SessionId);
+
+impl NextSessionId {
+    pub const fn take(&mut self) -> session::SessionId {
+        let id = self.0;
+        self.0 = self.0.next();
+        id
+    }
+}
+
+#[derive(Resource, Default)]
+pub struct PendingSessionEnvs(
+    pub HashMap<session_manager::SessionManager, BTreeMap<String, String>>,
+);
+
+#[derive(Resource, Default)]
+pub struct ProtocolObjects {
+    pub sessions: HashMap<Entity, Vec<session_core_session::SessionCoreSession>>,
+    pub users: HashMap<Entity, Vec<session_core_user::SessionCoreUser>>,
+    pub seats: HashMap<Entity, Vec<session_core_seat::SessionCoreSeat>>,
+    pub clients: HashMap<Entity, Vec<session_core_seat_client::SessionCoreSeatClient>>,
+    pub devices: HashMap<Entity, Vec<DeviceObject>>,
+    pub seat_devices: HashMap<Entity, Vec<SeatDeviceObject>>,
+}
+
+pub fn ensure_protocol_objects(world: &mut World) {
+    if world.get_resource::<ProtocolObjects>().is_none() {
+        world.insert_resource(ProtocolObjects::default());
+    }
+}
 
 // Bundles
 
@@ -21,7 +69,6 @@ pub struct SessionBundle {
     pub timestamp: Timestamp,
     pub leader_id: LeaderId,
     pub env: SessionEnv,
-    pub objects: SessionObjects,
     pub active_state: ActiveState,
 }
 
@@ -31,7 +78,6 @@ pub struct UserBundle {
     pub uid: Uid,
     pub username: Username,
     pub state: UserState,
-    pub objects: UserObjects,
 }
 
 #[derive(Bundle)]
@@ -39,7 +85,6 @@ pub struct ClientBundle {
     pub marker: Client,
     pub seat_object: SeatObject,
     pub pid: ClientPid,
-    pub objects: ClientObjects,
     pub state: SeatState,
 }
 
@@ -48,14 +93,11 @@ pub struct SeatBundle {
     pub marker: Seat,
     pub name: SeatName,
     pub mode: SeatMode,
-    pub objects: SeatObjects,
 }
 
 #[derive(Bundle)]
 pub struct DeviceBundle {
     pub marker: Device,
-    pub objects: DeviceObjects,
-    pub seat_objects: SeatDeviceObjects,
     pub path: DevicePath,
     pub ref_count: DeviceRefCount,
     pub kind: DeviceKind,
@@ -108,9 +150,6 @@ pub struct SessionId(pub session::SessionId);
 #[derive(Component)]
 pub struct UserState(pub session_core_v1::UserState);
 
-#[derive(Component)]
-pub struct UserObjects(pub Vec<session_core_user::SessionCoreUser>);
-
 // Session components
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
@@ -132,9 +171,6 @@ pub struct RemoteHost(pub String);
 pub struct SessionEnv(pub BTreeMap<String, String>);
 
 #[derive(Component)]
-pub struct SessionObjects(pub Vec<session_core_session::SessionCoreSession>);
-
-#[derive(Component)]
 pub struct ActiveState(pub session_core_v1::ActiveState);
 
 #[derive(Component)]
@@ -154,9 +190,6 @@ pub struct SeatMode(pub SeatKind);
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CurrentVt(pub num::NonZeroU32);
 
-#[derive(Component)]
-pub struct SeatObjects(pub Vec<session_core_seat::SessionCoreSeat>);
-
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ActiveClient(pub Entity);
 
@@ -174,9 +207,6 @@ pub struct ClientPid(pub u32);
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClientSession(pub session::SessionId);
 
-#[derive(Component)]
-pub struct ClientObjects(pub Vec<session_core_seat_client::SessionCoreSeatClient>);
-
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClientSeat(pub Entity);
 
@@ -184,12 +214,6 @@ pub struct ClientSeat(pub Entity);
 pub struct SeatState(pub seat::SeatState);
 
 // Device components
-
-#[derive(Component)]
-pub struct DeviceObjects(pub Vec<DeviceObject>);
-
-#[derive(Component)]
-pub struct SeatDeviceObjects(pub Vec<SeatDeviceObject>);
 
 pub struct SeatDeviceObject {
     pub object: session_core_seat_device::SessionCoreSeatDevice,

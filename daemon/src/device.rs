@@ -2,7 +2,6 @@ use crate::seat_v1::device;
 use crate::session_core_v1;
 use crate::session_core_v1::session_core_seat_device;
 use crate::{client, ecs, seat, seat_v1};
-use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 use rustix::{io, ioctl};
 use std::ffi::c_int;
@@ -11,6 +10,12 @@ use std::os::fd::AsFd;
 use std::{fs, path};
 
 const MAX_SEAT_DEVICES: u8 = 128;
+
+pub fn remove_protocol_objects(world: &mut world::World, device_entity: entity::Entity) {
+    let mut objects = world.resource_mut::<ecs::ProtocolObjects>();
+    objects.devices.remove(&device_entity);
+    objects.seat_devices.remove(&device_entity);
+}
 
 #[allow(clippy::too_many_arguments)]
 pub fn spawn(
@@ -23,10 +28,9 @@ pub fn spawn(
     fd: fd::OwnedFd,
     owner: entity::Entity,
 ) -> entity::Entity {
+    ecs::ensure_protocol_objects(world);
     let mut cmd = world.spawn(ecs::DeviceBundle {
         marker: ecs::Device,
-        objects: ecs::DeviceObjects(vec![ecs::DeviceObject { object, id }]),
-        seat_objects: ecs::SeatDeviceObjects(Vec::new()),
         path: ecs::DevicePath(path),
         ref_count: ecs::DeviceRefCount(1),
         kind: ecs::DeviceKind(kind),
@@ -38,7 +42,14 @@ pub fn spawn(
         cmd.insert(ecs::DeviceActive);
     }
 
-    cmd.id()
+    let entity = cmd.id();
+    ecs::ensure_protocol_objects(world);
+    world
+        .resource_mut::<ecs::ProtocolObjects>()
+        .devices
+        .insert(entity, vec![ecs::DeviceObject { object, id }]);
+
+    entity
 }
 
 impl hyprwire::Dispatch<device::Device> for crate::Sessiond {
@@ -81,14 +92,22 @@ pub fn remove_core_object(
     device_entity: entity::Entity,
     object: &session_core_seat_device::SessionCoreSeatDevice,
 ) {
-    if let Some(mut objects) = world.get_mut::<ecs::SeatDeviceObjects>(device_entity) {
-        objects.0.retain(|candidate| candidate.object != *object);
+    if let Some(objects) = world
+        .resource_mut::<ecs::ProtocolObjects>()
+        .seat_devices
+        .get_mut(&device_entity)
+    {
+        objects.retain(|candidate| candidate.object != *object);
     }
 }
 
 pub fn notify_id_destroyed(world: &world::World, device_entity: entity::Entity, device_id: u32) {
-    if let Some(objects) = world.get::<ecs::SeatDeviceObjects>(device_entity) {
-        for object in &objects.0 {
+    if let Some(objects) = world
+        .resource::<ecs::ProtocolObjects>()
+        .seat_devices
+        .get(&device_entity)
+    {
+        for object in objects {
             if object.id == device_id {
                 object.object.send_destroyed();
             }
@@ -97,28 +116,28 @@ pub fn notify_id_destroyed(world: &world::World, device_entity: entity::Entity, 
 }
 
 pub fn remove_id_objects(world: &mut world::World, device_entity: entity::Entity, device_id: u32) {
-    if let Some(mut objects) = world.get_mut::<ecs::SeatDeviceObjects>(device_entity) {
-        objects.0.retain(|candidate| candidate.id != device_id);
+    if let Some(objects) = world
+        .resource_mut::<ecs::ProtocolObjects>()
+        .seat_devices
+        .get_mut(&device_entity)
+    {
+        objects.retain(|candidate| candidate.id != device_id);
     }
 }
 
 pub fn devices(
     world: &world::World,
     client_entity: entity::Entity,
-) -> impl Iterator<Item = entity::Entity> + use<> {
-    let Some(mut devices) =
-        world.try_query_filtered::<(Entity, &ecs::OwnerClient), With<ecs::Device>>()
-    else {
-        return Vec::new().into_iter();
-    };
-
-    devices
-        .iter(world)
-        .filter_map(move |(device_entity, client)| {
-            (client.0 == client_entity).then_some(device_entity)
+) -> impl Iterator<Item = entity::Entity> + '_ {
+    world
+        .iter_entities()
+        .filter(move |entity| {
+            entity.contains::<ecs::Device>()
+                && entity
+                    .get::<ecs::OwnerClient>()
+                    .is_some_and(|client| client.0 == client_entity)
         })
-        .collect::<Vec<_>>()
-        .into_iter()
+        .map(|entity| entity.id())
 }
 
 fn close(
@@ -138,10 +157,11 @@ fn close(
         .find(|device_entity| contains_object(world, *device_entity, object))
         .ok_or_else(|| anyhow::anyhow!("device not found"))?;
     let device_id = world
-        .get::<ecs::DeviceObjects>(device_entity)
+        .resource::<ecs::ProtocolObjects>()
+        .devices
+        .get(&device_entity)
         .and_then(|objects| {
             objects
-                .0
                 .iter()
                 .find(|candidate| candidate.object == *object)
                 .map(|candidate| candidate.id)
@@ -173,6 +193,7 @@ fn close(
     }
 
     notify_destroyed(world, device_entity);
+    remove_protocol_objects(world, device_entity);
     world.despawn(device_entity);
 
     Ok(())
@@ -319,6 +340,7 @@ pub fn open(
                 "could not activate device",
             );
         }
+        remove_protocol_objects(world, device_entity);
         world.despawn(device_entity);
         return;
     }
@@ -415,7 +437,7 @@ pub fn activate(world: &mut world::World, entity: entity::Entity) -> anyhow::Res
 }
 
 pub fn deactivate(world: &mut world::World, entity: entity::Entity) -> anyhow::Result<()> {
-    if !world.get::<ecs::DeviceActive>(entity).is_some() {
+    if world.get::<ecs::DeviceActive>(entity).is_none() {
         return Ok(());
     }
 
@@ -457,8 +479,12 @@ pub fn deactivate(world: &mut world::World, entity: entity::Entity) -> anyhow::R
 }
 
 fn notify_active(world: &world::World, entity: entity::Entity, active: bool) {
-    if let Some(objects) = world.get::<ecs::SeatDeviceObjects>(entity) {
-        for object in &objects.0 {
+    if let Some(objects) = world
+        .resource::<ecs::ProtocolObjects>()
+        .seat_devices
+        .get(&entity)
+    {
+        for object in objects {
             object.object.send_active(u32::from(active));
         }
     }
@@ -479,21 +505,28 @@ pub fn add_object(
     if let Some(mut ref_count) = world.get_mut::<ecs::DeviceRefCount>(entity) {
         ref_count.0 += 1;
     }
-    if let Some(mut objects) = world.get_mut::<ecs::DeviceObjects>(entity) {
-        objects.0.push(ecs::DeviceObject { object, id });
-    }
+    world
+        .resource_mut::<ecs::ProtocolObjects>()
+        .devices
+        .entry(entity)
+        .or_default()
+        .push(ecs::DeviceObject { object, id });
 }
 
 pub fn max_id(world: &world::World, entity: entity::Entity) -> Option<u32> {
     world
-        .get::<ecs::DeviceObjects>(entity)
-        .and_then(|objects| objects.0.iter().map(|handle| handle.id).max())
+        .resource::<ecs::ProtocolObjects>()
+        .devices
+        .get(&entity)
+        .and_then(|objects| objects.iter().map(|handle| handle.id).max())
 }
 
 pub fn object_count(world: &world::World, entity: entity::Entity) -> usize {
     world
-        .get::<ecs::DeviceObjects>(entity)
-        .map_or(0, |objects| objects.0.len())
+        .resource::<ecs::ProtocolObjects>()
+        .devices
+        .get(&entity)
+        .map_or(0, Vec::len)
 }
 
 pub fn kind(world: &world::World, entity: entity::Entity) -> anyhow::Result<DeviceKind> {
@@ -527,8 +560,10 @@ pub fn absolute_path_string(
 
 pub fn last_object(world: &world::World, entity: entity::Entity) -> Option<&device::Device> {
     world
-        .get::<ecs::DeviceObjects>(entity)
-        .and_then(|objects| objects.0.last())
+        .resource::<ecs::ProtocolObjects>()
+        .devices
+        .get(&entity)
+        .and_then(|objects| objects.last())
         .map(|handle| &handle.object)
 }
 
@@ -538,18 +573,19 @@ pub fn contains_object(
     object: &device::Device,
 ) -> bool {
     world
-        .get::<ecs::DeviceObjects>(entity)
-        .is_some_and(|objects| {
-            objects
-                .0
-                .iter()
-                .any(|candidate| candidate.object == *object)
-        })
+        .resource::<ecs::ProtocolObjects>()
+        .devices
+        .get(&entity)
+        .is_some_and(|objects| objects.iter().any(|candidate| candidate.object == *object))
 }
 
 pub fn remove_object(world: &mut world::World, entity: entity::Entity, object: &device::Device) {
-    if let Some(mut objects) = world.get_mut::<ecs::DeviceObjects>(entity) {
-        objects.0.retain(|candidate| candidate.object != *object);
+    if let Some(objects) = world
+        .resource_mut::<ecs::ProtocolObjects>()
+        .devices
+        .get_mut(&entity)
+    {
+        objects.retain(|candidate| candidate.object != *object);
     }
 }
 
@@ -563,8 +599,10 @@ pub fn decrement_ref(world: &mut world::World, entity: entity::Entity) -> usize 
 
 pub fn send_opened(world: &world::World, entity: entity::Entity) -> anyhow::Result<()> {
     let Some(handle) = world
-        .get::<ecs::DeviceObjects>(entity)
-        .and_then(|objects| objects.0.last())
+        .resource::<ecs::ProtocolObjects>()
+        .devices
+        .get(&entity)
+        .and_then(|objects| objects.last())
     else {
         return Ok(());
     };
@@ -583,8 +621,10 @@ pub fn entity_by_id(
 ) -> Option<entity::Entity> {
     devices(world, client_entity).find(|device_entity| {
         world
-            .get::<ecs::DeviceObjects>(*device_entity)
-            .is_some_and(|objects| objects.0.iter().any(|object| object.id == device_id))
+            .resource::<ecs::ProtocolObjects>()
+            .devices
+            .get(device_entity)
+            .is_some_and(|objects| objects.iter().any(|object| object.id == device_id))
     })
 }
 
@@ -595,13 +635,10 @@ pub fn entity_by_core_object(
 ) -> Option<entity::Entity> {
     devices(world, client_entity).find(|device_entity| {
         world
-            .get::<ecs::SeatDeviceObjects>(*device_entity)
-            .is_some_and(|objects| {
-                objects
-                    .0
-                    .iter()
-                    .any(|candidate| candidate.object == *object)
-            })
+            .resource::<ecs::ProtocolObjects>()
+            .seat_devices
+            .get(device_entity)
+            .is_some_and(|objects| objects.iter().any(|candidate| candidate.object == *object))
     })
 }
 
@@ -634,12 +671,15 @@ pub fn add_core_object(
     }
     object.send_done();
 
-    if let Some(mut objects) = world.get_mut::<ecs::SeatDeviceObjects>(device_entity) {
-        objects.0.push(ecs::SeatDeviceObject {
+    world
+        .resource_mut::<ecs::ProtocolObjects>()
+        .seat_devices
+        .entry(device_entity)
+        .or_default()
+        .push(ecs::SeatDeviceObject {
             object,
             id: device_id,
         });
-    }
 }
 
 pub fn notify_removed(
@@ -647,8 +687,12 @@ pub fn notify_removed(
     client_entity: entity::Entity,
     device_entity: entity::Entity,
 ) {
-    if let Some(objects) = world.get::<ecs::DeviceObjects>(device_entity) {
-        for device_object in &objects.0 {
+    if let Some(objects) = world
+        .resource::<ecs::ProtocolObjects>()
+        .devices
+        .get(&device_entity)
+    {
+        for device_object in objects {
             client::notify_device_removed(world, client_entity, device_object.id);
         }
     }
@@ -656,8 +700,12 @@ pub fn notify_removed(
 }
 
 pub fn notify_destroyed(world: &world::World, device_entity: entity::Entity) {
-    if let Some(objects) = world.get::<ecs::SeatDeviceObjects>(device_entity) {
-        for object in &objects.0 {
+    if let Some(objects) = world
+        .resource::<ecs::ProtocolObjects>()
+        .seat_devices
+        .get(&device_entity)
+    {
+        for object in objects {
             object.object.send_destroyed();
         }
     }

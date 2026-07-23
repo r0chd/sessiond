@@ -10,12 +10,12 @@ pub fn spawn(
     lingering: bool,
     state: session_core_v1::UserState,
 ) -> entity::Entity {
+    ecs::ensure_protocol_objects(world);
     let mut cmd = world.spawn(ecs::UserBundle {
         marker: ecs::User,
         uid: ecs::Uid(uid),
         username: ecs::Username(username),
         state: ecs::UserState(state),
-        objects: ecs::UserObjects(Vec::new()),
     });
 
     if lingering {
@@ -56,14 +56,16 @@ pub fn entity_by_object(
     world: &world::World,
     object: &session_core_user::SessionCoreUser,
 ) -> Option<entity::Entity> {
-    let mut users = world.try_query_filtered::<(Entity, &ecs::UserObjects), With<ecs::User>>()?;
-    users.iter(world).find_map(|(entity, objects)| {
-        objects
-            .0
-            .iter()
-            .any(|candidate| candidate == object)
-            .then_some(entity)
-    })
+    world
+        .resource::<ecs::ProtocolObjects>()
+        .users
+        .iter()
+        .find_map(|(entity, objects)| {
+            objects
+                .iter()
+                .any(|candidate| candidate == object)
+                .then_some(*entity)
+        })
 }
 
 pub fn create(world: &mut world::World, uid: u32, lingering: bool) -> Option<entity::Entity> {
@@ -133,8 +135,8 @@ fn sync(world: &mut world::World, entity: entity::Entity) {
     if let Some(mut component) = world.get_mut::<ecs::UserState>(entity) {
         component.0 = state;
     }
-    if let Some(objects) = world.get::<ecs::UserObjects>(entity) {
-        for object in &objects.0 {
+    if let Some(objects) = world.resource::<ecs::ProtocolObjects>().users.get(&entity) {
+        for object in objects {
             object.send_state(state);
         }
     }
@@ -144,7 +146,7 @@ pub fn add_object(
     world: &mut world::World,
     entity: entity::Entity,
     object: session_core_user::SessionCoreUser,
-    management_access: &crate::Access,
+    management_access: crate::Access,
 ) {
     if let Some(uid) = world.get::<ecs::Uid>(entity) {
         object.send_uid(uid.0);
@@ -168,9 +170,13 @@ pub fn add_object(
     }
     object.send_done();
 
-    if let Some(mut objects) = world.get_mut::<ecs::UserObjects>(entity) {
-        objects.0.push(object);
-    }
+    ecs::ensure_protocol_objects(world);
+    world
+        .resource_mut::<ecs::ProtocolObjects>()
+        .users
+        .entry(entity)
+        .or_default()
+        .push(object);
 }
 
 impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond {
@@ -188,13 +194,22 @@ impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond 
 
         match event {
             session_core_user::Event::Destroy => {
-                if let Some(mut objects) = self.world.get_mut::<ecs::UserObjects>(entity) {
-                    objects.0.retain(|candidate| candidate != object);
+                if let Some(objects) = self
+                    .world
+                    .resource_mut::<ecs::ProtocolObjects>()
+                    .users
+                    .get_mut(&entity)
+                {
+                    objects.retain(|candidate| candidate != object);
                 }
             }
             session_core_user::Event::Terminate => {
                 let uid = self.world.get::<ecs::Uid>(entity).map_or(0, |uid| uid.0);
-                if !self.management_access.allows(client.creds())
+                if !self
+                    .world
+                    .resource::<ecs::AccessRules>()
+                    .management
+                    .allows(client.creds())
                     && uid != client.creds().uid.as_raw()
                 {
                     object.send_error(
@@ -214,7 +229,11 @@ impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond 
             }
             session_core_user::Event::Kill => {
                 let uid = self.world.get::<ecs::Uid>(entity).map_or(0, |uid| uid.0);
-                if !self.management_access.allows(client.creds())
+                if !self
+                    .world
+                    .resource::<ecs::AccessRules>()
+                    .management
+                    .allows(client.creds())
                     && uid != client.creds().uid.as_raw()
                 {
                     object.send_error(

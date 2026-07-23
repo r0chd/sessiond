@@ -37,9 +37,7 @@ use calloop::{generic, signals};
 use clap::Parser;
 use hyprwire::server;
 use rustix::{net, process};
-use session_core_v1::{session_core_manager, session_core_session, session_core_user};
-use session_management_v1::session_manager;
-use std::collections::{BTreeMap, HashMap};
+use session_core_v1::{session_core_session, session_core_user};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::{env, fs, path};
@@ -52,6 +50,7 @@ struct Args {
     config: Option<path::PathBuf>,
 }
 
+#[derive(Clone, Copy)]
 struct Access {
     user: process::Uid,
     group: process::Gid,
@@ -62,7 +61,7 @@ impl Access {
         Self { user, group }
     }
 
-    fn allows(&self, creds: &net::UCred) -> bool {
+    fn allows(self, creds: &net::UCred) -> bool {
         if self.user == creds.uid || self.group == creds.gid || creds.uid.is_root() {
             return true;
         }
@@ -90,13 +89,7 @@ impl Access {
 }
 
 struct Sessiond {
-    next_session_id: session::SessionId,
-    info_managers: Vec<session_core_manager::SessionCoreManager>,
-    envs: HashMap<session_manager::SessionManager, BTreeMap<String, String>>,
     cgroup_manager: cgroup::CgroupManager,
-    seat_access: Access,
-    management_access: Access,
-    settings: config::Config,
     #[cfg(feature = "consolekit")]
     consolekit: consolekit::Server,
     shutting_down: bool,
@@ -107,6 +100,10 @@ struct Sessiond {
 impl Sessiond {
     fn remove_session(&mut self, session_id: session::SessionId) -> Option<Entity> {
         let entity = session::entity(&self.world, session_id)?;
+        self.world
+            .resource_mut::<ecs::ProtocolObjects>()
+            .sessions
+            .remove(&entity);
         self.world.despawn(entity);
         #[cfg(feature = "consolekit")]
         self.consolekit.remove_session(session_id);
@@ -121,12 +118,7 @@ impl Sessiond {
     }
 }
 
-struct DaemonConfig {
-    settings: config::Config,
-    socket_path: path::PathBuf,
-}
-
-fn run(config: DaemonConfig) -> anyhow::Result<()> {
+fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
     let mut event_loop = calloop::EventLoop::try_new()?;
     let loop_signal = event_loop.get_signal();
     let signals = signals::Signals::new(&[
@@ -137,51 +129,29 @@ fn run(config: DaemonConfig) -> anyhow::Result<()> {
     ])?;
 
     anyhow::ensure!(
-        !config.settings.seats.is_empty(),
-        "exactly one seat must be configured"
+        !config.seats.is_empty(),
+        "at least one seat must be configured"
     );
     let seat_config = config
-        .settings
         .seats
-        .get(&config.settings.default_seat)
+        .get(&config.default_seat)
         .ok_or_else(|| anyhow::anyhow!("configured `default-seat` not found"))?;
 
     let vtbound = seat_config.kind == config::SeatKind::VtBound;
+    let default_seat = config.default_seat.clone();
 
-    let mut sessiond = Sessiond {
-        next_session_id: session::SessionId::from_raw(1),
-        info_managers: Vec::new(),
-        envs: HashMap::new(),
-        cgroup_manager: cgroup::CgroupManager::new(event_loop.handle())?,
-        seat_access: Access::new(
+    let access_rules = ecs::AccessRules {
+        seat: Access::new(
             resolve_user(&seat_config.user)?,
             resolve_group(&seat_config.group)?,
         ),
-        management_access: Access::new(
-            resolve_user(&config.settings.management.user)?,
-            resolve_group(&config.settings.management.group)?,
+        management: Access::new(
+            resolve_user(&config.management.user)?,
+            resolve_group(&config.management.group)?,
         ),
-        settings: config.settings,
-        #[cfg(feature = "consolekit")]
-        consolekit: consolekit::Server::start(),
-        shutting_down: false,
-        loop_signal,
-        world: World::new(),
     };
 
-    seat::spawn(
-        &mut sessiond.world,
-        sessiond.settings.default_seat.clone(),
-        if vtbound {
-            ecs::SeatKind::VtBound
-        } else {
-            ecs::SeatKind::NonVtBound
-        },
-        0,
-    );
-
-    let lingering_users = sessiond
-        .settings
+    let lingering_users = config
         .users
         .iter()
         .filter(|(_, config)| config.linger)
@@ -191,6 +161,42 @@ fn run(config: DaemonConfig) -> anyhow::Result<()> {
             Some((uid, config.runtime_dir(uid)))
         })
         .collect::<Vec<_>>();
+
+    let mut sessiond = Sessiond {
+        cgroup_manager: cgroup::CgroupManager::new(event_loop.handle())?,
+        #[cfg(feature = "consolekit")]
+        consolekit: consolekit::Server::start(),
+        shutting_down: false,
+        loop_signal,
+        world: World::new(),
+    };
+
+    sessiond
+        .world
+        .insert_resource(ecs::PendingSessionEnvs::default());
+    sessiond
+        .world
+        .insert_resource(ecs::NextSessionId(session::SessionId::from_raw(1)));
+    sessiond
+        .world
+        .insert_resource(ecs::SessionInfoManagers::default());
+    sessiond
+        .world
+        .insert_resource(ecs::ProtocolObjects::default());
+
+    sessiond.world.insert_resource(access_rules);
+    sessiond.world.insert_resource(ecs::DaemonConfig(config));
+
+    seat::spawn(
+        &mut sessiond.world,
+        default_seat,
+        if vtbound {
+            ecs::SeatKind::VtBound
+        } else {
+            ecs::SeatKind::NonVtBound
+        },
+        0,
+    );
 
     for (uid, runtime_dir) in lingering_users {
         user::create(&mut sessiond.world, uid, true);
@@ -204,9 +210,8 @@ fn run(config: DaemonConfig) -> anyhow::Result<()> {
         }
     }
 
-    let path = config.socket_path.as_path();
-    let mut socket = server::Server::bind(&path)?;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o777))?;
+    let mut socket = server::Server::bind(&socket_path)?;
+    fs::set_permissions(socket_path, fs::Permissions::from_mode(0o777))?;
 
     socket
         .add_implementation::<session_management_v1::SessionManagementV1Impl, _>(&mut sessiond, 1);
@@ -308,7 +313,7 @@ fn run(config: DaemonConfig) -> anyhow::Result<()> {
 
     event_loop.run(None, &mut sessiond, |_| {})?;
 
-    let _ = fs::remove_file(&config.socket_path);
+    let _ = fs::remove_file(socket_path);
 
     Ok(())
 }
@@ -331,12 +336,7 @@ fn main() -> anyhow::Result<()> {
 
     log::info!("sessiond daemon starting");
 
-    let config = DaemonConfig {
-        settings: config::Config::load(args.config)?,
-        socket_path: args.socket_path,
-    };
-
-    run(config)
+    run(&args.socket_path, config::Config::load(args.config)?)
 }
 
 fn resolve_user(user: &str) -> anyhow::Result<process::Uid> {

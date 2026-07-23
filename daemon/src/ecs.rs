@@ -52,10 +52,195 @@ pub struct ProtocolObjects {
     pub seat_devices: HashMap<Entity, Vec<SeatDeviceObject>>,
 }
 
-pub fn ensure_protocol_objects(world: &mut World) {
-    if world.get_resource::<ProtocolObjects>().is_none() {
-        world.insert_resource(ProtocolObjects::default());
+impl ProtocolObjects {
+    pub fn session_objects(
+        &self,
+        entity: Entity,
+    ) -> Option<&[session_core_session::SessionCoreSession]> {
+        self.sessions.get(&entity).map(Vec::as_slice)
     }
+
+    pub fn add_session_object(
+        &mut self,
+        entity: Entity,
+        object: session_core_session::SessionCoreSession,
+    ) {
+        self.sessions.entry(entity).or_default().push(object);
+    }
+
+    pub fn remove_session_object(
+        &mut self,
+        entity: Entity,
+        object: &session_core_session::SessionCoreSession,
+    ) {
+        if let Some(objects) = self.sessions.get_mut(&entity) {
+            objects.retain(|candidate| candidate != object);
+        }
+    }
+
+    pub fn remove_session_objects(&mut self, entity: Entity) {
+        self.sessions.remove(&entity);
+    }
+
+    pub fn session_entity_by_object(
+        &self,
+        object: &session_core_session::SessionCoreSession,
+    ) -> Option<Entity> {
+        self.sessions.iter().find_map(|(entity, objects)| {
+            objects
+                .iter()
+                .any(|candidate| candidate == object)
+                .then_some(*entity)
+        })
+    }
+
+    pub fn user_objects(&self, entity: Entity) -> Option<&[session_core_user::SessionCoreUser]> {
+        self.users.get(&entity).map(Vec::as_slice)
+    }
+
+    pub fn add_user_object(&mut self, entity: Entity, object: session_core_user::SessionCoreUser) {
+        self.users.entry(entity).or_default().push(object);
+    }
+
+    pub fn remove_user_object(
+        &mut self,
+        entity: Entity,
+        object: &session_core_user::SessionCoreUser,
+    ) {
+        if let Some(objects) = self.users.get_mut(&entity) {
+            objects.retain(|candidate| candidate != object);
+        }
+    }
+
+    pub fn user_entity_by_object(
+        &self,
+        object: &session_core_user::SessionCoreUser,
+    ) -> Option<Entity> {
+        self.users.iter().find_map(|(entity, objects)| {
+            objects
+                .iter()
+                .any(|candidate| candidate == object)
+                .then_some(*entity)
+        })
+    }
+
+    pub fn seat_objects(&self, entity: Entity) -> Option<&[session_core_seat::SessionCoreSeat]> {
+        self.seats.get(&entity).map(Vec::as_slice)
+    }
+
+    pub fn add_seat_object(&mut self, entity: Entity, object: session_core_seat::SessionCoreSeat) {
+        self.seats.entry(entity).or_default().push(object);
+    }
+
+    pub fn remove_seat_object(
+        &mut self,
+        entity: Entity,
+        object: &session_core_seat::SessionCoreSeat,
+    ) {
+        if let Some(objects) = self.seats.get_mut(&entity) {
+            objects.retain(|candidate| candidate != object);
+        }
+    }
+
+    pub fn seat_entity_by_object(
+        &self,
+        object: &session_core_seat::SessionCoreSeat,
+    ) -> Option<Entity> {
+        self.seats.iter().find_map(|(entity, objects)| {
+            objects
+                .iter()
+                .any(|candidate| candidate == object)
+                .then_some(*entity)
+        })
+    }
+
+    pub fn client_objects(
+        &self,
+        entity: Entity,
+    ) -> Option<&[session_core_seat_client::SessionCoreSeatClient]> {
+        self.clients.get(&entity).map(Vec::as_slice)
+    }
+
+    pub fn add_client_object(
+        &mut self,
+        entity: Entity,
+        object: session_core_seat_client::SessionCoreSeatClient,
+    ) {
+        self.clients.entry(entity).or_default().push(object);
+    }
+
+    pub fn remove_client_object(
+        &mut self,
+        entity: Entity,
+        object: &session_core_seat_client::SessionCoreSeatClient,
+    ) {
+        if let Some(objects) = self.clients.get_mut(&entity) {
+            objects.retain(|candidate| candidate != object);
+        }
+    }
+
+    pub fn remove_client_objects(&mut self, entity: Entity) {
+        self.clients.remove(&entity);
+    }
+
+    pub fn client_entity_by_object(
+        &self,
+        object: &session_core_seat_client::SessionCoreSeatClient,
+    ) -> Option<Entity> {
+        self.clients.iter().find_map(|(entity, objects)| {
+            objects
+                .iter()
+                .any(|candidate| candidate == object)
+                .then_some(*entity)
+        })
+    }
+
+    pub fn device_objects(&self, entity: Entity) -> Option<&[DeviceObject]> {
+        self.devices.get(&entity).map(Vec::as_slice)
+    }
+
+    pub fn add_device_object(&mut self, entity: Entity, object: DeviceObject) {
+        self.devices.entry(entity).or_default().push(object);
+    }
+
+    pub fn remove_device_object(&mut self, entity: Entity, object: &seat_v1::device::Device) {
+        if let Some(objects) = self.devices.get_mut(&entity) {
+            objects.retain(|candidate| candidate.object != *object);
+        }
+    }
+
+    pub fn remove_device_objects(&mut self, entity: Entity) {
+        self.devices.remove(&entity);
+        self.seat_devices.remove(&entity);
+    }
+
+    pub fn seat_device_objects(&self, entity: Entity) -> Option<&[SeatDeviceObject]> {
+        self.seat_devices.get(&entity).map(Vec::as_slice)
+    }
+
+    pub fn add_seat_device_object(&mut self, entity: Entity, object: SeatDeviceObject) {
+        self.seat_devices.entry(entity).or_default().push(object);
+    }
+
+    pub fn remove_seat_device_object(
+        &mut self,
+        entity: Entity,
+        object: &session_core_seat_device::SessionCoreSeatDevice,
+    ) {
+        if let Some(objects) = self.seat_devices.get_mut(&entity) {
+            objects.retain(|candidate| candidate.object != *object);
+        }
+    }
+
+    pub fn remove_seat_device_objects_by_id(&mut self, entity: Entity, id: u32) {
+        if let Some(objects) = self.seat_devices.get_mut(&entity) {
+            objects.retain(|candidate| candidate.id != id);
+        }
+    }
+}
+
+pub fn init_resources(world: &mut World) {
+    world.insert_resource(ProtocolObjects::default());
 }
 
 // Bundles

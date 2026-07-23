@@ -24,6 +24,7 @@ mod config;
 mod consolekit;
 mod device;
 mod ecs;
+mod reconcile;
 mod seat;
 mod session;
 mod terminal;
@@ -102,8 +103,7 @@ impl Sessiond {
         let entity = session::entity(&self.world, session_id)?;
         self.world
             .resource_mut::<ecs::ProtocolObjects>()
-            .sessions
-            .remove(&entity);
+            .remove_session_objects(entity);
         self.world.despawn(entity);
         #[cfg(feature = "consolekit")]
         self.consolekit.remove_session(session_id);
@@ -180,9 +180,7 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
     sessiond
         .world
         .insert_resource(ecs::SessionInfoManagers::default());
-    sessiond
-        .world
-        .insert_resource(ecs::ProtocolObjects::default());
+    ecs::init_resources(&mut sessiond.world);
 
     sessiond.world.insert_resource(access_rules);
     sessiond.world.insert_resource(ecs::DaemonConfig(config));
@@ -255,6 +253,7 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
                     state.shutting_down = true;
 
                     for session_id in session::entities(&state.world)
+                        .into_iter()
                         .filter_map(|entity| state.world.get::<ecs::SessionId>(entity))
                     {
                         if let Err(err) = state.cgroup_manager.terminate_session(session_id.0) {
@@ -279,30 +278,35 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
                 let mut state_updates = Vec::new();
 
                 if active_state == session_core_v1::ActiveState::Active {
-                    state_updates.extend(session::entities(&state.world).filter_map(|entity| {
-                        let session_vt = state.world.get::<ecs::Vt>(entity)?.0.get();
-                        let session_state = state.world.get::<ecs::ActiveState>(entity)?.0;
+                    state_updates.extend(session::entities(&state.world).into_iter().filter_map(
+                        |entity| {
+                            let session_vt = state.world.get::<ecs::Vt>(entity)?.0.get();
+                            let session_state = state.world.get::<ecs::ActiveState>(entity)?.0;
 
-                        if session_vt != vt.get()
-                            && session_state == session_core_v1::ActiveState::Active
-                        {
-                            return Some((entity, session_core_v1::ActiveState::Online));
-                        }
+                            if session_vt != vt.get()
+                                && session_state == session_core_v1::ActiveState::Active
+                            {
+                                return Some((entity, session_core_v1::ActiveState::Online));
+                            }
 
-                        None
-                    }));
+                            None
+                        },
+                    ));
                 }
 
-                state_updates.extend(session::entities(&state.world).filter_map(|entity| {
-                    let session_vt = state.world.get::<ecs::Vt>(entity)?.0.get();
-                    (session_vt == vt.get()).then_some((entity, active_state))
-                }));
+                state_updates.extend(session::entities(&state.world).into_iter().filter_map(
+                    |entity| {
+                        let session_vt = state.world.get::<ecs::Vt>(entity)?.0.get();
+                        (session_vt == vt.get()).then_some((entity, active_state))
+                    },
+                ));
 
                 for (entity, active_state) in state_updates {
                     let Some(session_id) = session::id(&state.world, entity) else {
                         continue;
                     };
-                    session::set_state(&mut state.world, session_id, entity, active_state);
+                    session::set_active_state(&mut state.world, entity, active_state);
+                    let _ = session_id;
                     #[cfg(feature = "consolekit")]
                     state.sync_consolekit_session(session_id, entity);
                 }

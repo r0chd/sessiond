@@ -2,7 +2,8 @@ use crate::session_core_v1::{session_core_manager, session_core_session};
 use crate::session_management_v1::session_manager as session_manager_v1;
 use crate::session_management_v2::{session_management_session, session_manager};
 use crate::{
-    config, ecs, seat, session_core_v1, session_management_v1, session_management_v2, user,
+    config, ecs, reconcile, seat, session_core_v1, session_management_v1, session_management_v2,
+    user,
 };
 use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
@@ -41,7 +42,6 @@ pub fn spawn(
     active_state: session_core_v1::ActiveState,
     session_object: Option<session_management_session::SessionManagementSession>,
 ) -> entity::Entity {
-    ecs::ensure_protocol_objects(world);
     let mut cmd = world.spawn(ecs::SessionBundle {
         marker: ecs::Session,
         id: ecs::SessionId(session_id),
@@ -72,11 +72,11 @@ pub fn spawn(
     cmd.id()
 }
 
-pub fn entities(world: &world::World) -> impl Iterator<Item = entity::Entity> + '_ {
-    world
-        .iter_entities()
-        .filter(bevy_ecs::world::EntityRef::contains::<ecs::Session>)
-        .map(|entity| entity.id())
+pub fn entities(world: &world::World) -> Vec<entity::Entity> {
+    let Some(mut sessions) = world.try_query_filtered::<Entity, With<ecs::Session>>() else {
+        return Vec::new();
+    };
+    sessions.iter(world).collect()
 }
 
 pub fn id(world: &world::World, entity: entity::Entity) -> Option<SessionId> {
@@ -98,34 +98,27 @@ pub fn entity_by_uid(world: &world::World, uid: u32) -> Option<entity::Entity> {
         .find_map(|(entity, session_uid)| (session_uid.0 == uid).then_some(entity))
 }
 
-pub fn entities_by_uid(
-    world: &world::World,
-    uid: u32,
-) -> impl Iterator<Item = entity::Entity> + '_ {
-    world
-        .iter_entities()
-        .filter(move |entity| {
-            entity.contains::<ecs::Session>()
-                && entity
-                    .get::<ecs::Uid>()
-                    .is_some_and(|session_uid| session_uid.0 == uid)
-        })
-        .map(|entity| entity.id())
+pub fn entities_by_uid(world: &world::World, uid: u32) -> Vec<entity::Entity> {
+    let Some(mut sessions) = world.try_query_filtered::<(Entity, &ecs::Uid), With<ecs::Session>>()
+    else {
+        return Vec::new();
+    };
+    sessions
+        .iter(world)
+        .filter_map(|(entity, session_uid)| (session_uid.0 == uid).then_some(entity))
+        .collect()
 }
 
-pub fn entities_by_seat_name<'a>(
-    world: &'a world::World,
-    name: &'a str,
-) -> impl Iterator<Item = entity::Entity> + 'a {
-    world
-        .iter_entities()
-        .filter(move |entity| {
-            entity.contains::<ecs::Session>()
-                && entity
-                    .get::<ecs::SeatName>()
-                    .is_some_and(|session_seat| session_seat.0 == name)
-        })
-        .map(|entity| entity.id())
+pub fn entities_by_seat_name(world: &world::World, name: &str) -> Vec<entity::Entity> {
+    let Some(mut sessions) =
+        world.try_query_filtered::<(Entity, &ecs::SeatName), With<ecs::Session>>()
+    else {
+        return Vec::new();
+    };
+    sessions
+        .iter(world)
+        .filter_map(|(entity, session_seat)| (session_seat.0 == name).then_some(entity))
+        .collect()
 }
 
 pub fn entity_by_object(
@@ -134,14 +127,7 @@ pub fn entity_by_object(
 ) -> Option<entity::Entity> {
     world
         .resource::<ecs::ProtocolObjects>()
-        .sessions
-        .iter()
-        .find_map(|(entity, objects)| {
-            objects
-                .iter()
-                .any(|session_object| session_object == object)
-                .then_some(*entity)
-        })
+        .session_entity_by_object(object)
 }
 
 pub fn entity_by_management_object(
@@ -195,14 +181,9 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
         };
 
         if matches!(event, session_core_session::Event::Destroy) {
-            if let Some(objects) = self
-                .world
+            self.world
                 .resource_mut::<ecs::ProtocolObjects>()
-                .sessions
-                .get_mut(&entity)
-            {
-                objects.retain(|session_object| session_object != object);
-            }
+                .remove_session_object(entity, object);
             return;
         }
 
@@ -231,8 +212,7 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
                 if let Some(objects) = self
                     .world
                     .resource::<ecs::ProtocolObjects>()
-                    .sessions
-                    .get(&entity)
+                    .session_objects(entity)
                 {
                     for object in objects {
                         object.send_locked();
@@ -245,8 +225,7 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
                 if let Some(objects) = self
                     .world
                     .resource::<ecs::ProtocolObjects>()
-                    .sessions
-                    .get(&entity)
+                    .session_objects(entity)
                 {
                     for object in objects {
                         object.send_unlocked();
@@ -267,9 +246,8 @@ impl crate::Sessiond {
 
         log::info!(session_id = session_id.as_raw(); "kill requested");
 
-        set_state(
+        set_active_state(
             &mut self.world,
-            session_id,
             entity,
             session_core_v1::ActiveState::Closing,
         );
@@ -289,9 +267,8 @@ impl crate::Sessiond {
 
         log::info!(session_id = session_id.as_raw(); "terminate requested");
 
-        set_state(
+        set_active_state(
             &mut self.world,
-            session_id,
             entity,
             session_core_v1::ActiveState::Closing,
         );
@@ -320,8 +297,7 @@ impl crate::Sessiond {
         if let Some(objects) = self
             .world
             .resource::<ecs::ProtocolObjects>()
-            .sessions
-            .get(&entity)
+            .session_objects(entity)
         {
             for object in objects {
                 object.send_destroyed();
@@ -340,7 +316,7 @@ impl crate::Sessiond {
 
         if !self.cgroup_manager.has_uid_sessions(uid)
             && !user::is_lingering(&self.world, uid)
-            && entities_by_uid(&self.world, uid).next().is_none()
+            && entities_by_uid(&self.world, uid).is_empty()
             && let Err(e) = user::remove_runtime_dir(
                 &self
                     .user_config(&user.name().to_string_lossy())
@@ -401,13 +377,9 @@ pub fn add_object(
     }
     object.send_done();
 
-    ecs::ensure_protocol_objects(world);
     world
         .resource_mut::<ecs::ProtocolObjects>()
-        .sessions
-        .entry(entity)
-        .or_default()
-        .push(object);
+        .add_session_object(entity, object);
 }
 
 pub fn sync_vt_session_states(world: &mut world::World) {
@@ -416,28 +388,24 @@ pub fn sync_vt_session_states(world: &mut world::World) {
     user::sync_all(world);
 }
 
-pub fn set_state(
+pub fn set_active_state(
     world: &mut world::World,
-    session_id: SessionId,
     entity: entity::Entity,
     state: session_core_v1::ActiveState,
 ) {
+    let session_id = world
+        .get::<ecs::SessionId>(entity)
+        .map(|session_id| session_id.0.as_raw())
+        .unwrap_or_default();
     let vt = world
         .get::<ecs::Vt>(entity)
         .map(|vt| vt.0.get())
         .unwrap_or_default();
-    log::info!(session_id = session_id.as_raw(), vt; "session state changed");
+    log::info!(session_id, vt; "session state changed");
     if let Some(mut active_state) = world.get_mut::<ecs::ActiveState>(entity) {
         active_state.0 = state;
     }
-    if let Some(objects) = world
-        .get_resource::<ecs::ProtocolObjects>()
-        .and_then(|objects| objects.sessions.get(&entity))
-    {
-        for object in objects {
-            object.send_active(state);
-        }
-    }
+    reconcile::session_active(world, entity);
 }
 
 impl session_management_v1::SessionManagementV1Handler for crate::Sessiond {}
@@ -449,6 +417,7 @@ impl session_core_v1::SessionCoreV1Handler for crate::Sessiond {
         sync_vt_session_states(&mut self.world);
 
         entities(&self.world)
+            .into_iter()
             .filter_map(|entity| id(&self.world, entity))
             .for_each(|session_id| {
                 object.send_session_added(session_id.as_raw());
@@ -473,6 +442,7 @@ impl crate::Sessiond {
             .management
             .allows(creds)
             || entities(&self.world)
+                .into_iter()
                 .filter_map(|entity| self.world.get::<ecs::Uid>(entity))
                 .all(|session| session.0 == creds.uid.as_raw())
     }
@@ -616,18 +586,20 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                 user::create_runtime_dir(uid, &self.user_config(&username).runtime_dir(uid));
 
                 if let Some((seat_entity, seat)) =
-                    seat::entities(&self.world).find_map(|seat_entity| {
-                        let mode = self.world.get::<ecs::SeatMode>(seat_entity)?;
-                        if mode.0 != ecs::SeatKind::VtBound {
-                            return None;
-                        }
-                        let current_vt = self.world.get::<ecs::CurrentVt>(seat_entity)?.0;
-                        (Some(current_vt) == session_vt && is_local).then(|| {
-                            self.world
-                                .get::<ecs::SeatName>(seat_entity)
-                                .map(|seat| (seat_entity, seat.0.clone()))
-                        })?
-                    })
+                    seat::entities(&self.world)
+                        .into_iter()
+                        .find_map(|seat_entity| {
+                            let mode = self.world.get::<ecs::SeatMode>(seat_entity)?;
+                            if mode.0 != ecs::SeatKind::VtBound {
+                                return None;
+                            }
+                            let current_vt = self.world.get::<ecs::CurrentVt>(seat_entity)?.0;
+                            (Some(current_vt) == session_vt && is_local).then(|| {
+                                self.world
+                                    .get::<ecs::SeatName>(seat_entity)
+                                    .map(|seat| (seat_entity, seat.0.clone()))
+                            })?
+                        })
                 {
                     session_seat_entity = Some(seat_entity);
                     session_seat = Some(seat);
@@ -755,6 +727,7 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                 });
 
                 let active_state = if let Some((seat_entity, seat)) = seat::entities(&self.world)
+                    .into_iter()
                     .find_map(|seat_entity| {
                         let mode = self.world.get::<ecs::SeatMode>(seat_entity)?;
                         if mode.0 != ecs::SeatKind::VtBound {
@@ -788,7 +761,7 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                     }
                 }
 
-                set_state(&mut self.world, session_id, entity, active_state);
+                set_active_state(&mut self.world, entity, active_state);
                 #[cfg(feature = "consolekit")]
                 self.sync_consolekit_session(session_id, entity);
                 user::sync_all(&mut self.world);
@@ -914,6 +887,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
 
                 // let user reboot only if there are no other user sessions active
                 let foreign_session_count = entities(&self.world)
+                    .into_iter()
                     .filter_map(|entity| self.world.get::<ecs::Uid>(entity))
                     .filter(|session| session.0 != client.creds().uid.as_raw())
                     .count();
@@ -930,6 +904,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                 log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "reboot accepted");
 
                 for session_id in entities(&self.world)
+                    .into_iter()
                     .filter_map(|entity| self.world.get::<ecs::SessionId>(entity))
                 {
                     if let Err(err) = self.cgroup_manager.terminate_session(session_id.0) {
@@ -965,6 +940,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
 
                 // let user poweroff only if there are no other user sessions active
                 let foreign_session_count = entities(&self.world)
+                    .into_iter()
                     .filter_map(|entity| self.world.get::<ecs::Uid>(entity))
                     .filter(|session| session.0 != client.creds().uid.as_raw())
                     .count();
@@ -981,6 +957,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                 log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "poweroff accepted");
 
                 for session_id in entities(&self.world)
+                    .into_iter()
                     .filter_map(|entity| self.world.get::<ecs::SessionId>(entity))
                 {
                     if let Err(err) = self.cgroup_manager.terminate_session(session_id.0) {
@@ -1016,6 +993,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
 
                 // let user suspend only if there are no other user sessions active
                 let foreign_session_count = entities(&self.world)
+                    .into_iter()
                     .filter_map(|entity| self.world.get::<ecs::Uid>(entity))
                     .filter(|session| session.0 != client.creds().uid.as_raw())
                     .count();
@@ -1051,6 +1029,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
 
                 // let user hibernate only if there are no other user sessions active
                 let foreign_session_count = entities(&self.world)
+                    .into_iter()
                     .filter_map(|entity| self.world.get::<ecs::Uid>(entity))
                     .filter(|session| session.0 != client.creds().uid.as_raw())
                     .count();

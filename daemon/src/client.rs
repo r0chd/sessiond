@@ -1,5 +1,5 @@
 use crate::session_core_v1::{session_core_seat_client, session_core_seat_device};
-use crate::{client, device, ecs, seat, seat_v1, session, session_core_v1};
+use crate::{device, ecs, reconcile, seat, seat_v1, session, session_core_v1};
 use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 
@@ -9,7 +9,6 @@ pub fn spawn(
     pid: u32,
     session: Option<session::SessionId>,
 ) -> entity::Entity {
-    ecs::ensure_protocol_objects(world);
     let mut cmd = world.spawn(ecs::ClientBundle {
         marker: ecs::Client,
         seat_object: ecs::SeatObject(object),
@@ -71,7 +70,7 @@ pub fn add_object(
         object.send_session(session.as_raw());
     }
     if let Some(state) = world.get::<ecs::SeatState>(client_entity) {
-        object.send_state(client::state_event(state.0));
+        object.send_state(state_event(state.0));
     }
     object.send_active(u32::from(is_active(world, seat_entity, client_entity)));
     object.send_next(u32::from(
@@ -85,8 +84,7 @@ pub fn add_object(
     for device_entity in device::devices(world, client_entity) {
         if let Some(objects) = world
             .resource::<ecs::ProtocolObjects>()
-            .devices
-            .get(&device_entity)
+            .device_objects(device_entity)
         {
             for device_object in objects {
                 object.send_device_added(device_object.id);
@@ -95,13 +93,9 @@ pub fn add_object(
     }
     object.send_done();
 
-    ecs::ensure_protocol_objects(world);
     world
         .resource_mut::<ecs::ProtocolObjects>()
-        .clients
-        .entry(client_entity)
-        .or_default()
-        .push(object);
+        .add_client_object(client_entity, object);
 }
 
 pub fn entity_by_seat_object(
@@ -121,14 +115,7 @@ pub fn entity_by_core_object(
 ) -> Option<entity::Entity> {
     world
         .resource::<ecs::ProtocolObjects>()
-        .clients
-        .iter()
-        .find_map(|(entity, objects)| {
-            objects
-                .iter()
-                .any(|candidate| candidate == object)
-                .then_some(*entity)
-        })
+        .client_entity_by_object(object)
 }
 
 pub fn entity_by_pid(world: &world::World, pid: u32) -> Option<entity::Entity> {
@@ -158,8 +145,7 @@ pub fn entity_by_core_device_object(
     devices.iter(world).find_map(|(client, device_entity)| {
         world
             .resource::<ecs::ProtocolObjects>()
-            .seat_devices
-            .get(&device_entity)
+            .seat_device_objects(device_entity)
             .is_some_and(|objects| objects.iter().any(|candidate| candidate.object == *object))
             .then_some(client.0)
     })
@@ -176,7 +162,7 @@ impl hyprwire::Dispatch<session_core_seat_client::SessionCoreSeatClient> for cra
                 session_core_seat_device,
                 device_id,
             } => {
-                let Some(client_entity) = client::entity_by_core_object(&self.world, object) else {
+                let Some(client_entity) = entity_by_core_object(&self.world, object) else {
                     session_core_seat_device.send_destroyed();
                     return;
                 };
@@ -195,105 +181,25 @@ impl hyprwire::Dispatch<session_core_seat_client::SessionCoreSeatClient> for cra
                 );
             }
             session_core_seat_client::Event::Destroy => {
-                if let Some(client_entity) = client::entity_by_core_object(&self.world, object)
-                    && let Some(objects) = self
-                        .world
+                if let Some(client_entity) = entity_by_core_object(&self.world, object) {
+                    self.world
                         .resource_mut::<ecs::ProtocolObjects>()
-                        .clients
-                        .get_mut(&client_entity)
-                {
-                    objects.retain(|candidate| candidate != object);
+                        .remove_client_object(client_entity, object);
                 }
             }
         }
     }
 }
 
-pub fn notify_state(world: &world::World, client_entity: entity::Entity) {
-    let Some(state) = world
-        .get::<ecs::SeatState>(client_entity)
-        .map(|state| state.0)
-    else {
-        return;
-    };
-    if let Some(objects) = world
-        .resource::<ecs::ProtocolObjects>()
-        .clients
-        .get(&client_entity)
-    {
-        for object in objects {
-            object.send_state(client::state_event(state));
-        }
-    }
-}
-
-pub fn notify_active(
-    world: &world::World,
-    seat_entity: entity::Entity,
-    client_entity: entity::Entity,
-) {
-    let active = u32::from(client::is_active(world, seat_entity, client_entity));
-    if let Some(objects) = world
-        .resource::<ecs::ProtocolObjects>()
-        .clients
-        .get(&client_entity)
-    {
-        for object in objects {
-            object.send_active(active);
-        }
-    }
-}
-
-pub fn notify_next(world: &world::World, client_entity: entity::Entity, next: bool) {
-    if let Some(objects) = world
-        .resource::<ecs::ProtocolObjects>()
-        .clients
-        .get(&client_entity)
-    {
-        for object in objects {
-            object.send_next(u32::from(next));
-        }
-    }
-}
-
-pub fn notify_device_added(world: &world::World, client_entity: entity::Entity, device_id: u32) {
-    if let Some(objects) = world
-        .resource::<ecs::ProtocolObjects>()
-        .clients
-        .get(&client_entity)
-    {
-        for object in objects {
-            object.send_device_added(device_id);
-        }
-    }
-}
-
-pub fn notify_device_removed(world: &world::World, client_entity: entity::Entity, device_id: u32) {
-    if let Some(objects) = world
-        .resource::<ecs::ProtocolObjects>()
-        .clients
-        .get(&client_entity)
-    {
-        for object in objects {
-            object.send_device_removed(device_id);
-        }
-    }
-}
-
-pub fn notify_destroyed(world: &world::World, client_entity: entity::Entity) {
-    if let Some(objects) = world
-        .resource::<ecs::ProtocolObjects>()
-        .clients
-        .get(&client_entity)
-    {
-        for object in objects {
-            object.send_destroyed();
-        }
-    }
+pub fn set_state(world: &mut world::World, client_entity: entity::Entity, state: seat::SeatState) {
+    world
+        .entity_mut(client_entity)
+        .insert(ecs::SeatState(state));
+    reconcile::client_state(world, client_entity);
 }
 
 pub fn deactivate_devices(world: &mut world::World, client_entity: entity::Entity) {
-    let devices = device::devices(world, client_entity).collect::<Vec<_>>();
+    let devices = device::devices(world, client_entity);
 
     for device_entity in devices {
         if let Err(err) = device::deactivate(world, device_entity) {
@@ -305,7 +211,7 @@ pub fn deactivate_devices(world: &mut world::World, client_entity: entity::Entit
         match device::kind(world, device_entity) {
             Ok(device::DeviceKind::Drm | device::DeviceKind::Wscons) => {}
             Ok(device::DeviceKind::Evdev | device::DeviceKind::Hidraw) => {
-                device::notify_removed(world, client_entity, device_entity);
+                reconcile::device_removed(world, client_entity, device_entity);
                 device::remove_protocol_objects(world, device_entity);
                 world.despawn(device_entity);
             }
@@ -351,7 +257,7 @@ pub fn add(
                 .map(|vt| vt.0)
                 .ok_or_else(|| anyhow::anyhow!("could not determine VT for client"))?;
 
-            let already_pending = seat::clients(world, seat_entity).any(|client| {
+            let already_pending = seat::clients(world, seat_entity).into_iter().any(|client| {
                 world
                     .get::<ecs::SessionId>(client)
                     .is_some_and(|session| session.0.as_raw() == vt.get())
@@ -369,7 +275,7 @@ pub fn add(
         }
         ecs::SeatKind::NonVtBound => {
             let mut next_session = 1;
-            while seat::clients(world, seat_entity).any(|client| {
+            while seat::clients(world, seat_entity).into_iter().any(|client| {
                 world
                     .get::<ecs::SessionId>(client)
                     .is_some_and(|session| session.0.as_raw() == next_session)
@@ -389,14 +295,10 @@ pub fn add(
         ecs::SeatName(name.clone()),
         ecs::ClientSeat(seat_entity),
         ecs::SessionId(session_id),
-        ecs::SeatState(seat::SeatState::Enabled),
     ));
-    world
-        .entity_mut(seat_entity)
-        .insert(ecs::ActiveClient(client_entity));
+    set_state(world, client_entity, seat::SeatState::Enabled);
+    seat::set_active_client(world, seat_entity, Some(client_entity));
     seat::notify_client_added(world, seat_entity, client_entity);
-    notify_state(world, client_entity);
-    notify_active(world, seat_entity, client_entity);
 
     if let Some(object) = world.get::<ecs::SeatObject>(client_entity) {
         object.0.send_enabled();
@@ -443,7 +345,7 @@ pub fn open(
         seat::vt_open(session_id.as_raw())?;
     }
 
-    let devices = device::devices(world, client_entity).collect::<Vec<_>>();
+    let devices = device::devices(world, client_entity);
     for device_entity in devices {
         if let Err(err) = device::activate(world, device_entity) {
             let path = device::path_display(world, device_entity);
@@ -454,14 +356,8 @@ pub fn open(
     if let Some(object) = world.get::<ecs::SeatObject>(client_entity) {
         object.0.send_enabled();
     }
-    world
-        .entity_mut(client_entity)
-        .insert(ecs::SeatState(seat::SeatState::Enabled));
-    world
-        .entity_mut(seat_entity)
-        .insert(ecs::ActiveClient(client_entity));
-    notify_state(world, client_entity);
-    notify_active(world, seat_entity, client_entity);
+    set_state(world, client_entity, seat::SeatState::Enabled);
+    seat::set_active_client(world, seat_entity, Some(client_entity));
     log::info!("Opened client {} on {}", session_id.as_raw(), name);
 
     Ok(())
@@ -477,7 +373,7 @@ pub fn disable(
         return Err(anyhow::anyhow!("client is not active"));
     }
 
-    if !client::is_active(world, seat_entity, client_entity) {
+    if !is_active(world, seat_entity, client_entity) {
         log::error!("Could not disable client: client is not the active seat client");
         return Err(anyhow::anyhow!("client is not the active seat client"));
     }
@@ -487,10 +383,7 @@ pub fn disable(
 
     deactivate_devices(world, client_entity);
 
-    world
-        .entity_mut(client_entity)
-        .insert(ecs::SeatState(seat::SeatState::PendingDisabled));
-    notify_state(world, client_entity);
+    set_state(world, client_entity, seat::SeatState::PendingDisabled);
     if let Some(object) = world.get::<ecs::SeatObject>(client_entity) {
         object.0.send_disabled();
     }
@@ -511,18 +404,14 @@ pub fn ack_disable(
 
     let session_id = session_id(world, client_entity)?;
     let name = seat::name(world, seat_entity)?;
-    world
-        .entity_mut(client_entity)
-        .insert(ecs::SeatState(seat::SeatState::Disabled));
-    notify_state(world, client_entity);
+    set_state(world, client_entity, seat::SeatState::Disabled);
     log::info!("Disabled client {} on {}", session_id.as_raw(), name);
 
-    if !client::is_active(world, seat_entity, client_entity) {
+    if !is_active(world, seat_entity, client_entity) {
         return Ok(());
     }
 
-    world.entity_mut(seat_entity).remove::<ecs::ActiveClient>();
-    notify_active(world, seat_entity, client_entity);
+    seat::set_active_client(world, seat_entity, None);
     let _ = seat::activate(world, seat_entity);
 
     Ok(())

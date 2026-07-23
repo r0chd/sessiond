@@ -9,11 +9,11 @@ pub fn spawn(
     pid: u32,
     session: Option<session::SessionId>,
 ) -> entity::Entity {
+    ecs::ensure_protocol_objects(world);
     let mut cmd = world.spawn(ecs::ClientBundle {
         marker: ecs::Client,
         seat_object: ecs::SeatObject(object),
         pid: ecs::ClientPid(pid),
-        objects: ecs::ClientObjects(Vec::new()),
         state: ecs::SeatState(seat::SeatState::New),
     });
 
@@ -83,17 +83,25 @@ pub fn add_object(
         object.send_pid(pid.0);
     }
     for device_entity in device::devices(world, client_entity) {
-        if let Some(objects) = world.get::<ecs::DeviceObjects>(device_entity) {
-            for device_object in &objects.0 {
+        if let Some(objects) = world
+            .resource::<ecs::ProtocolObjects>()
+            .devices
+            .get(&device_entity)
+        {
+            for device_object in objects {
                 object.send_device_added(device_object.id);
             }
         }
     }
     object.send_done();
 
-    if let Some(mut objects) = world.get_mut::<ecs::ClientObjects>(client_entity) {
-        objects.0.push(object);
-    }
+    ecs::ensure_protocol_objects(world);
+    world
+        .resource_mut::<ecs::ProtocolObjects>()
+        .clients
+        .entry(client_entity)
+        .or_default()
+        .push(object);
 }
 
 pub fn entity_by_seat_object(
@@ -111,15 +119,16 @@ pub fn entity_by_core_object(
     world: &world::World,
     object: &session_core_seat_client::SessionCoreSeatClient,
 ) -> Option<entity::Entity> {
-    let mut clients =
-        world.try_query_filtered::<(Entity, &ecs::ClientObjects), With<ecs::Client>>()?;
-    clients.iter(world).find_map(|(entity, objects)| {
-        objects
-            .0
-            .iter()
-            .any(|candidate| candidate == object)
-            .then_some(entity)
-    })
+    world
+        .resource::<ecs::ProtocolObjects>()
+        .clients
+        .iter()
+        .find_map(|(entity, objects)| {
+            objects
+                .iter()
+                .any(|candidate| candidate == object)
+                .then_some(*entity)
+        })
 }
 
 pub fn entity_by_pid(world: &world::World, pid: u32) -> Option<entity::Entity> {
@@ -148,13 +157,10 @@ pub fn entity_by_core_device_object(
         world.try_query_filtered::<(&ecs::OwnerClient, Entity), With<ecs::Device>>()?;
     devices.iter(world).find_map(|(client, device_entity)| {
         world
-            .get::<ecs::SeatDeviceObjects>(device_entity)
-            .is_some_and(|objects| {
-                objects
-                    .0
-                    .iter()
-                    .any(|candidate| candidate.object == *object)
-            })
+            .resource::<ecs::ProtocolObjects>()
+            .seat_devices
+            .get(&device_entity)
+            .is_some_and(|objects| objects.iter().any(|candidate| candidate.object == *object))
             .then_some(client.0)
     })
 }
@@ -190,10 +196,13 @@ impl hyprwire::Dispatch<session_core_seat_client::SessionCoreSeatClient> for cra
             }
             session_core_seat_client::Event::Destroy => {
                 if let Some(client_entity) = client::entity_by_core_object(&self.world, object)
-                    && let Some(mut objects) =
-                        self.world.get_mut::<ecs::ClientObjects>(client_entity)
+                    && let Some(objects) = self
+                        .world
+                        .resource_mut::<ecs::ProtocolObjects>()
+                        .clients
+                        .get_mut(&client_entity)
                 {
-                    objects.0.retain(|candidate| candidate != object);
+                    objects.retain(|candidate| candidate != object);
                 }
             }
         }
@@ -207,8 +216,12 @@ pub fn notify_state(world: &world::World, client_entity: entity::Entity) {
     else {
         return;
     };
-    if let Some(objects) = world.get::<ecs::ClientObjects>(client_entity) {
-        for object in &objects.0 {
+    if let Some(objects) = world
+        .resource::<ecs::ProtocolObjects>()
+        .clients
+        .get(&client_entity)
+    {
+        for object in objects {
             object.send_state(client::state_event(state));
         }
     }
@@ -220,40 +233,60 @@ pub fn notify_active(
     client_entity: entity::Entity,
 ) {
     let active = u32::from(client::is_active(world, seat_entity, client_entity));
-    if let Some(objects) = world.get::<ecs::ClientObjects>(client_entity) {
-        for object in &objects.0 {
+    if let Some(objects) = world
+        .resource::<ecs::ProtocolObjects>()
+        .clients
+        .get(&client_entity)
+    {
+        for object in objects {
             object.send_active(active);
         }
     }
 }
 
 pub fn notify_next(world: &world::World, client_entity: entity::Entity, next: bool) {
-    if let Some(objects) = world.get::<ecs::ClientObjects>(client_entity) {
-        for object in &objects.0 {
+    if let Some(objects) = world
+        .resource::<ecs::ProtocolObjects>()
+        .clients
+        .get(&client_entity)
+    {
+        for object in objects {
             object.send_next(u32::from(next));
         }
     }
 }
 
 pub fn notify_device_added(world: &world::World, client_entity: entity::Entity, device_id: u32) {
-    if let Some(objects) = world.get::<ecs::ClientObjects>(client_entity) {
-        for object in &objects.0 {
+    if let Some(objects) = world
+        .resource::<ecs::ProtocolObjects>()
+        .clients
+        .get(&client_entity)
+    {
+        for object in objects {
             object.send_device_added(device_id);
         }
     }
 }
 
 pub fn notify_device_removed(world: &world::World, client_entity: entity::Entity, device_id: u32) {
-    if let Some(objects) = world.get::<ecs::ClientObjects>(client_entity) {
-        for object in &objects.0 {
+    if let Some(objects) = world
+        .resource::<ecs::ProtocolObjects>()
+        .clients
+        .get(&client_entity)
+    {
+        for object in objects {
             object.send_device_removed(device_id);
         }
     }
 }
 
 pub fn notify_destroyed(world: &world::World, client_entity: entity::Entity) {
-    if let Some(objects) = world.get::<ecs::ClientObjects>(client_entity) {
-        for object in &objects.0 {
+    if let Some(objects) = world
+        .resource::<ecs::ProtocolObjects>()
+        .clients
+        .get(&client_entity)
+    {
+        for object in objects {
             object.send_destroyed();
         }
     }
@@ -273,6 +306,7 @@ pub fn deactivate_devices(world: &mut world::World, client_entity: entity::Entit
             Ok(device::DeviceKind::Drm | device::DeviceKind::Wscons) => {}
             Ok(device::DeviceKind::Evdev | device::DeviceKind::Hidraw) => {
                 device::notify_removed(world, client_entity, device_entity);
+                device::remove_protocol_objects(world, device_entity);
                 world.despawn(device_entity);
             }
             Err(err) => {
@@ -409,7 +443,8 @@ pub fn open(
         seat::vt_open(session_id.as_raw())?;
     }
 
-    for device_entity in device::devices(world, client_entity) {
+    let devices = device::devices(world, client_entity).collect::<Vec<_>>();
+    for device_entity in devices {
         if let Err(err) = device::activate(world, device_entity) {
             let path = device::path_display(world, device_entity);
             log::error!("Could not activate {path}: {err}");

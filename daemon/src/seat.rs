@@ -1,7 +1,6 @@
 use crate::seat_v1::{seat, seat_manager};
 use crate::session_core_v1::session_core_seat;
 use crate::{client, device, ecs, seat_v1, session, session_core_v1, terminal, user};
-use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 use calloop::signals;
 use rustix::io;
@@ -21,11 +20,11 @@ pub fn spawn(
     mode: ecs::SeatKind,
     current_vt: u32,
 ) -> entity::Entity {
+    ecs::ensure_protocol_objects(world);
     let mut cmd = world.spawn(ecs::SeatBundle {
         marker: ecs::Seat,
         name: ecs::SeatName(name),
         mode: ecs::SeatMode(mode),
-        objects: ecs::SeatObjects(Vec::new()),
     });
 
     if let Some(current_vt) = num::NonZeroU32::new(current_vt) {
@@ -39,11 +38,16 @@ pub fn entity_by_core_object(
     world: &world::World,
     object: &session_core_seat::SessionCoreSeat,
 ) -> Option<entity::Entity> {
-    entities(world).find(|entity| {
-        world
-            .get::<ecs::SeatObjects>(*entity)
-            .is_some_and(|objects| objects.0.iter().any(|candidate| candidate == object))
-    })
+    world
+        .resource::<ecs::ProtocolObjects>()
+        .seats
+        .iter()
+        .find_map(|(entity, objects)| {
+            objects
+                .iter()
+                .any(|candidate| candidate == object)
+                .then_some(*entity)
+        })
 }
 
 pub fn entity_by_name(world: &world::World, name: &str) -> Option<entity::Entity> {
@@ -54,29 +58,26 @@ pub fn entity_by_name(world: &world::World, name: &str) -> Option<entity::Entity
     })
 }
 
-pub fn entities(world: &world::World) -> impl Iterator<Item = entity::Entity> + use<> {
-    let Some(mut seats) = world.try_query_filtered::<Entity, With<ecs::Seat>>() else {
-        return Vec::new().into_iter();
-    };
-
-    seats.iter(world).collect::<Vec<_>>().into_iter()
+pub fn entities(world: &world::World) -> impl Iterator<Item = entity::Entity> + '_ {
+    world
+        .iter_entities()
+        .filter(bevy_ecs::world::EntityRef::contains::<ecs::Seat>)
+        .map(|entity| entity.id())
 }
 
 pub fn clients(
     world: &world::World,
     seat_entity: entity::Entity,
-) -> impl Iterator<Item = entity::Entity> + use<> {
-    let Some(mut clients) =
-        world.try_query_filtered::<(Entity, &ecs::ClientSeat), With<ecs::Client>>()
-    else {
-        return Vec::new().into_iter();
-    };
-
-    clients
-        .iter(world)
-        .filter_map(move |(client_entity, seat)| (seat.0 == seat_entity).then_some(client_entity))
-        .collect::<Vec<_>>()
-        .into_iter()
+) -> impl Iterator<Item = entity::Entity> + '_ {
+    world
+        .iter_entities()
+        .filter(move |entity| {
+            entity.contains::<ecs::Client>()
+                && entity
+                    .get::<ecs::ClientSeat>()
+                    .is_some_and(|seat| seat.0 == seat_entity)
+        })
+        .map(|entity| entity.id())
 }
 
 pub fn first(world: &world::World) -> Option<entity::Entity> {
@@ -94,7 +95,7 @@ pub fn add_object(
     world: &mut world::World,
     seat_entity: entity::Entity,
     object: session_core_seat::SessionCoreSeat,
-    management_access: &crate::Access,
+    management_access: crate::Access,
 ) {
     if let Some(name) = world.get::<ecs::SeatName>(seat_entity) {
         object.send_seat(&name.0);
@@ -120,16 +121,20 @@ pub fn add_object(
     }
     object.send_done();
 
-    if let Some(mut objects) = world.get_mut::<ecs::SeatObjects>(seat_entity) {
-        objects.0.push(object);
-    }
+    ecs::ensure_protocol_objects(world);
+    world
+        .resource_mut::<ecs::ProtocolObjects>()
+        .seats
+        .entry(seat_entity)
+        .or_default()
+        .push(object);
 }
 
 fn can_modify(
     world: &world::World,
     seat_entity: entity::Entity,
     creds: &rustix::net::UCred,
-    management_access: &crate::Access,
+    management_access: crate::Access,
 ) -> bool {
     if management_access.allows(creds) {
         return true;
@@ -154,8 +159,12 @@ pub fn notify_client_added(
     let Some(pid) = world.get::<ecs::ClientPid>(client_entity).map(|pid| pid.0) else {
         return;
     };
-    if let Some(objects) = world.get::<ecs::SeatObjects>(seat_entity) {
-        for object in &objects.0 {
+    if let Some(objects) = world
+        .resource::<ecs::ProtocolObjects>()
+        .seats
+        .get(&seat_entity)
+    {
+        for object in objects {
             object.send_client_added(pid);
         }
     }
@@ -166,8 +175,12 @@ fn notify_current_vt(world: &world::World, seat_entity: entity::Entity) {
         .get::<ecs::CurrentVt>(seat_entity)
         .map(|vt| vt.0)
         .map_or(0, num::NonZeroU32::get);
-    if let Some(objects) = world.get::<ecs::SeatObjects>(seat_entity) {
-        for object in &objects.0 {
+    if let Some(objects) = world
+        .resource::<ecs::ProtocolObjects>()
+        .seats
+        .get(&seat_entity)
+    {
+        for object in objects {
             object.send_current_vt(vt);
         }
     }
@@ -253,12 +266,14 @@ pub fn remove_client(
         .map(|session| session.0);
     let name = name(world, seat_entity)?;
 
-    for device_entity in device::devices(world, client_entity) {
+    let devices = device::devices(world, client_entity).collect::<Vec<_>>();
+    for device_entity in devices {
         if let Err(err) = device::deactivate(world, device_entity) {
             let path = device::path_display(world, device_entity);
             log::error!("Could not deactivate {path}: {err}");
         }
         device::notify_removed(world, client_entity, device_entity);
+        device::remove_protocol_objects(world, device_entity);
         world.despawn(device_entity);
     }
 
@@ -293,6 +308,10 @@ pub fn remove_client(
     }
 
     client::notify_destroyed(world, client_entity);
+    world
+        .resource_mut::<ecs::ProtocolObjects>()
+        .clients
+        .remove(&client_entity);
     world.despawn(client_entity);
 
     log::info!(
@@ -324,7 +343,8 @@ pub fn refresh_current_vt(world: &mut world::World, seat_entity: entity::Entity)
 }
 
 pub fn refresh_current_vts(world: &mut world::World) {
-    for seat_entity in entities(world) {
+    let seats = entities(world).collect::<Vec<_>>();
+    for seat_entity in seats {
         refresh_current_vt(world, seat_entity);
     }
 }
@@ -335,7 +355,8 @@ pub fn handle_vt_signal(
 ) -> Vec<(num::NonZeroU32, session_core_v1::ActiveState)> {
     let mut session_updates = Vec::new();
 
-    for seat_entity in entities(world) {
+    let seats = entities(world).collect::<Vec<_>>();
+    for seat_entity in seats {
         if !is_vt_bound(world, seat_entity) {
             continue;
         }
@@ -604,7 +625,7 @@ impl seat_v1::SeatV1Handler for crate::Sessiond {
         };
 
         let creds = client.creds();
-        if self.seat_access.allows(creds) {
+        if self.world.resource::<ecs::AccessRules>().seat.allows(creds) {
             return;
         }
 
@@ -638,7 +659,7 @@ impl hyprwire::Dispatch<seat_manager::SeatManager> for crate::Sessiond {
                 };
 
                 let creds = server_client.creds();
-                if !self.seat_access.allows(creds) {
+                if !self.world.resource::<ecs::AccessRules>().seat.allows(creds) {
                     log::warn!(
                         pid = creds.pid.as_raw_pid(),
                         uid = creds.uid.as_raw(),
@@ -675,6 +696,10 @@ impl hyprwire::Dispatch<seat_manager::SeatManager> for crate::Sessiond {
                 if let Err(err) = client::add(&mut self.world, seat_entity, client_entity) {
                     log::error!("Could not add client to seat: {err}");
                     seat.send_disabled();
+                    self.world
+                        .resource_mut::<ecs::ProtocolObjects>()
+                        .clients
+                        .remove(&client_entity);
                     self.world.despawn(client_entity);
                     return;
                 }
@@ -703,8 +728,13 @@ impl hyprwire::Dispatch<seat_manager::SeatManager> for crate::Sessiond {
                                 ecs::SessionSeat(seat_entity),
                             ));
                         }
-                        if let Some(objects) = self.world.get::<ecs::SessionObjects>(entity) {
-                            for object in &objects.0 {
+                        if let Some(objects) = self
+                            .world
+                            .resource::<ecs::ProtocolObjects>()
+                            .sessions
+                            .get(&entity)
+                        {
+                            for object in objects {
                                 object.send_seat(&name);
                             }
                         }
@@ -838,12 +868,8 @@ impl hyprwire::Dispatch<session_core_seat::SessionCoreSeat> for crate::Sessiond 
                 let Some(client) = object.client() else {
                     return;
                 };
-                if !can_modify(
-                    &self.world,
-                    seat_entity,
-                    client.creds(),
-                    &self.management_access,
-                ) {
+                let management_access = self.world.resource::<ecs::AccessRules>().management;
+                if !can_modify(&self.world, seat_entity, client.creds(), management_access) {
                     object.send_error(
                         session_core_v1::ErrorCode::PermissionDenied,
                         "permission denied",
@@ -860,9 +886,13 @@ impl hyprwire::Dispatch<session_core_seat::SessionCoreSeat> for crate::Sessiond 
             }
             session_core_seat::Event::Destroy => {
                 if let Some(seat_entity) = entity_by_core_object(&self.world, object)
-                    && let Some(mut objects) = self.world.get_mut::<ecs::SeatObjects>(seat_entity)
+                    && let Some(objects) = self
+                        .world
+                        .resource_mut::<ecs::ProtocolObjects>()
+                        .seats
+                        .get_mut(&seat_entity)
                 {
-                    objects.0.retain(|candidate| candidate != object);
+                    objects.retain(|candidate| candidate != object);
                 }
             }
         }

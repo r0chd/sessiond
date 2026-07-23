@@ -40,7 +40,7 @@ pub fn add_object(
 ) {
     if let Some(session) = world
         .get::<ecs::ClientSession>(client_entity)
-        .and_then(|session| session.0)
+        .map(|session| session.0)
         .or_else(|| {
             world
                 .get::<ecs::SessionId>(client_entity)
@@ -295,15 +295,11 @@ pub fn add(
                 .get::<ecs::CurrentVt>(seat_entity)
                 .map(|vt| vt.0)
                 .ok_or_else(|| anyhow::anyhow!("could not determine VT for client"))?;
-            if vt == 0 {
-                log::error!("Could not determine VT for client");
-                return Err(anyhow::anyhow!("could not determine VT for client"));
-            }
 
             let already_pending = seat::clients(world, seat_entity).any(|client| {
                 world
                     .get::<ecs::SessionId>(client)
-                    .is_some_and(|session| session.0.as_raw() == vt)
+                    .is_some_and(|session| session.0.as_raw() == vt.get())
             });
             if world.get::<ecs::ActiveClient>(seat_entity).is_some() && already_pending {
                 log::error!(
@@ -314,7 +310,7 @@ pub fn add(
                 ));
             }
 
-            session::SessionId::from_raw(vt)
+            session::SessionId::from_raw(vt.get())
         }
         ecs::SeatKind::NonVtBound => {
             let mut next_session = 1;

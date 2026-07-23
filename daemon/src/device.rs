@@ -358,10 +358,7 @@ pub fn matches_named_device(path: &path::Path, parent: &str, prefix: &str) -> bo
 }
 
 pub fn activate(world: &mut world::World, entity: entity::Entity) -> anyhow::Result<()> {
-    if world
-        .get::<ecs::DeviceActive>(entity)
-        .is_some_and(|active| active.0)
-    {
+    if world.get::<ecs::DeviceActive>(entity).is_some() {
         return Ok(());
     }
 
@@ -373,14 +370,14 @@ pub fn activate(world: &mut world::World, entity: entity::Entity) -> anyhow::Res
                 .ok_or_else(|| anyhow::anyhow!("device has no fd"))?;
             drm_set_master(&fd.0)
                 .map_err(|err| anyhow::anyhow!("Could not make device fd drm master: {err}"))?;
-            world.entity_mut(entity).insert(ecs::DeviceActive(true));
+            world.entity_mut(entity).insert(ecs::DeviceActive);
             notify_active(world, entity, true);
         }
         DeviceKind::Evdev | DeviceKind::Hidraw => {
             return Err(anyhow::anyhow!("device type cannot be activated"));
         }
         DeviceKind::Wscons => {
-            world.entity_mut(entity).insert(ecs::DeviceActive(true));
+            world.entity_mut(entity).insert(ecs::DeviceActive);
             notify_active(world, entity, true);
         }
     }
@@ -389,10 +386,7 @@ pub fn activate(world: &mut world::World, entity: entity::Entity) -> anyhow::Res
 }
 
 pub fn deactivate(world: &mut world::World, entity: entity::Entity) -> anyhow::Result<()> {
-    if !world
-        .get::<ecs::DeviceActive>(entity)
-        .is_some_and(|active| active.0)
-    {
+    if !world.get::<ecs::DeviceActive>(entity).is_some() {
         return Ok(());
     }
 
@@ -428,7 +422,7 @@ pub fn deactivate(world: &mut world::World, entity: entity::Entity) -> anyhow::R
         DeviceKind::Wscons => {}
     }
 
-    world.entity_mut(entity).insert(ecs::DeviceActive(false));
+    world.entity_mut(entity).remove::<ecs::DeviceActive>();
     notify_active(world, entity, false);
     Ok(())
 }
@@ -604,8 +598,10 @@ pub fn add_core_object(
     if let Some(kind) = world.get::<ecs::DeviceKind>(device_entity) {
         object.send_kind(kind_event(kind.0));
     }
-    if let Some(active) = world.get::<ecs::DeviceActive>(device_entity) {
-        object.send_active(u32::from(active.0));
+    if world.get::<ecs::DeviceActive>(device_entity).is_some() {
+        object.send_active(1);
+    } else {
+        object.send_active(0);
     }
     object.send_done();
 

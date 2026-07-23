@@ -1,5 +1,6 @@
 use crate::{ecs, session, session_core_v1};
 use bevy_ecs::prelude::*;
+use std::num;
 
 fn make_session_entity(world: &mut World, session_id: u32, uid: u32) -> Entity {
     world
@@ -230,7 +231,9 @@ fn set_state_without_active_state_component() {
 fn set_state_with_vt_component() {
     let mut world = World::new();
     let e = make_active_session_entity(&mut world, 1, 1000, session_core_v1::ActiveState::Online);
-    world.entity_mut(e).insert(ecs::Vt(Some(3)));
+    world
+        .entity_mut(e)
+        .insert(ecs::Vt(num::NonZeroU32::new(3).unwrap()));
     session::set_state(
         &mut world,
         session::SessionId::from_raw(1),

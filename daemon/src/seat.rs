@@ -5,6 +5,7 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 use calloop::signals;
 use rustix::io;
+use std::num;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SeatState {
@@ -82,7 +83,7 @@ pub fn add_object(
         object.send_mode(mode_event(mode.0));
     }
     if let Some(vt) = world.get::<ecs::CurrentVt>(seat_entity) {
-        object.send_current_vt(vt.0);
+        object.send_current_vt(vt.0.get());
     }
     for client_entity in clients(world, seat_entity) {
         if let Some(pid) = world.get::<ecs::ClientPid>(client_entity) {
@@ -143,7 +144,8 @@ pub fn notify_client_added(
 fn notify_current_vt(world: &world::World, seat_entity: entity::Entity) {
     let vt = world
         .get::<ecs::CurrentVt>(seat_entity)
-        .map_or(0, |vt| vt.0);
+        .map(|vt| vt.0)
+        .map_or(0, num::NonZeroU32::get);
     if let Some(objects) = world.get::<ecs::SeatObjects>(seat_entity) {
         for object in &objects.0 {
             object.send_current_vt(vt);
@@ -186,9 +188,10 @@ pub fn set_next_session(
     if is_vt_bound(world, seat_entity) {
         let cur_vt = world
             .get::<ecs::CurrentVt>(seat_entity)
-            .map_or(0, |vt| vt.0);
+            .map(|vt| vt.0)
+            .ok_or_else(|| anyhow::anyhow!("could not determine current VT"))?;
         log::info!("Switching from VT {} to VT {}", cur_vt, session.as_raw());
-        vt_switch(cur_vt, session.as_raw())?;
+        vt_switch(cur_vt.get(), session.as_raw())?;
         return Ok(());
     }
 
@@ -254,7 +257,7 @@ pub fn remove_client(
                 world
                     .get::<ecs::CurrentVt>(seat_entity)
                     .map(|current| current.0)
-                    .filter(|current| *current != 0)
+                    .map(num::NonZeroU32::get)
             });
             if let Some(vt) = vt {
                 vt_close(vt)?;
@@ -309,7 +312,7 @@ pub fn refresh_current_vts(world: &mut world::World) {
 pub fn handle_vt_signal(
     world: &mut world::World,
     signal: signals::Signal,
-) -> Vec<(u32, session_core_v1::ActiveState)> {
+) -> Vec<(num::NonZeroU32, session_core_v1::ActiveState)> {
     let mut session_updates = Vec::new();
 
     for seat_entity in entities(world) {
@@ -351,8 +354,7 @@ pub fn sync_states(world: &mut world::World) {
                 return None;
             }
 
-            let vt = world.get::<ecs::CurrentVt>(seat_entity)?.0;
-            (vt != 0).then_some(vt)
+            Some(world.get::<ecs::CurrentVt>(seat_entity)?.0)
         })
         .collect::<Vec<_>>();
 
@@ -370,7 +372,7 @@ pub fn sync_states(world: &mut world::World) {
                 return None;
             }
 
-            let vt = world.get::<ecs::Vt>(entity)?.0?;
+            let vt = world.get::<ecs::Vt>(entity)?.0;
             let state = if active_vts.contains(&vt) {
                 session_core_v1::ActiveState::Active
             } else {
@@ -416,17 +418,19 @@ pub fn activate(world: &mut world::World, seat_entity: entity::Entity) -> anyhow
             }
 
             if is_vt_bound(world, seat_entity) {
-                let cur_vt = world
-                    .get::<ecs::CurrentVt>(seat_entity)
-                    .map_or(0, |vt| vt.0);
+                let cur_vt = world.get::<ecs::CurrentVt>(seat_entity).map(|vt| vt.0);
                 let client = clients.iter().copied().find(|client| {
-                    world
-                        .get::<ecs::SessionId>(*client)
-                        .is_some_and(|session| session.0.as_raw() == cur_vt)
+                    world.get::<ecs::SessionId>(*client).is_some_and(|session| {
+                        cur_vt.is_some_and(|vt| session.0.as_raw() == vt.get())
+                    })
                 });
                 if client.is_some() {
-                    log::debug!("Activating client belonging to VT {cur_vt}");
+                    log::debug!(
+                        "Activating client belonging to VT {}",
+                        cur_vt.map_or(0, num::NonZeroU32::get)
+                    );
                 } else {
+                    let cur_vt = cur_vt.map_or(0, num::NonZeroU32::get);
                     log::info!("No clients belonging to VT {cur_vt} to activate");
                     return Err(anyhow::anyhow!(
                         "No clients belonging to VT {cur_vt} to activate"
@@ -449,15 +453,14 @@ pub fn activate(world: &mut world::World, seat_entity: entity::Entity) -> anyhow
 fn release_vt(
     world: &mut world::World,
     seat_entity: entity::Entity,
-) -> anyhow::Result<Option<u32>> {
+) -> anyhow::Result<Option<num::NonZeroU32>> {
     refresh_current_vt(world, seat_entity);
-    let cur_vt = world
-        .get::<ecs::CurrentVt>(seat_entity)
-        .map_or(0, |vt| vt.0);
+    let cur_vt = world.get::<ecs::CurrentVt>(seat_entity).map(|vt| vt.0);
     let released_vt = world
         .get::<ecs::ActiveClient>(seat_entity)
         .and_then(|client| world.get::<ecs::SessionId>(client.0))
-        .map_or(cur_vt, |session| session.0.as_raw());
+        .and_then(|session| num::NonZeroU32::new(session.0.as_raw()))
+        .or(cur_vt);
     log::debug!("Releasing VT");
 
     if let Some(active_client) = world
@@ -469,19 +472,16 @@ fn release_vt(
 
     ack_vt_release(world, seat_entity)?;
 
-    Ok(Some(released_vt))
+    Ok(released_vt)
 }
 
 fn ack_vt_release(world: &mut world::World, seat_entity: entity::Entity) -> anyhow::Result<()> {
-    let cur_vt = world
-        .get::<ecs::CurrentVt>(seat_entity)
-        .map_or(0, |vt| vt.0);
-    if cur_vt == 0 {
+    let Some(cur_vt) = world.get::<ecs::CurrentVt>(seat_entity).map(|vt| vt.0) else {
         return Ok(());
-    }
+    };
 
-    terminal::Terminal::open(cur_vt)?.ack_release()?;
-    world.entity_mut(seat_entity).insert(ecs::CurrentVt(0));
+    terminal::Terminal::open(cur_vt.get())?.ack_release()?;
+    world.entity_mut(seat_entity).remove::<ecs::CurrentVt>();
     notify_current_vt(world, seat_entity);
 
     Ok(())
@@ -490,10 +490,10 @@ fn ack_vt_release(world: &mut world::World, seat_entity: entity::Entity) -> anyh
 fn activate_vt(
     world: &mut world::World,
     seat_entity: entity::Entity,
-) -> anyhow::Result<Option<u32>> {
+) -> anyhow::Result<Option<num::NonZeroU32>> {
     let acquired_vt = current_vt()?;
     log::debug!("Activating VT");
-    terminal::Terminal::open(acquired_vt)?.ack_acquire()?;
+    terminal::Terminal::open(acquired_vt.get())?.ack_acquire()?;
     world
         .entity_mut(seat_entity)
         .insert(ecs::CurrentVt(acquired_vt));
@@ -509,7 +509,7 @@ fn activate_vt(
         }
     }
 
-    send_session_switched(world, seat_entity, acquired_vt);
+    send_session_switched(world, seat_entity, acquired_vt.get());
 
     Ok(Some(acquired_vt))
 }
@@ -540,9 +540,10 @@ fn vt_switch(current_vt: u32, next_vt: u32) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn current_vt() -> anyhow::Result<u32> {
+fn current_vt() -> anyhow::Result<num::NonZeroU32> {
     let tty0fd = terminal::Terminal::open(0)?;
-    Ok(u32::from(tty0fd.current_vt()?))
+    num::NonZeroU32::new(u32::from(tty0fd.current_vt()?))
+        .ok_or_else(|| anyhow::anyhow!("active VT is zero"))
 }
 
 pub fn is_vt_bound(world: &world::World, seat_entity: entity::Entity) -> bool {

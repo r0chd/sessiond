@@ -98,9 +98,7 @@ fn sync(world: &mut world::World, entity: entity::Entity) {
     let Some(uid) = world.get::<ecs::Uid>(entity).map(|uid| uid.0) else {
         return;
     };
-    let lingering = world
-        .get::<ecs::Lingering>(entity)
-        .is_some_and(|lingering| lingering.0);
+    let lingering = world.get::<ecs::Lingering>(entity).is_some();
     let state = compute_state(world, uid, lingering);
 
     let changed = world
@@ -132,8 +130,10 @@ pub fn add_object(
     if let Some(username) = world.get::<ecs::Username>(entity) {
         object.send_username(&username.0);
     }
-    if let Some(lingering) = world.get::<ecs::Lingering>(entity) {
-        object.send_lingering(u32::from(lingering.0));
+    if world.get::<ecs::Lingering>(entity).is_some() {
+        object.send_lingering(1);
+    } else {
+        object.send_lingering(0);
     }
     if let Some(state) = world.get::<ecs::UserState>(entity) {
         object.send_state(state.0);
@@ -217,5 +217,5 @@ impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond 
 pub fn is_lingering(world: &world::World, uid: u32) -> bool {
     entity_by_uid(world, uid)
         .and_then(|entity| world.get::<ecs::Lingering>(entity))
-        .is_some_and(|lingering| lingering.0)
+        .is_some()
 }

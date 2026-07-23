@@ -1,4 +1,4 @@
-use crate::{ecs, session, session_core_user, session_core_v1, user};
+use crate::{ecs, reconcile, session, session_core_user, session_core_v1, user};
 use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 use std::{fs, io};
@@ -10,7 +10,6 @@ pub fn spawn(
     lingering: bool,
     state: session_core_v1::UserState,
 ) -> entity::Entity {
-    ecs::ensure_protocol_objects(world);
     let mut cmd = world.spawn(ecs::UserBundle {
         marker: ecs::User,
         uid: ecs::Uid(uid),
@@ -58,14 +57,7 @@ pub fn entity_by_object(
 ) -> Option<entity::Entity> {
     world
         .resource::<ecs::ProtocolObjects>()
-        .users
-        .iter()
-        .find_map(|(entity, objects)| {
-            objects
-                .iter()
-                .any(|candidate| candidate == object)
-                .then_some(*entity)
-        })
+        .user_entity_by_object(object)
 }
 
 pub fn create(world: &mut world::World, uid: u32, lingering: bool) -> Option<entity::Entity> {
@@ -82,6 +74,7 @@ pub fn create(world: &mut world::World, uid: u32, lingering: bool) -> Option<ent
 
 fn compute_state(world: &world::World, uid: u32, lingering: bool) -> session_core_v1::UserState {
     let states = session::entities_by_uid(world, uid)
+        .into_iter()
         .filter_map(|entity| world.get::<ecs::ActiveState>(entity).map(|state| state.0))
         .collect::<Vec<_>>();
 
@@ -132,14 +125,14 @@ fn sync(world: &mut world::World, entity: entity::Entity) {
         return;
     }
 
+    set_state(world, entity, state);
+}
+
+fn set_state(world: &mut world::World, entity: entity::Entity, state: session_core_v1::UserState) {
     if let Some(mut component) = world.get_mut::<ecs::UserState>(entity) {
         component.0 = state;
     }
-    if let Some(objects) = world.resource::<ecs::ProtocolObjects>().users.get(&entity) {
-        for object in objects {
-            object.send_state(state);
-        }
-    }
+    reconcile::user_state(world, entity);
 }
 
 pub fn add_object(
@@ -170,13 +163,9 @@ pub fn add_object(
     }
     object.send_done();
 
-    ecs::ensure_protocol_objects(world);
     world
         .resource_mut::<ecs::ProtocolObjects>()
-        .users
-        .entry(entity)
-        .or_default()
-        .push(object);
+        .add_user_object(entity, object);
 }
 
 impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond {
@@ -194,14 +183,9 @@ impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond 
 
         match event {
             session_core_user::Event::Destroy => {
-                if let Some(objects) = self
-                    .world
+                self.world
                     .resource_mut::<ecs::ProtocolObjects>()
-                    .users
-                    .get_mut(&entity)
-                {
-                    objects.retain(|candidate| candidate != object);
-                }
+                    .remove_user_object(entity, object);
             }
             session_core_user::Event::Terminate => {
                 let uid = self.world.get::<ecs::Uid>(entity).map_or(0, |uid| uid.0);
@@ -219,7 +203,7 @@ impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond 
                     return;
                 }
 
-                let entities = session::entities_by_uid(&self.world, uid).collect::<Vec<_>>();
+                let entities = session::entities_by_uid(&self.world, uid);
                 for entity in entities {
                     self.terminate_session(entity);
                 }
@@ -243,7 +227,7 @@ impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond 
                     return;
                 }
 
-                let entities = session::entities_by_uid(&self.world, uid).collect::<Vec<_>>();
+                let entities = session::entities_by_uid(&self.world, uid);
                 for entity in entities {
                     self.kill_session(entity);
                 }

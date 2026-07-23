@@ -62,7 +62,7 @@ fn entities_returns_only_session_entities() {
     let mut world = World::new();
     let with_session = make_session_entity(&mut world, 1, 1000);
     world.spawn_empty();
-    let result: Vec<_> = session::entities(&world).collect();
+    let result = session::entities(&world);
     assert_eq!(result, vec![with_session]);
 }
 
@@ -70,7 +70,7 @@ fn entities_returns_only_session_entities() {
 fn entities_empty_when_none_have_session() {
     let mut world = World::new();
     world.spawn_empty();
-    let result: Vec<_> = session::entities(&world).collect();
+    let result = session::entities(&world);
     assert!(result.is_empty());
 }
 
@@ -145,7 +145,7 @@ fn entities_returns_multiple_session_entities() {
     let e1 = make_session_entity(&mut world, 1, 1000);
     let e2 = make_session_entity(&mut world, 2, 2000);
     world.spawn_empty();
-    let result: Vec<_> = session::entities(&world).collect();
+    let result = session::entities(&world);
     assert_eq!(result, vec![e1, e2]);
 }
 
@@ -157,7 +157,7 @@ fn entities_by_seat_name_returns_matching_sessions() {
     let e3 = make_seated_session_entity(&mut world, 3, 3000, "seat0");
     world.spawn(ecs::SeatName("seat0".to_string()));
 
-    let result: Vec<_> = session::entities_by_seat_name(&world, "seat0").collect();
+    let result = session::entities_by_seat_name(&world, "seat0");
 
     assert_eq!(result, vec![e1, e3]);
 }
@@ -167,7 +167,7 @@ fn entities_by_seat_name_returns_empty_without_match() {
     let mut world = World::new();
     make_seated_session_entity(&mut world, 1, 1000, "seat0");
 
-    let result: Vec<_> = session::entities_by_seat_name(&world, "seat1").collect();
+    let result = session::entities_by_seat_name(&world, "seat1");
 
     assert!(result.is_empty());
 }
@@ -186,13 +186,9 @@ fn entity_finds_correct_among_multiple() {
 #[test]
 fn set_state_updates_active_state() {
     let mut world = World::new();
+    ecs::init_resources(&mut world);
     let e = make_active_session_entity(&mut world, 1, 1000, session_core_v1::ActiveState::Online);
-    session::set_state(
-        &mut world,
-        session::SessionId::from_raw(1),
-        e,
-        session_core_v1::ActiveState::Active,
-    );
+    session::set_active_state(&mut world, e, session_core_v1::ActiveState::Active);
     assert!(matches!(
         world.get::<ecs::ActiveState>(e).unwrap().0,
         session_core_v1::ActiveState::Active
@@ -202,13 +198,9 @@ fn set_state_updates_active_state() {
 #[test]
 fn set_state_to_closing() {
     let mut world = World::new();
+    ecs::init_resources(&mut world);
     let e = make_active_session_entity(&mut world, 1, 1000, session_core_v1::ActiveState::Active);
-    session::set_state(
-        &mut world,
-        session::SessionId::from_raw(1),
-        e,
-        session_core_v1::ActiveState::Closing,
-    );
+    session::set_active_state(&mut world, e, session_core_v1::ActiveState::Closing);
     assert!(matches!(
         world.get::<ecs::ActiveState>(e).unwrap().0,
         session_core_v1::ActiveState::Closing
@@ -218,28 +210,20 @@ fn set_state_to_closing() {
 #[test]
 fn set_state_without_active_state_component() {
     let mut world = World::new();
+    ecs::init_resources(&mut world);
     let e = make_session_entity(&mut world, 1, 1000);
-    session::set_state(
-        &mut world,
-        session::SessionId::from_raw(1),
-        e,
-        session_core_v1::ActiveState::Active,
-    );
+    session::set_active_state(&mut world, e, session_core_v1::ActiveState::Active);
 }
 
 #[test]
 fn set_state_with_vt_component() {
     let mut world = World::new();
+    ecs::init_resources(&mut world);
     let e = make_active_session_entity(&mut world, 1, 1000, session_core_v1::ActiveState::Online);
     world
         .entity_mut(e)
         .insert(ecs::Vt(num::NonZeroU32::new(3).unwrap()));
-    session::set_state(
-        &mut world,
-        session::SessionId::from_raw(1),
-        e,
-        session_core_v1::ActiveState::Active,
-    );
+    session::set_active_state(&mut world, e, session_core_v1::ActiveState::Active);
     assert!(matches!(
         world.get::<ecs::ActiveState>(e).unwrap().0,
         session_core_v1::ActiveState::Active

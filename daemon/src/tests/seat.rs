@@ -2,7 +2,7 @@ use crate::{client, ecs, seat, session};
 use bevy_ecs::prelude::*;
 
 fn make_seat(world: &mut World) -> Entity {
-    ecs::insert_seat(world, "seat0".to_string(), ecs::SeatKind::NonVtBound, 0)
+    seat::spawn(world, "seat0".to_string(), ecs::SeatKind::NonVtBound, 0)
 }
 
 fn make_client(world: &mut World) -> Entity {

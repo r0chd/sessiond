@@ -10,161 +10,100 @@ use std::collections::BTreeMap;
 use std::os::fd;
 use std::{num, path, time};
 
-#[allow(clippy::too_many_arguments)]
-pub fn insert_session(
-    world: &mut World,
-    session_id: session::SessionId,
-    uid: u32,
-    username: String,
-    vt: Option<u32>,
-    seat: Option<String>,
-    session_seat: Option<Entity>,
-    leader_id: i32,
-    remote_host: Option<String>,
-    active_state: session_core_v1::ActiveState,
-    session_object: Option<session_management_session::SessionManagementSession>,
-) -> Entity {
-    let mut cmd = world.spawn((
-        Session,
-        SessionId(session_id),
-        Uid(uid),
-        Username(username),
-        Timestamp(time::SystemTime::now()),
-        LeaderId(leader_id),
-        SessionEnv(BTreeMap::new()),
-        SessionObjects(Vec::new()),
-        ActiveState(active_state),
-    ));
-    if let Some(vt) = vt.and_then(num::NonZeroU32::new) {
-        cmd.insert(Vt(vt));
-    }
-    if let Some(remote_host) = remote_host {
-        cmd.insert(RemoteHost(remote_host));
-    } else {
-        cmd.insert(IsLocal);
-    }
-    if let Some(name) = seat {
-        cmd.insert(SeatName(name));
-    }
-    if let Some(entity) = session_seat {
-        cmd.insert(SessionSeat(entity));
-    }
-    if let Some(session_object) = session_object {
-        cmd.insert(SessionObject(session_object));
-    }
-    cmd.id()
+// Bundles
+
+#[derive(Bundle)]
+pub struct SessionBundle {
+    pub marker: Session,
+    pub id: SessionId,
+    pub uid: Uid,
+    pub username: Username,
+    pub timestamp: Timestamp,
+    pub leader_id: LeaderId,
+    pub env: SessionEnv,
+    pub objects: SessionObjects,
+    pub active_state: ActiveState,
 }
 
-pub fn insert_user(
-    world: &mut World,
-    uid: u32,
-    username: String,
-    lingering: bool,
-    state: session_core_v1::UserState,
-) -> Entity {
-    let mut cmd = world.spawn((
-        User,
-        Uid(uid),
-        Username(username),
-        UserState(state),
-        UserObjects(Vec::new()),
-    ));
-
-    if lingering {
-        cmd.insert(Lingering);
-    }
-
-    cmd.id()
+#[derive(Bundle)]
+pub struct UserBundle {
+    pub marker: User,
+    pub uid: Uid,
+    pub username: Username,
+    pub state: UserState,
+    pub objects: UserObjects,
 }
 
-pub fn insert_client(
-    world: &mut World,
-    object: seat_v1::seat::Seat,
-    pid: u32,
-    session: Option<session::SessionId>,
-) -> Entity {
-    let mut cmd = world.spawn((
-        Client,
-        SeatObject(object),
-        ClientPid(pid),
-        ClientObjects(Vec::new()),
-        SeatState(seat::SeatState::New),
-    ));
-
-    if let Some(session) = session {
-        cmd.insert(ClientSession(session));
-    }
-
-    cmd.id()
+#[derive(Bundle)]
+pub struct ClientBundle {
+    pub marker: Client,
+    pub seat_object: SeatObject,
+    pub pid: ClientPid,
+    pub objects: ClientObjects,
+    pub state: SeatState,
 }
 
-pub fn insert_seat(world: &mut World, name: String, mode: SeatKind, current_vt: u32) -> Entity {
-    let mut cmd = world.spawn((
-        Seat,
-        SeatName(name),
-        SeatMode(mode),
-        SeatObjects(Vec::new()),
-    ));
-
-    if let Some(current_vt) = num::NonZeroU32::new(current_vt) {
-        cmd.insert(CurrentVt(current_vt));
-    }
-
-    cmd.id()
+#[derive(Bundle)]
+pub struct SeatBundle {
+    pub marker: Seat,
+    pub name: SeatName,
+    pub mode: SeatMode,
+    pub objects: SeatObjects,
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn insert_device(
-    world: &mut World,
-    object: seat_v1::device::Device,
-    path: path::PathBuf,
-    kind: device::DeviceKind,
-    id: u32,
-    active: bool,
-    fd: fd::OwnedFd,
-    owner: Entity,
-) -> Entity {
-    let mut cmd = world.spawn((
-        Device,
-        DeviceObjects(vec![DeviceObject { object, id }]),
-        SeatDeviceObjects(Vec::new()),
-        DevicePath(path),
-        DeviceRefCount(1),
-        DeviceKind(kind),
-        DeviceFd(fd),
-        OwnerClient(owner),
-    ));
-
-    if active {
-        cmd.insert(DeviceActive);
-    }
-
-    cmd.id()
+#[derive(Bundle)]
+pub struct DeviceBundle {
+    pub marker: Device,
+    pub objects: DeviceObjects,
+    pub seat_objects: SeatDeviceObjects,
+    pub path: DevicePath,
+    pub ref_count: DeviceRefCount,
+    pub kind: DeviceKind,
+    pub fd: DeviceFd,
+    pub owner: OwnerClient,
 }
 
-#[derive(Component)]
+// Marker components
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Session;
 
-#[derive(Component)]
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Client;
 
-#[derive(Component)]
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct User;
 
-#[derive(Component)]
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Seat;
 
-#[derive(Component)]
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Device;
 
-#[derive(Component)]
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Lingering;
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IsLocal;
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeviceActive;
+
+// Shared components
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Uid(pub u32);
 
-#[derive(Component)]
+#[derive(Component, Debug, Clone, PartialEq, Eq)]
 pub struct Username(pub String);
 
-#[derive(Component)]
-pub struct Lingering;
+#[derive(Component, Debug, Clone, PartialEq, Eq)]
+pub struct SeatName(pub String);
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionId(pub session::SessionId);
+
+// User components
 
 #[derive(Component)]
 pub struct UserState(pub session_core_v1::UserState);
@@ -172,28 +111,21 @@ pub struct UserState(pub session_core_v1::UserState);
 #[derive(Component)]
 pub struct UserObjects(pub Vec<session_core_user::SessionCoreUser>);
 
-#[derive(Component)]
+// Session components
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Vt(pub num::NonZeroU32);
 
-#[derive(Component)]
-pub struct SeatName(pub String);
-
-#[derive(Component)]
-pub struct ClientSeat(pub Entity);
-
-#[derive(Component)]
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SessionSeat(pub Entity);
 
-#[derive(Component)]
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Timestamp(pub time::SystemTime);
 
-#[derive(Component)]
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LeaderId(pub i32);
 
-#[derive(Component)]
-pub struct IsLocal;
-
-#[derive(Component)]
+#[derive(Component, Debug, Clone, PartialEq, Eq)]
 pub struct RemoteHost(pub String);
 
 #[derive(Component)]
@@ -206,19 +138,52 @@ pub struct SessionObjects(pub Vec<session_core_session::SessionCoreSession>);
 pub struct ActiveState(pub session_core_v1::ActiveState);
 
 #[derive(Component)]
-pub struct SessionId(pub session::SessionId);
+pub struct SessionObject(pub session_management_session::SessionManagementSession);
+
+// Seat components
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SeatKind {
+    VtBound,
+    NonVtBound,
+}
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SeatMode(pub SeatKind);
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CurrentVt(pub num::NonZeroU32);
+
+#[derive(Component)]
+pub struct SeatObjects(pub Vec<session_core_seat::SessionCoreSeat>);
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActiveClient(pub Entity);
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NextClient(pub Entity);
+
+// Client components
 
 #[derive(Component)]
 pub struct SeatObject(pub seat_v1::seat::Seat);
 
-#[derive(Component)]
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClientPid(pub u32);
 
-#[derive(Component)]
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClientSession(pub session::SessionId);
 
 #[derive(Component)]
 pub struct ClientObjects(pub Vec<session_core_seat_client::SessionCoreSeatClient>);
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClientSeat(pub Entity);
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SeatState(pub seat::SeatState);
+
+// Device components
 
 #[derive(Component)]
 pub struct DeviceObjects(pub Vec<DeviceObject>);
@@ -239,44 +204,14 @@ pub struct DeviceObject {
 #[derive(Component)]
 pub struct DevicePath(pub path::PathBuf);
 
-#[derive(Component)]
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DeviceRefCount(pub usize);
 
 #[derive(Component)]
 pub struct DeviceKind(pub device::DeviceKind);
 
 #[derive(Component)]
-pub struct DeviceActive;
-
-#[derive(Component)]
 pub struct DeviceFd(pub fd::OwnedFd);
 
-#[derive(Component)]
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OwnerClient(pub Entity);
-
-#[derive(Component)]
-pub struct SeatState(pub seat::SeatState);
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum SeatKind {
-    VtBound,
-    NonVtBound,
-}
-
-#[derive(Component)]
-pub struct SeatMode(pub SeatKind);
-
-#[derive(Component)]
-pub struct CurrentVt(pub num::NonZeroU32);
-
-#[derive(Component)]
-pub struct SeatObjects(pub Vec<session_core_seat::SessionCoreSeat>);
-
-#[derive(Component)]
-pub struct ActiveClient(pub Entity);
-
-#[derive(Component)]
-pub struct NextClient(pub Entity);
-
-#[derive(Component)]
-pub struct SessionObject(pub session_management_session::SessionManagementSession);

@@ -3,6 +3,28 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 use std::{fs, io};
 
+pub fn spawn(
+    world: &mut world::World,
+    uid: u32,
+    username: String,
+    lingering: bool,
+    state: session_core_v1::UserState,
+) -> entity::Entity {
+    let mut cmd = world.spawn(ecs::UserBundle {
+        marker: ecs::User,
+        uid: ecs::Uid(uid),
+        username: ecs::Username(username),
+        state: ecs::UserState(state),
+        objects: ecs::UserObjects(Vec::new()),
+    });
+
+    if lingering {
+        cmd.insert(ecs::Lingering);
+    }
+
+    cmd.id()
+}
+
 pub fn create_runtime_dir(uid: u32, path: &str) {
     if let Err(e) = fs::create_dir_all(path) {
         log::error!(uid, error = e.to_string().as_str(); "failed to create runtime dir");
@@ -47,7 +69,7 @@ pub fn entity_by_object(
 pub fn create(world: &mut world::World, uid: u32, lingering: bool) -> Option<entity::Entity> {
     let user = uzers::get_user_by_uid(uid)?;
     let state = compute_state(world, uid, lingering);
-    Some(ecs::insert_user(
+    Some(spawn(
         world,
         uid,
         user.name().to_string_lossy().into_owned(),

@@ -15,6 +15,26 @@ pub enum SeatState {
     Disabled,
 }
 
+pub fn spawn(
+    world: &mut world::World,
+    name: String,
+    mode: ecs::SeatKind,
+    current_vt: u32,
+) -> entity::Entity {
+    let mut cmd = world.spawn(ecs::SeatBundle {
+        marker: ecs::Seat,
+        name: ecs::SeatName(name),
+        mode: ecs::SeatMode(mode),
+        objects: ecs::SeatObjects(Vec::new()),
+    });
+
+    if let Some(current_vt) = num::NonZeroU32::new(current_vt) {
+        cmd.insert(ecs::CurrentVt(current_vt));
+    }
+
+    cmd.id()
+}
+
 pub fn entity_by_core_object(
     world: &world::World,
     object: &session_core_seat::SessionCoreSeat,
@@ -650,12 +670,8 @@ impl hyprwire::Dispatch<seat_manager::SeatManager> for crate::Sessiond {
                     return;
                 };
 
-                let client_entity = ecs::insert_client(
-                    &mut self.world,
-                    seat.clone(),
-                    opener_pid,
-                    opener_session_id,
-                );
+                let client_entity =
+                    client::spawn(&mut self.world, seat.clone(), opener_pid, opener_session_id);
                 if let Err(err) = client::add(&mut self.world, seat_entity, client_entity) {
                     log::error!("Could not add client to seat: {err}");
                     seat.send_disabled();

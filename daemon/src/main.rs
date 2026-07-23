@@ -169,7 +169,7 @@ fn run(config: DaemonConfig) -> anyhow::Result<()> {
         world: World::new(),
     };
 
-    ecs::insert_seat(
+    seat::spawn(
         &mut sessiond.world,
         sessiond.settings.default_seat.clone(),
         if vtbound {

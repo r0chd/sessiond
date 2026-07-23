@@ -3,6 +3,27 @@ use crate::{client, device, ecs, seat, seat_v1, session, session_core_v1};
 use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 
+pub fn spawn(
+    world: &mut world::World,
+    object: seat_v1::seat::Seat,
+    pid: u32,
+    session: Option<session::SessionId>,
+) -> entity::Entity {
+    let mut cmd = world.spawn(ecs::ClientBundle {
+        marker: ecs::Client,
+        seat_object: ecs::SeatObject(object),
+        pid: ecs::ClientPid(pid),
+        objects: ecs::ClientObjects(Vec::new()),
+        state: ecs::SeatState(seat::SeatState::New),
+    });
+
+    if let Some(session) = session {
+        cmd.insert(ecs::ClientSession(session));
+    }
+
+    cmd.id()
+}
+
 pub const fn state_event(state: seat::SeatState) -> session_core_v1::SeatClientState {
     match state {
         seat::SeatState::New => session_core_v1::SeatClientState::New,

@@ -51,6 +51,9 @@ in
         user = lib.mkDefault "root";
         group = lib.mkDefault "seat";
       };
+      users = lib.mapAttrs (_userName: _userCfg: {
+        env.DBUS_SESSION_BUS_ADDRESS = lib.mkDefault "unix:path={runtime-dir}/bus";
+      }) config.users.users;
     };
 
     environment.systemPackages = [ cfg.package ];

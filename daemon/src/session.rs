@@ -589,10 +589,20 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                     active_state = session_core_v1::ActiveState::Active;
                 }
 
+                let pending_env = self
+                    .world
+                    .resource_mut::<ecs::PendingSessionEnvs>()
+                    .0
+                    .remove(object);
+
                 let mut env = self.user_config(&username).environment(
                     uid,
                     session_id.as_raw(),
                     session_seat.as_deref(),
+                    pending_env
+                        .as_ref()
+                        .and_then(|env| env.get("TERM"))
+                        .map(String::as_str),
                 );
                 env.extend(session_envs_by_uid(&self.world, uid, None));
 
@@ -610,11 +620,6 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                     None,
                 );
 
-                let pending_env = self
-                    .world
-                    .resource_mut::<ecs::PendingSessionEnvs>()
-                    .0
-                    .remove(object);
                 if let Some(pending_env) = pending_env
                     && let Some(mut session_env) =
                         self.world.get_mut::<ecs::SessionEnv>(session_entity)
@@ -752,10 +757,16 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                 object.send_session_id(session_id.as_raw());
                 object.send_seat(session_seat.as_deref().unwrap_or_default());
                 if let (Some(uid), Some(username)) = (uid, username) {
+                    let term = self
+                        .world
+                        .get::<ecs::SessionEnv>(entity)
+                        .and_then(|env| env.0.get("TERM"))
+                        .map(String::as_str);
                     let mut env = self.user_config(&username).environment(
                         uid,
                         session_id.as_raw(),
                         session_seat.as_deref(),
+                        term,
                     );
                     env.extend(session_envs_by_uid(&self.world, uid, Some(entity)));
 

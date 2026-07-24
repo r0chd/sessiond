@@ -154,12 +154,10 @@ pub fn add_object(
     if let Some(state) = world.get::<ecs::UserState>(entity) {
         object.send_state(state.0);
     }
-    if let Some(client) = object.client() {
-        let uid = world.get::<ecs::Uid>(entity).map_or(0, |uid| uid.0);
-        let can_modify =
-            management_access.allows(client.creds()) || uid == client.creds().uid.as_raw();
-        object.send_can_modify(u32::from(can_modify));
-    }
+    let client = object.client();
+    let uid = world.get::<ecs::Uid>(entity).map_or(0, |uid| uid.0);
+    let can_modify = management_access.allows(client.creds()) || uid == client.creds().uid.as_raw();
+    object.send_can_modify(u32::from(can_modify));
     object.send_done();
 
     world
@@ -176,9 +174,7 @@ impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond 
         let Some(entity) = entity_by_object(&self.world, object) else {
             return;
         };
-        let Some(client) = object.client() else {
-            return;
-        };
+        let client = object.client();
 
         match event {
             session_core_user::Event::Destroy => {

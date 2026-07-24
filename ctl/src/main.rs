@@ -803,7 +803,7 @@ fn main() -> anyhow::Result<()> {
     let mut socket = client::Client::connect("/run/sessiond.sock")?;
     let event_queue = socket.new_event_queue();
 
-    socket.add_implementation::<session_core_v1::SessionCoreV1Impl>();
+    socket.add_implementation::<session_core_v1::SessionCoreV1>();
 
     event_queue.wait_for_handshake(&mut state)?;
 

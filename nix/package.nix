@@ -65,7 +65,7 @@ rustPlatform.buildRustPackage {
       --fish <($out/bin/sessionctl completions fish) \
       --nushell <($out/bin/sessionctl completions nushell)
   ''
-  + lib.optionals withConsoleKit ''
+  + lib.optionalString withConsoleKit ''
     mkdir -p $out/share/dbus-1/system.d
     cat > $out/share/dbus-1/system.d/org.freedesktop.ConsoleKit.conf <<'EOF'
     <!DOCTYPE busconfig PUBLIC

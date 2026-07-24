@@ -1,6 +1,7 @@
 use anyhow::Context;
 use std::collections::BTreeMap;
 use std::{fs, io, path};
+use uzers::os::unix::UserExt;
 
 #[derive(serde::Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -89,16 +90,28 @@ impl UserConfig {
         uid: u32,
         session_id: u32,
         seat: Option<&str>,
+        term: Option<&str>,
     ) -> BTreeMap<String, String> {
         let runtime_dir = self.runtime_dir(uid);
         let mut env = BTreeMap::from([
             ("XDG_RUNTIME_DIR".to_string(), runtime_dir.clone()),
-            (
-                "DBUS_SESSION_BUS_ADDRESS".to_string(),
-                format!("unix:path={runtime_dir}/bus"),
-            ),
             ("XDG_SESSION_ID".to_string(), session_id.to_string()),
+            ("TERM".to_string(), term.unwrap_or("linux").to_string()),
         ]);
+
+        if let Some(user) = uzers::get_user_by_uid(uid) {
+            let username = user.name().to_string_lossy().to_string();
+            env.insert("USER".to_string(), username.clone());
+            env.insert("LOGNAME".to_string(), username);
+            env.insert(
+                "HOME".to_string(),
+                user.home_dir().to_string_lossy().to_string(),
+            );
+            env.insert(
+                "SHELL".to_string(),
+                user.shell().to_string_lossy().to_string(),
+            );
+        }
 
         if let Some(seat) = seat.filter(|seat| !seat.is_empty()) {
             env.insert("XDG_SEAT".to_string(), seat.to_string());

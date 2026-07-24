@@ -1,4 +1,4 @@
-use crate::{ecs, reconcile, session, session_core_user, session_core_v1, user};
+use crate::{ecs, session, session_core_user, session_core_v1, user};
 use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 use std::{fs, io};
@@ -132,7 +132,6 @@ fn set_state(world: &mut world::World, entity: entity::Entity, state: session_co
     if let Some(mut component) = world.get_mut::<ecs::UserState>(entity) {
         component.0 = state;
     }
-    reconcile::user_state(world, entity);
 }
 
 pub fn add_object(

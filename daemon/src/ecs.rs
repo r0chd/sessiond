@@ -8,11 +8,15 @@ use crate::{
     session_core_v1,
 };
 use bevy_ecs::prelude::*;
+use bevy_ecs::schedule::ScheduleLabel;
 use std::collections::{BTreeMap, HashMap};
 use std::os::fd;
 use std::{num, path, time};
 
 // Resources
+
+#[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Notify;
 
 #[derive(Resource)]
 pub struct AccessRules {
@@ -25,6 +29,49 @@ pub struct DaemonConfig(pub config::Config);
 
 #[derive(Resource, Default)]
 pub struct SessionInfoManagers(pub Vec<session_core_manager::SessionCoreManager>);
+
+#[derive(Resource, Default)]
+pub struct NotifyBatch {
+    pub sessions: Vec<Entity>,
+    pub users: Vec<Entity>,
+    pub clients: Vec<Entity>,
+    pub devices: Vec<Entity>,
+}
+
+impl NotifyBatch {
+    pub fn session(&mut self, entity: Entity) {
+        if !self.sessions.contains(&entity) {
+            self.sessions.push(entity);
+        }
+    }
+
+    pub fn user(&mut self, entity: Entity) {
+        if !self.users.contains(&entity) {
+            self.users.push(entity);
+        }
+    }
+
+    pub fn client(&mut self, entity: Entity) {
+        if !self.clients.contains(&entity) {
+            self.clients.push(entity);
+        }
+    }
+
+    pub fn device(&mut self, entity: Entity) {
+        if !self.devices.contains(&entity) {
+            self.devices.push(entity);
+        }
+    }
+}
+
+#[derive(Resource, Default)]
+pub struct SeatNotifyState {
+    pub active_clients: HashMap<Entity, Entity>,
+    pub next_clients: HashMap<Entity, Entity>,
+}
+
+#[derive(Resource, Default)]
+pub struct PendingDeviceActiveNotifications(pub Vec<(Entity, bool)>);
 
 #[derive(Resource)]
 pub struct NextSessionId(pub session::SessionId);
@@ -241,6 +288,16 @@ impl ProtocolObjects {
 
 pub fn init_resources(world: &mut World) {
     world.insert_resource(ProtocolObjects::default());
+    world.insert_resource(NotifyBatch::default());
+    world.insert_resource(SeatNotifyState::default());
+    world.insert_resource(PendingDeviceActiveNotifications::default());
+}
+
+pub fn push_device_active_notification(world: &mut World, entity: Entity, active: bool) {
+    world
+        .resource_mut::<PendingDeviceActiveNotifications>()
+        .0
+        .push((entity, active));
 }
 
 // Bundles

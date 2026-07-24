@@ -395,14 +395,12 @@ pub fn activate(world: &mut world::World, entity: entity::Entity) -> anyhow::Res
             drm_set_master(&fd.0)
                 .map_err(|err| anyhow::anyhow!("Could not make device fd drm master: {err}"))?;
             world.entity_mut(entity).insert(ecs::DeviceActive);
-            reconcile::device_active(world, entity, true);
         }
         DeviceKind::Evdev | DeviceKind::Hidraw => {
             return Err(anyhow::anyhow!("device type cannot be activated"));
         }
         DeviceKind::Wscons => {
             world.entity_mut(entity).insert(ecs::DeviceActive);
-            reconcile::device_active(world, entity, true);
         }
     }
 
@@ -447,7 +445,7 @@ pub fn deactivate(world: &mut world::World, entity: entity::Entity) -> anyhow::R
     }
 
     world.entity_mut(entity).remove::<ecs::DeviceActive>();
-    reconcile::device_active(world, entity, false);
+    ecs::push_device_active_notification(world, entity, false);
     Ok(())
 }
 

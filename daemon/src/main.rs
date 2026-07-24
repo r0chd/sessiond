@@ -96,6 +96,7 @@ struct Sessiond {
     shutting_down: bool,
     loop_signal: calloop::LoopSignal,
     world: World,
+    notify_schedule: Schedule,
 }
 
 impl Sessiond {
@@ -169,6 +170,7 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
         shutting_down: false,
         loop_signal,
         world: World::new(),
+        notify_schedule: reconcile::notify_schedule(),
     };
 
     sessiond
@@ -207,6 +209,7 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
             );
         }
     }
+    sessiond.world.clear_trackers();
 
     let mut socket = server::Server::bind(&socket_path)?;
     fs::set_permissions(socket_path, fs::Permissions::from_mode(0o777))?;
@@ -315,7 +318,9 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
             user::sync_all(&mut state.world);
         })?;
 
-    event_loop.run(None, &mut sessiond, |_| {})?;
+    event_loop.run(None, &mut sessiond, |state| {
+        state.notify_schedule.run(&mut state.world);
+    })?;
 
     let _ = fs::remove_file(socket_path);
 

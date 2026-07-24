@@ -6,6 +6,7 @@ use crate::{
 };
 use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
+use hyprwire::server;
 use rustix::system;
 use std::collections::BTreeMap;
 use std::{fs, num, time};
@@ -140,11 +141,7 @@ pub fn entity_by_management_object(
         .find_map(|(entity, session_object)| (session_object.0 == *object).then_some(entity))
 }
 
-pub fn can_modify(
-    world: &world::World,
-    entity: entity::Entity,
-    creds: &rustix::net::UCred,
-) -> bool {
+pub fn can_modify(world: &world::World, entity: entity::Entity, creds: &hyprwire::Creds) -> bool {
     let session_uid = world.get::<ecs::Uid>(entity).map_or(0, |uid| uid.0);
     creds.uid.is_root() || creds.uid.as_raw() == session_uid
 }
@@ -186,9 +183,7 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
             return;
         }
 
-        let Some(client) = object.client() else {
-            return;
-        };
+        let client = object.client();
         if !can_modify(&self.world, entity, client.creds()) {
             object.send_error(
                 session_core_v1::ErrorCode::PermissionDenied,
@@ -333,7 +328,7 @@ pub fn add_object(
     entity: entity::Entity,
     object: session_core_session::SessionCoreSession,
 ) {
-    log::debug!(session_id = session_id.as_raw(), uid = object.client().map_or(0, |c| c.creds().uid.as_raw()); "session info requested");
+    log::debug!(session_id = session_id.as_raw(), uid = object.client().creds().uid.as_raw(); "session info requested");
 
     object.send_session_id(session_id.as_raw());
     if let Some(uid) = world.get::<ecs::Uid>(entity) {
@@ -348,9 +343,11 @@ pub fn add_object(
     if let Some(active_state) = world.get::<ecs::ActiveState>(entity) {
         object.send_active(active_state.0);
     }
-    if let Some(client) = object.client() {
-        object.send_can_modify(u32::from(can_modify(world, entity, client.creds())));
-    }
+    object.send_can_modify(u32::from(can_modify(
+        world,
+        entity,
+        object.client().creds(),
+    )));
     if let Some(seat) = world.get::<ecs::SeatName>(entity) {
         object.send_seat(&seat.0);
     }
@@ -406,11 +403,25 @@ pub fn set_active_state(
     }
 }
 
-impl session_management_v1::SessionManagementV1Handler for crate::Sessiond {}
+impl hyprwire::Handler<session_management_v1::SessionManagementV1> for crate::Sessiond {
+    fn protocol_filter(&mut self, client: server::ServerClient) -> bool {
+        self.world
+            .resource::<ecs::AccessRules>()
+            .management
+            .allows(client.creds())
+    }
+}
 
-impl session_management_v2::SessionManagementV2Handler for crate::Sessiond {}
+impl hyprwire::Handler<session_management_v2::SessionManagementV2> for crate::Sessiond {
+    fn protocol_filter(&mut self, client: server::ServerClient) -> bool {
+        self.world
+            .resource::<ecs::AccessRules>()
+            .management
+            .allows(client.creds())
+    }
+}
 
-impl session_core_v1::SessionCoreV1Handler for crate::Sessiond {
+impl hyprwire::Handler<session_core_v1::SessionCoreV1> for crate::Sessiond {
     fn bind(&mut self, object: session_core_manager::SessionCoreManager) {
         sync_vt_session_states(&mut self.world);
 
@@ -420,9 +431,7 @@ impl session_core_v1::SessionCoreV1Handler for crate::Sessiond {
             .for_each(|session_id| {
                 object.send_session_added(session_id.as_raw());
             });
-        if let Some(client) = object.client() {
-            object.send_can_control_power(u32::from(self.can_control_power(client.creds())));
-        }
+        object.send_can_control_power(u32::from(self.can_control_power(object.client().creds())));
         object.send_done();
         self.world
             .resource_mut::<ecs::SessionInfoManagers>()
@@ -434,7 +443,7 @@ impl session_core_v1::SessionCoreV1Handler for crate::Sessiond {
 impl crate::Sessiond {
     // Allows to manage power commands (power off, reboot) only
     // if no other sessions are active or user has root permissions
-    fn can_control_power(&self, creds: &rustix::net::UCred) -> bool {
+    fn can_control_power(&self, creds: &hyprwire::Creds) -> bool {
         self.world
             .resource::<ecs::AccessRules>()
             .management
@@ -462,19 +471,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for crate::Sessiond {
         object: &session_manager::SessionManager,
         event: <session_manager::SessionManager as hyprwire::Object>::Event<'_>,
     ) {
-        let Some(client) = object.client() else {
-            return;
-        };
-
-        if !self
-            .world
-            .resource::<ecs::AccessRules>()
-            .management
-            .allows(client.creds())
-        {
-            log::warn!(uid = client.creds().uid.as_raw(); "rejected request from non-root client");
-            return;
-        }
+        let client = object.client();
 
         match event {
             session_manager::Event::Destroy => {}
@@ -529,19 +526,7 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
         object: &session_manager_v1::SessionManager,
         event: <session_manager_v1::SessionManager as hyprwire::Object>::Event<'_>,
     ) {
-        let Some(client) = object.client() else {
-            return;
-        };
-
-        if !self
-            .world
-            .resource::<ecs::AccessRules>()
-            .management
-            .allows(client.creds())
-        {
-            log::warn!(uid = client.creds().uid.as_raw(); "rejected request from non-root client");
-            return;
-        }
+        let client = object.client();
 
         match event {
             session_manager_v1::Event::CreateSession {
@@ -879,9 +864,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                 );
             }
             session_core_manager::Event::Reboot => {
-                let Some(client) = object.client() else {
-                    return;
-                };
+                let client = object.client();
 
                 // let user reboot only if there are no other user sessions active
                 let foreign_session_count = entities(&self.world)
@@ -932,9 +915,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                 object.send_done();
             }
             session_core_manager::Event::Poweroff => {
-                let Some(client) = object.client() else {
-                    return;
-                };
+                let client = object.client();
 
                 // let user poweroff only if there are no other user sessions active
                 let foreign_session_count = entities(&self.world)
@@ -985,9 +966,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                 object.send_done();
             }
             session_core_manager::Event::Suspend => {
-                let Some(client) = object.client() else {
-                    return;
-                };
+                let client = object.client();
 
                 // let user suspend only if there are no other user sessions active
                 let foreign_session_count = entities(&self.world)
@@ -1021,9 +1000,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                 object.send_done();
             }
             session_core_manager::Event::Hibernate => {
-                let Some(client) = object.client() else {
-                    return;
-                };
+                let client = object.client();
 
                 // let user hibernate only if there are no other user sessions active
                 let foreign_session_count = entities(&self.world)

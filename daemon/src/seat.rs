@@ -4,6 +4,7 @@ use crate::{client, device, ecs, reconcile, seat_v1, session, session_core_v1, t
 use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 use calloop::signals;
+use hyprwire::server;
 use rustix::io;
 use std::num;
 
@@ -101,14 +102,12 @@ pub fn add_object(
             object.send_client_added(pid.0);
         }
     }
-    if let Some(client) = object.client() {
-        object.send_can_modify(u32::from(can_modify(
-            world,
-            seat_entity,
-            client.creds(),
-            management_access,
-        )));
-    }
+    object.send_can_modify(u32::from(can_modify(
+        world,
+        seat_entity,
+        object.client().creds(),
+        management_access,
+    )));
     object.send_done();
 
     world
@@ -119,7 +118,7 @@ pub fn add_object(
 fn can_modify(
     world: &world::World,
     seat_entity: entity::Entity,
-    creds: &rustix::net::UCred,
+    creds: &hyprwire::Creds,
     management_access: crate::Access,
 ) -> bool {
     if management_access.allows(creds) {
@@ -627,31 +626,12 @@ pub fn state(world: &world::World, client_entity: entity::Entity) -> anyhow::Res
         .ok_or_else(|| anyhow::anyhow!("client has no seat state"))
 }
 
-impl seat_v1::SeatV1Handler for crate::Sessiond {
-    fn bind(&mut self, object: seat_manager::SeatManager) {
-        let Some(client) = object.client() else {
-            object.error(
-                io::Errno::PERM.raw_os_error().cast_unsigned(),
-                "seat access requires peer credentials",
-            );
-            return;
-        };
-
-        let creds = client.creds();
-        if self.world.resource::<ecs::AccessRules>().seat.allows(creds) {
-            return;
-        }
-
-        log::warn!(
-            pid = creds.pid.as_raw_pid(),
-            uid = creds.uid.as_raw(),
-            gid = creds.gid.as_raw();
-            "rejected seat_v1 bind from unauthorized client"
-        );
-        object.error(
-            io::Errno::PERM.raw_os_error().cast_unsigned(),
-            "seat access denied",
-        );
+impl hyprwire::Handler<seat_v1::SeatV1> for crate::Sessiond {
+    fn protocol_filter(&mut self, client: server::ServerClient) -> bool {
+        self.world
+            .resource::<ecs::AccessRules>()
+            .seat
+            .allows(client.creds())
     }
 }
 
@@ -663,14 +643,7 @@ impl hyprwire::Dispatch<seat_manager::SeatManager> for crate::Sessiond {
     ) {
         match event {
             seat_manager::Event::OpenSeat { seat } => {
-                let Some(server_client) = object.client() else {
-                    seat.error(
-                        io::Errno::PERM.raw_os_error().cast_unsigned(),
-                        "seat access requires peer credentials",
-                    );
-                    return;
-                };
-
+                let server_client = object.client();
                 let creds = server_client.creds();
                 if !self.world.resource::<ecs::AccessRules>().seat.allows(creds) {
                     log::warn!(
@@ -875,11 +848,13 @@ impl hyprwire::Dispatch<session_core_seat::SessionCoreSeat> for crate::Sessiond 
 
                 log::info!(seat = name.as_str(), sessions = session_entities.len(); "seat terminate requested");
 
-                let Some(client) = object.client() else {
-                    return;
-                };
                 let management_access = self.world.resource::<ecs::AccessRules>().management;
-                if !can_modify(&self.world, seat_entity, client.creds(), management_access) {
+                if !can_modify(
+                    &self.world,
+                    seat_entity,
+                    object.client().creds(),
+                    management_access,
+                ) {
                     object.send_error(
                         session_core_v1::ErrorCode::PermissionDenied,
                         "permission denied",

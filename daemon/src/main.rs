@@ -37,7 +37,7 @@ use bevy_ecs::prelude::*;
 use calloop::{generic, signals};
 use clap::Parser;
 use hyprwire::server;
-use rustix::{net, process};
+use rustix::process;
 use session_core_v1::{session_core_session, session_core_user};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
@@ -62,7 +62,7 @@ impl Access {
         Self { user, group }
     }
 
-    fn allows(self, creds: &net::UCred) -> bool {
+    fn allows(self, creds: &hyprwire::Creds) -> bool {
         if self.user == creds.uid || self.group == creds.gid || creds.uid.is_root() {
             return true;
         }
@@ -214,12 +214,10 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
     let mut socket = server::Server::bind(&socket_path)?;
     fs::set_permissions(socket_path, fs::Permissions::from_mode(0o777))?;
 
-    socket
-        .add_implementation::<session_management_v1::SessionManagementV1Impl, _>(&mut sessiond, 1);
-    socket
-        .add_implementation::<session_management_v2::SessionManagementV2Impl, _>(&mut sessiond, 1);
-    socket.add_implementation::<session_core_v1::SessionCoreV1Impl, _>(&mut sessiond, 1);
-    socket.add_implementation::<seat_v1::SeatV1Impl, _>(&mut sessiond, 1);
+    socket.add_implementation::<session_management_v1::SessionManagementV1, _>(&mut sessiond, 1);
+    socket.add_implementation::<session_management_v2::SessionManagementV2, _>(&mut sessiond, 1);
+    socket.add_implementation::<session_core_v1::SessionCoreV1, _>(&mut sessiond, 1);
+    socket.add_implementation::<seat_v1::SeatV1, _>(&mut sessiond, 1);
 
     let fd_wrapper = unsafe { generic::FdWrapper::new(socket.extract_loop_fd().as_raw_fd()) };
     let source = generic::Generic::new(

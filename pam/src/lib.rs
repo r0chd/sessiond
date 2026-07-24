@@ -57,7 +57,7 @@ impl PamServiceModule for Pam {
                 .map_err(|_| pamsm::PamError::SESSION_ERR)?;
             let event_queue = socket.new_event_queue();
 
-            socket.add_implementation::<session_management_v1::SessionManagementV1Impl>();
+            socket.add_implementation::<session_management_v1::SessionManagementV1>();
 
             event_queue
                 .wait_for_handshake(&mut session)
@@ -147,7 +147,7 @@ impl PamServiceModule for Pam {
                 .map_err(|_| pamsm::PamError::SESSION_ERR)?;
             let event_queue = socket.new_event_queue();
 
-            socket.add_implementation::<session_management_v1::SessionManagementV1Impl>();
+            socket.add_implementation::<session_management_v1::SessionManagementV1>();
 
             event_queue
                 .wait_for_handshake(&mut session)

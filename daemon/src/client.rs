@@ -195,7 +195,6 @@ pub fn set_state(world: &mut world::World, client_entity: entity::Entity, state:
     world
         .entity_mut(client_entity)
         .insert(ecs::SeatState(state));
-    reconcile::client_state(world, client_entity);
 }
 
 pub fn deactivate_devices(world: &mut world::World, client_entity: entity::Entity) {

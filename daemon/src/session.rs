@@ -2,8 +2,7 @@ use crate::session_core_v1::{session_core_manager, session_core_session};
 use crate::session_management_v1::session_manager as session_manager_v1;
 use crate::session_management_v2::{session_management_session, session_manager};
 use crate::{
-    config, ecs, reconcile, seat, session_core_v1, session_management_v1, session_management_v2,
-    user,
+    config, ecs, seat, session_core_v1, session_management_v1, session_management_v2, user,
 };
 use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
@@ -405,7 +404,6 @@ pub fn set_active_state(
     if let Some(mut active_state) = world.get_mut::<ecs::ActiveState>(entity) {
         active_state.0 = state;
     }
-    reconcile::session_active(world, entity);
 }
 
 impl session_management_v1::SessionManagementV1Handler for crate::Sessiond {}

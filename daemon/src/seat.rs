@@ -236,10 +236,6 @@ pub fn set_active_client(
     seat_entity: entity::Entity,
     client_entity: Option<entity::Entity>,
 ) {
-    let previous = world
-        .get::<ecs::ActiveClient>(seat_entity)
-        .map(|client| client.0);
-
     match client_entity {
         Some(client_entity) => {
             world
@@ -250,15 +246,6 @@ pub fn set_active_client(
             world.entity_mut(seat_entity).remove::<ecs::ActiveClient>();
         }
     }
-
-    match client_entity {
-        Some(client_entity) => reconcile::client_active(world, seat_entity, client_entity),
-        None => {
-            if let Some(previous) = previous {
-                reconcile::client_active(world, seat_entity, previous);
-            }
-        }
-    }
 }
 
 pub fn set_next_client(
@@ -266,10 +253,6 @@ pub fn set_next_client(
     seat_entity: entity::Entity,
     client_entity: Option<entity::Entity>,
 ) {
-    let previous = world
-        .get::<ecs::NextClient>(seat_entity)
-        .map(|client| client.0);
-
     match client_entity {
         Some(client_entity) => {
             world
@@ -279,15 +262,6 @@ pub fn set_next_client(
         None => {
             world.entity_mut(seat_entity).remove::<ecs::NextClient>();
         }
-    }
-
-    if previous != client_entity
-        && let Some(previous) = previous
-    {
-        reconcile::client_next(world, previous, false);
-    }
-    if let Some(client_entity) = client_entity {
-        reconcile::client_next(world, client_entity, true);
     }
 }
 

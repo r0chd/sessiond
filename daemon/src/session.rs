@@ -32,6 +32,7 @@ impl SessionId {
 pub fn spawn(
     world: &mut world::World,
     session_id: SessionId,
+    class: ecs::SessionClass,
     uid: u32,
     username: String,
     vt: Option<u32>,
@@ -45,6 +46,7 @@ pub fn spawn(
     let mut cmd = world.spawn(ecs::SessionBundle {
         marker: ecs::Session,
         id: ecs::SessionId(session_id),
+        class,
         uid: ecs::Uid(uid),
         username: ecs::Username(username),
         timestamp: ecs::Timestamp(time::SystemTime::now()),
@@ -337,6 +339,9 @@ pub fn add_object(
     if let Some(username) = world.get::<ecs::Username>(entity) {
         object.send_username(&username.0);
     }
+    if let Some(class) = world.get::<ecs::SessionClass>(entity) {
+        object.send_class((*class).into());
+    }
     if let Some(vt) = world.get::<ecs::Vt>(entity).map(|vt| vt.0.get()) {
         object.send_vt(vt);
     }
@@ -501,6 +506,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for crate::Sessiond {
                 let _session_entity = spawn(
                     &mut self.world,
                     session_id,
+                    ecs::SessionClass::User,
                     uid,
                     username,
                     None,
@@ -534,6 +540,7 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                 vt,
                 is_local,
                 remote_host,
+                class,
             } => {
                 let session_id = self.world.resource_mut::<ecs::NextSessionId>().take();
                 let username = uzers::get_user_by_uid(uid)
@@ -609,6 +616,7 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                 let session_entity = spawn(
                     &mut self.world,
                     session_id,
+                    class.into(),
                     uid,
                     username,
                     session_vt.map(num::NonZeroU32::get),
@@ -788,6 +796,11 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                         .entity_mut(entity)
                         .insert(ecs::SessionEnv(BTreeMap::from([(name, value)])));
                 }
+            }
+            session_management_session::Event::Class { class } => {
+                self.world
+                    .entity_mut(entity)
+                    .insert(ecs::SessionClass::from(class));
             }
             session_management_session::Event::Destroy => {
                 self.terminate_session(entity);

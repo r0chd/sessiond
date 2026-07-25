@@ -44,6 +44,12 @@
    </description>
    <arg name="remote_host" type="varchar" summary="remote host name"/>
   </c2s>
+  <c2s name="class">
+   <description summary="stage the session class">
+    Optional. Must be sent before done. Defaults to user.
+   </description>
+   <arg name="class" type="enum" interface="session_class" summary="session class"/>
+  </c2s>
   <c2s name="env">
    <description summary="stage an environment variable">
     Optional. Must be sent before done. May be sent multiple times.
@@ -84,5 +90,15 @@
  <enum name="error_code">
   <value idx="0" name="not_found" summary="session or cgroup not found"/>
   <value idx="1" name="io" summary="generic I/O error"/>
+ </enum>
+
+ <enum name="session_class">
+  <value idx="0" name="user" summary="interactive login session owned by a user"/>
+  <value idx="1" name="greeter" summary="login prompt or display manager session"/>
+  <value idx="2" name="lock_screen" summary="screen locker session associated with an existing login"/>
+  <value idx="3" name="background" summary="non-interactive user session without an attached seat or VT"/>
+  <value idx="4" name="background_light" summary="lightweight background session excluded from idle shutdown accounting"/>
+  <value idx="5" name="manager" summary="per-user service manager session"/>
+  <value idx="6" name="manager_early" summary="early per-user service manager session created before a regular login"/>
  </enum>
 </protocol>

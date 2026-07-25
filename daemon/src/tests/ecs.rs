@@ -29,6 +29,7 @@ fn spawn_session_sets_expected_components() {
     let entity = session::spawn(
         &mut world,
         id,
+        ecs::SessionClass::User,
         1000,
         "alice".to_string(),
         Some(2),
@@ -44,6 +45,10 @@ fn spawn_session_sets_expected_components() {
         Some(1)
     );
     assert_eq!(world.get::<ecs::Uid>(entity).map(|u| u.0), Some(1000));
+    assert_eq!(
+        world.get::<ecs::SessionClass>(entity).copied(),
+        Some(ecs::SessionClass::User)
+    );
     assert_eq!(world.get::<ecs::Vt>(entity).map(|v| v.0.get()), Some(2));
     assert_eq!(
         world.get::<ecs::ActiveState>(entity).map(|a| a.0),

@@ -23,6 +23,7 @@ struct Session {
     object: session_core_session::SessionCoreSession,
     uid: u32,
     username: String,
+    class: session_core_v1::SessionClass,
     vt: u32,
     seat: Option<String>,
     leader: u32,
@@ -251,6 +252,7 @@ impl State {
             object,
             uid: 0,
             username: String::new(),
+            class: session_core_v1::SessionClass::User,
             vt: 0,
             seat: None,
             leader: 0,
@@ -279,6 +281,7 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for State {
         match event {
             session_core_session::Event::Uid { uid } => session.uid = uid,
             session_core_session::Event::Username { username } => session.username = username,
+            session_core_session::Event::Class { class } => session.class = class,
             session_core_session::Event::Vt { vt } => session.vt = vt,
             session_core_session::Event::Seat { seat } => session.seat = Some(seat),
             session_core_session::Event::Leader { leader } => session.leader = leader,
@@ -733,6 +736,18 @@ const fn active_state_name(state: session_core_v1::ActiveState) -> &'static str 
     }
 }
 
+const fn session_class_name(class: session_core_v1::SessionClass) -> &'static str {
+    match class {
+        session_core_v1::SessionClass::User => "user",
+        session_core_v1::SessionClass::Greeter => "greeter",
+        session_core_v1::SessionClass::LockScreen => "lock-screen",
+        session_core_v1::SessionClass::Background => "background",
+        session_core_v1::SessionClass::BackgroundLight => "background-light",
+        session_core_v1::SessionClass::Manager => "manager",
+        session_core_v1::SessionClass::ManagerEarly => "manager-early",
+    }
+}
+
 const fn user_state_name(state: session_core_v1::UserState) -> &'static str {
     match state {
         session_core_v1::UserState::Offline => "offline",
@@ -838,6 +853,7 @@ fn main() -> anyhow::Result<()> {
                             obj.insert("id".into(), json!(session.id));
                             obj.insert("uid".into(), json!(session.uid));
                             obj.insert("username".into(), json!(session.username));
+                            obj.insert("class".into(), json!(session_class_name(session.class)));
                             if session.vt != 0 {
                                 obj.insert("vt".into(), json!(session.vt));
                                 obj.insert("tty".into(), json!(fmt_tty(session.vt)));
@@ -901,6 +917,13 @@ fn main() -> anyhow::Result<()> {
                     .max()
                     .unwrap_or(0)
                     .max(4);
+                let class_w = state
+                    .sessions
+                    .iter()
+                    .map(|s| session_class_name(s.class).len())
+                    .max()
+                    .unwrap_or(0)
+                    .max(5);
                 let vt_w = state
                     .sessions
                     .iter()
@@ -938,8 +961,8 @@ fn main() -> anyhow::Result<()> {
                     .max(5);
 
                 println!(
-                    "  {:<id_w$}  {:<uid_w$}  {:<user_w$}  {:<vt_w$}  {:<seat_w$}  {:<leader_w$}  {:<since_w$}  {:<state_w$}",
-                    "ID", "UID", "USER", "TTY", "SEAT", "LEADER", "SINCE", "STATE",
+                    "  {:<id_w$}  {:<uid_w$}  {:<user_w$}  {:<class_w$}  {:<vt_w$}  {:<seat_w$}  {:<leader_w$}  {:<since_w$}  {:<state_w$}",
+                    "ID", "UID", "USER", "CLASS", "TTY", "SEAT", "LEADER", "SINCE", "STATE",
                 );
                 println!(
                     "  {}",
@@ -948,6 +971,8 @@ fn main() -> anyhow::Result<()> {
                             + uid_w
                             + 2
                             + user_w
+                            + 2
+                            + class_w
                             + 2
                             + vt_w
                             + 2
@@ -962,10 +987,11 @@ fn main() -> anyhow::Result<()> {
                 );
                 for session in state.sessions {
                     println!(
-                        "  {:<id_w$}  {:<uid_w$}  {:<user_w$}  {:<vt_w$}  {:<seat_w$}  {:<leader_w$}  {:<since_w$}  {:<state_w$}",
+                        "  {:<id_w$}  {:<uid_w$}  {:<user_w$}  {:<class_w$}  {:<vt_w$}  {:<seat_w$}  {:<leader_w$}  {:<since_w$}  {:<state_w$}",
                         session.id,
                         session.uid,
                         session.username,
+                        session_class_name(session.class),
                         fmt_tty(session.vt),
                         session.seat.as_deref().unwrap_or("-"),
                         session.leader,

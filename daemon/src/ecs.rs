@@ -5,7 +5,7 @@ use crate::session_management_v1::session_manager;
 use crate::session_management_v2::session_management_session;
 use crate::{
     config, device, seat, seat_v1, session, session_core_session, session_core_user,
-    session_core_v1,
+    session_core_v1, session_management_v1, session_management_v2,
 };
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::ScheduleLabel;
@@ -306,6 +306,7 @@ pub fn push_device_active_notification(world: &mut World, entity: Entity, active
 pub struct SessionBundle {
     pub marker: Session,
     pub id: SessionId,
+    pub class: SessionClass,
     pub uid: Uid,
     pub username: Username,
     pub timestamp: Timestamp,
@@ -411,6 +412,60 @@ pub struct RemoteHost(pub String);
 
 #[derive(Component)]
 pub struct SessionEnv(pub BTreeMap<String, String>);
+
+#[derive(Component, Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum SessionClass {
+    #[default]
+    User,
+    Greeter,
+    LockScreen,
+    Background,
+    BackgroundLight,
+    Manager,
+    ManagerEarly,
+}
+
+impl From<session_management_v1::SessionClass> for SessionClass {
+    fn from(class: session_management_v1::SessionClass) -> Self {
+        match class {
+            session_management_v1::SessionClass::User => Self::User,
+            session_management_v1::SessionClass::Greeter => Self::Greeter,
+            session_management_v1::SessionClass::LockScreen => Self::LockScreen,
+            session_management_v1::SessionClass::Background => Self::Background,
+            session_management_v1::SessionClass::BackgroundLight => Self::BackgroundLight,
+            session_management_v1::SessionClass::Manager => Self::Manager,
+            session_management_v1::SessionClass::ManagerEarly => Self::ManagerEarly,
+        }
+    }
+}
+
+impl From<session_management_v2::SessionClass> for SessionClass {
+    fn from(class: session_management_v2::SessionClass) -> Self {
+        match class {
+            session_management_v2::SessionClass::User => Self::User,
+            session_management_v2::SessionClass::Greeter => Self::Greeter,
+            session_management_v2::SessionClass::LockScreen => Self::LockScreen,
+            session_management_v2::SessionClass::Background => Self::Background,
+            session_management_v2::SessionClass::BackgroundLight => Self::BackgroundLight,
+            session_management_v2::SessionClass::Manager => Self::Manager,
+            session_management_v2::SessionClass::ManagerEarly => Self::ManagerEarly,
+        }
+    }
+}
+
+impl From<SessionClass> for session_core_v1::SessionClass {
+    fn from(class: SessionClass) -> Self {
+        match class {
+            SessionClass::User => Self::User,
+            SessionClass::Greeter => Self::Greeter,
+            SessionClass::LockScreen => Self::LockScreen,
+            SessionClass::Background => Self::Background,
+            SessionClass::BackgroundLight => Self::BackgroundLight,
+            SessionClass::Manager => Self::Manager,
+            SessionClass::ManagerEarly => Self::ManagerEarly,
+        }
+    }
+}
 
 #[derive(Component)]
 pub struct ActiveState(pub session_core_v1::ActiveState);

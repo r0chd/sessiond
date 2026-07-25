@@ -1,6 +1,7 @@
 mod session_management_v1 {
     hyprwire::include_protocol!("session_management_v1");
     pub use client::*;
+    pub use spec::*;
 }
 
 use hyprwire::client;
@@ -93,13 +94,31 @@ impl PamServiceModule for Pam {
             let is_local = u32::from(remote_host.is_empty());
 
             let envlist = pamh.getenvlist()?;
+
+            let mut class = session_management_v1::SessionClass::User;
             for env in envlist.iter() {
-                if let Some((name, value)) = env.to_string_lossy().split_once('=') {
-                    manager.send_env(name, value);
+                let env = env.to_string_lossy();
+
+                let Some((name, value)) = env.split_once('=') else {
+                    continue;
+                };
+
+                manager.send_env(name, value);
+
+                if name == "XDG_SESSION_CLASS" {
+                    class = match value {
+                        "greeter" => session_management_v1::SessionClass::Greeter,
+                        "lock-screen" => session_management_v1::SessionClass::LockScreen,
+                        "background" => session_management_v1::SessionClass::Background,
+                        "background-light" => session_management_v1::SessionClass::BackgroundLight,
+                        "manager" => session_management_v1::SessionClass::Manager,
+                        "manager-early" => session_management_v1::SessionClass::ManagerEarly,
+                        _ => session_management_v1::SessionClass::User,
+                    };
                 }
             }
 
-            manager.send_create_session(uid, vt, is_local, remote_host);
+            manager.send_create_session(uid, vt, is_local, remote_host, class);
 
             while !session.done {
                 event_queue

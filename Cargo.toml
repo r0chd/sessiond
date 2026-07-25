@@ -20,7 +20,7 @@ edition = "2024"
 license = "GPLv3"
 repository = "https://tangled.org/r0chd.pl/sessiond"
 version = "0.1.0"
-description = ""
+description = "session and seat management daemon"
 readme = "README.md"
 
 [workspace.lints.clippy]

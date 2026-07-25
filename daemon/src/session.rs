@@ -455,8 +455,15 @@ impl crate::Sessiond {
             .allows(creds)
             || entities(&self.world)
                 .into_iter()
-                .filter_map(|entity| self.world.get::<ecs::Uid>(entity))
-                .all(|session| session.0 == creds.uid.as_raw())
+                .filter_map(|entity| {
+                    Some((
+                        self.world.get::<ecs::Uid>(entity)?,
+                        self.world.get::<ecs::SessionClass>(entity)?,
+                    ))
+                })
+                .all(|(uid, session_class)| {
+                    uid.0 == creds.uid.as_raw() || *session_class != ecs::SessionClass::User
+                })
     }
 
     pub fn user_config(&self, username: &str) -> config::UserConfig {
@@ -503,7 +510,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for crate::Sessiond {
 
                 user::create_runtime_dir(uid, &self.user_config(&username).runtime_dir(uid));
 
-                let _session_entity = spawn(
+                let session_entity = spawn(
                     &mut self.world,
                     session_id,
                     ecs::SessionClass::User,
@@ -517,9 +524,11 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for crate::Sessiond {
                     session_core_v1::ActiveState::Opening,
                     Some(session_management_session),
                 );
+                #[cfg(not(feature = "consolekit"))]
+                let _ = session_entity;
 
                 #[cfg(feature = "consolekit")]
-                self.sync_consolekit_session(session_id, _session_entity);
+                self.sync_consolekit_session(session_id, session_entity);
                 user::sync_all(&mut self.world);
             }
         }
@@ -890,15 +899,8 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
             session_core_manager::Event::Reboot => {
                 let client = object.client();
 
-                // let user reboot only if there are no other user sessions active
-                let foreign_session_count = entities(&self.world)
-                    .into_iter()
-                    .filter_map(|entity| self.world.get::<ecs::Uid>(entity))
-                    .filter(|session| session.0 != client.creds().uid.as_raw())
-                    .count();
-
                 if !self.can_control_power(client.creds()) {
-                    log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "reboot denied: multiple sessions active");
+                    log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(); "reboot denied: multiple sessions active");
                     object.send_error(
                         session_core_v1::ErrorCode::ActiveSessions,
                         "cannot reboot while multiple sessions are active (root privileges required)",
@@ -906,7 +908,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                     return;
                 }
 
-                log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "reboot accepted");
+                log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(); "reboot accepted");
 
                 for session_id in entities(&self.world)
                     .into_iter()
@@ -944,8 +946,16 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                 // let user poweroff only if there are no other user sessions active
                 let foreign_session_count = entities(&self.world)
                     .into_iter()
-                    .filter_map(|entity| self.world.get::<ecs::Uid>(entity))
-                    .filter(|session| session.0 != client.creds().uid.as_raw())
+                    .filter_map(|entity| {
+                        Some((
+                            self.world.get::<ecs::Uid>(entity)?,
+                            self.world.get::<ecs::SessionClass>(entity)?,
+                        ))
+                    })
+                    .filter(|(uid, session_class)| {
+                        uid.0 != client.creds().uid.as_raw()
+                            && **session_class == ecs::SessionClass::User
+                    })
                     .count();
 
                 if !self.can_control_power(client.creds()) {
@@ -1026,15 +1036,12 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
             session_core_manager::Event::Hibernate => {
                 let client = object.client();
 
-                // let user hibernate only if there are no other user sessions active
-                let foreign_session_count = entities(&self.world)
-                    .into_iter()
-                    .filter_map(|entity| self.world.get::<ecs::Uid>(entity))
-                    .filter(|session| session.0 != client.creds().uid.as_raw())
-                    .count();
-
                 if !self.can_control_power(client.creds()) {
-                    log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "hibernate denied: multiple sessions active");
+                    log::warn!(
+                        uid = client.creds().uid.as_raw(),
+                        pid = client.creds().pid.as_raw_pid();
+                        "hibernate denied: multiple sessions active"
+                    );
                     object.send_error(
                         session_core_v1::ErrorCode::ActiveSessions,
                         "cannot hibernate while multiple sessions are active (root privileges required)",
@@ -1042,7 +1049,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                     return;
                 }
 
-                log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "hibernate accepted");
+                log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(); "hibernate accepted");
 
                 rustix::fs::sync();
 

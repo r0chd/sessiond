@@ -59,19 +59,19 @@ fn key_file_list_empty() {
 
 #[test]
 fn key_file_list_single() {
-    let items = vec!["seat0".to_string()];
+    let items = ["seat0".to_string()];
     assert_eq!(key_file_list(items.iter()), "seat0");
 }
 
 #[test]
 fn key_file_list_multiple() {
-    let items = vec!["seat0".to_string(), "seat1".to_string()];
+    let items = ["seat0".to_string(), "seat1".to_string()];
     assert_eq!(key_file_list(items.iter()), "seat0;seat1");
 }
 
 #[test]
 fn key_file_list_escapes_items() {
-    let items = vec!["a;b".to_string()];
+    let items = ["a;b".to_string()];
     assert_eq!(key_file_list(items.iter()), "a\\;b");
 }
 

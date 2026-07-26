@@ -25,6 +25,7 @@ bevy_ecs = { version = "0.19.0", default-features = false }
 serde = { version = "1.0.228", features = ["derive"] }
 toml = "1.1.2"
 uzers = "0.12.2"
+syslog = "7.0.0"
 
 [build-dependencies]
 hyprwire-scanner = "0.5.0"

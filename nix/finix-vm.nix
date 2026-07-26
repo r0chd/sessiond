@@ -1,4 +1,5 @@
 {
+  lib,
   pkgs,
   sessiond,
   seattest,
@@ -51,6 +52,12 @@ in
     sessiond = {
       enable = true;
       package = sessiond;
+      settings.power = {
+        suspend = lib.mkDefault [ "${pkgs.zzz}/bin/zzz" ];
+        hibernate = lib.mkDefault [ "${pkgs.zzz}/bin/ZZZ" ];
+        reboot = lib.mkDefault [ "${pkgs.finit}/bin/reboot" ];
+        poweroff = lib.mkDefault [ "${pkgs.finit}/bin/poweroff" ];
+      };
     };
     mdevd.enable = true;
     getty = {
@@ -119,6 +126,7 @@ in
   ];
 
   environment.systemPackages = [
+    pkgs.systemd
     polkitTestAction
     seattest.packages.default
   ];

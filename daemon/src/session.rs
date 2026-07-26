@@ -10,6 +10,40 @@ use hyprwire::server;
 use std::collections::BTreeMap;
 use std::{num, process, time};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PowerAction {
+    Reboot,
+    Poweroff,
+    Suspend,
+    Hibernate,
+}
+
+impl PowerAction {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Reboot => "reboot",
+            Self::Poweroff => "poweroff",
+            Self::Suspend => "suspend",
+            Self::Hibernate => "hibernate",
+        }
+    }
+
+    const fn display_name(self) -> &'static str {
+        match self {
+            Self::Reboot => "reboot",
+            Self::Poweroff => "power off",
+            Self::Suspend => "suspend",
+            Self::Hibernate => "hibernate",
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum PowerError {
+    ActiveSessions(String),
+    Io(String),
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct SessionId(u32);
 
@@ -447,7 +481,7 @@ impl hyprwire::Handler<session_core_v1::SessionCoreV1> for crate::Sessiond {
 impl crate::Sessiond {
     // Allows to manage power commands (power off, reboot) only
     // if no other sessions are active or user has root permissions
-    fn can_control_power(&self, creds: &hyprwire::Creds) -> bool {
+    pub fn can_control_power(&self, creds: &hyprwire::Creds) -> bool {
         self.world
             .resource::<ecs::AccessRules>()
             .management
@@ -492,6 +526,63 @@ impl crate::Sessiond {
         }
     }
 
+    pub fn handle_power_action(
+        &self,
+        action: PowerAction,
+        creds: &hyprwire::Creds,
+    ) -> Result<(), PowerError> {
+        let foreign_session_count = entities(&self.world)
+            .into_iter()
+            .filter_map(|entity| {
+                Some((
+                    self.world.get::<ecs::Uid>(entity)?,
+                    self.world.get::<ecs::SessionClass>(entity)?,
+                ))
+            })
+            .filter(|(uid, session_class)| {
+                uid.0 != creds.uid.as_raw() && **session_class == ecs::SessionClass::User
+            })
+            .count();
+
+        if !self.can_control_power(creds) {
+            log::warn!(
+                uid = creds.uid.as_raw(),
+                pid = creds.pid.as_raw_pid(),
+                foreign_session_count,
+                action = action.name();
+                "power action denied: multiple sessions active"
+            );
+            return Err(PowerError::ActiveSessions(format!(
+                "cannot {} while multiple sessions are active (root privileges required)",
+                action.display_name()
+            )));
+        }
+
+        log::info!(
+            uid = creds.uid.as_raw(),
+            pid = creds.pid.as_raw_pid(),
+            foreign_session_count,
+            action = action.name();
+            "power action accepted"
+        );
+
+        rustix::fs::sync();
+
+        let config = &self.world.resource::<ecs::DaemonConfig>().0.power;
+        let command = match action {
+            PowerAction::Reboot => &config.reboot,
+            PowerAction::Poweroff => &config.poweroff,
+            PowerAction::Suspend => &config.suspend,
+            PowerAction::Hibernate => &config.hibernate,
+        };
+
+        if let Err(err) = Self::run_power_command(command, action.name()) {
+            return Err(PowerError::Io(err));
+        }
+
+        Ok(())
+    }
+
     pub fn user_config(&self, username: &str) -> config::UserConfig {
         self.world
             .resource::<ecs::DaemonConfig>()
@@ -500,6 +591,21 @@ impl crate::Sessiond {
             .get(username)
             .cloned()
             .unwrap_or_default()
+    }
+}
+
+fn send_power_result(
+    object: &session_core_manager::SessionCoreManager,
+    result: Result<(), PowerError>,
+) {
+    match result {
+        Ok(()) => object.send_done(),
+        Err(PowerError::ActiveSessions(message)) => {
+            object.send_error(session_core_v1::ErrorCode::ActiveSessions, message);
+        }
+        Err(PowerError::Io(message)) => {
+            object.send_error(session_core_v1::ErrorCode::Io, message);
+        }
     }
 }
 
@@ -924,107 +1030,31 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
             }
             session_core_manager::Event::Reboot => {
                 let client = object.client();
-
-                if !self.can_control_power(client.creds()) {
-                    log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(); "reboot denied: multiple sessions active");
-                    object.send_error(
-                        session_core_v1::ErrorCode::ActiveSessions,
-                        "cannot reboot while multiple sessions are active (root privileges required)",
-                    );
-                    return;
-                }
-
-                log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(); "reboot accepted");
-
-                rustix::fs::sync();
-
-                let reboot = &self.world.resource::<ecs::DaemonConfig>().0.power.reboot;
-
-                if let Err(err) = Self::run_power_command(reboot, "reboot") {
-                    object.send_error(session_core_v1::ErrorCode::Io, err);
-                    return;
-                }
-
-                object.send_done();
+                send_power_result(
+                    object,
+                    self.handle_power_action(PowerAction::Reboot, client.creds()),
+                );
             }
             session_core_manager::Event::Poweroff => {
                 let client = object.client();
-
-                if !self.can_control_power(client.creds()) {
-                    log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(); "poweroff denied: multiple sessions active");
-                    object.send_error(
-                        session_core_v1::ErrorCode::ActiveSessions,
-                        "cannot power off while multiple sessions are active (root privileges required)",
-                    );
-                    return;
-                }
-
-                log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(); "poweroff accepted");
-
-                rustix::fs::sync();
-
-                let poweroff = &self.world.resource::<ecs::DaemonConfig>().0.power.poweroff;
-
-                if let Err(err) = Self::run_power_command(poweroff, "poweroff") {
-                    object.send_error(session_core_v1::ErrorCode::Io, err);
-                    return;
-                }
-
-                object.send_done();
+                send_power_result(
+                    object,
+                    self.handle_power_action(PowerAction::Poweroff, client.creds()),
+                );
             }
             session_core_manager::Event::Suspend => {
                 let client = object.client();
-
-                if !self.can_control_power(client.creds()) {
-                    log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(); "suspend denied: multiple sessions active");
-                    object.send_error(
-                        session_core_v1::ErrorCode::ActiveSessions,
-                        "cannot suspend while multiple sessions are active (root privileges required)",
-                    );
-                    return;
-                }
-
-                log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(); "suspend accepted");
-
-                rustix::fs::sync();
-
-                let suspend = &self.world.resource::<ecs::DaemonConfig>().0.power.suspend;
-
-                if let Err(err) = Self::run_power_command(suspend, "suspend") {
-                    object.send_error(session_core_v1::ErrorCode::Io, err);
-                    return;
-                }
-
-                object.send_done();
+                send_power_result(
+                    object,
+                    self.handle_power_action(PowerAction::Suspend, client.creds()),
+                );
             }
             session_core_manager::Event::Hibernate => {
                 let client = object.client();
-
-                if !self.can_control_power(client.creds()) {
-                    log::warn!(
-                        uid = client.creds().uid.as_raw(),
-                        pid = client.creds().pid.as_raw_pid();
-                        "hibernate denied: multiple sessions active"
-                    );
-                    object.send_error(
-                        session_core_v1::ErrorCode::ActiveSessions,
-                        "cannot hibernate while multiple sessions are active (root privileges required)",
-                    );
-                    return;
-                }
-
-                log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(); "hibernate accepted");
-
-                rustix::fs::sync();
-
-                let hibernate = &self.world.resource::<ecs::DaemonConfig>().0.power.hibernate;
-
-                if let Err(err) = Self::run_power_command(hibernate, "hibernate") {
-                    object.send_error(session_core_v1::ErrorCode::Io, err);
-                    return;
-                }
-
-                object.send_done();
+                send_power_result(
+                    object,
+                    self.handle_power_action(PowerAction::Hibernate, client.creds()),
+                );
             }
             session_core_manager::Event::GetSeat {
                 session_core_seat,

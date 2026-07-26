@@ -111,6 +111,10 @@ sessiondTest {
     machine.succeed(f"${pkgs.systemd}/bin/busctl --system call org.freedesktop.ConsoleKit /org/freedesktop/ConsoleKit/Manager org.freedesktop.ConsoleKit.Manager GetSessionForUnixProcess u {pid} > /tmp/ck-session")
     machine.succeed("grep -q '/org/freedesktop/ConsoleKit/Session/' /tmp/ck-session")
     machine.succeed("${pkgs.systemd}/bin/busctl --system introspect org.freedesktop.ConsoleKit /org/freedesktop/ConsoleKit/Manager org.freedesktop.ConsoleKit.Manager")
+    machine.succeed("${pkgs.systemd}/bin/busctl --system call org.freedesktop.ConsoleKit /org/freedesktop/ConsoleKit/Manager org.freedesktop.ConsoleKit.Manager CanRestart")
+    machine.succeed("${pkgs.systemd}/bin/busctl --system call org.freedesktop.ConsoleKit /org/freedesktop/ConsoleKit/Manager org.freedesktop.ConsoleKit.Manager CanStop")
+    machine.succeed("${pkgs.systemd}/bin/busctl --system call org.freedesktop.ConsoleKit /org/freedesktop/ConsoleKit/Manager org.freedesktop.ConsoleKit.Manager CanSuspend")
+    machine.succeed("${pkgs.systemd}/bin/busctl --system call org.freedesktop.ConsoleKit /org/freedesktop/ConsoleKit/Manager org.freedesktop.ConsoleKit.Manager CanHibernate")
 
     session = machine.succeed(f"${pkgs.systemd}/bin/busctl --system call org.freedesktop.ConsoleKit /org/freedesktop/ConsoleKit/Manager org.freedesktop.ConsoleKit.Manager GetSessionForUnixProcess u {pid} | cut -d '\"' -f 2").strip()
     machine.succeed("test -f /var/run/ConsoleKit/database")

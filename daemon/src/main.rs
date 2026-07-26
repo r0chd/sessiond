@@ -44,6 +44,8 @@ mod user;
 mod tests;
 
 use bevy_ecs::prelude::*;
+#[cfg(feature = "consolekit")]
+use calloop::channel;
 use calloop::{generic, signals};
 use clap::{Parser, ValueEnum};
 use hyprwire::server;
@@ -140,6 +142,8 @@ impl Sessiond {
 fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
     let mut event_loop = calloop::EventLoop::try_new()?;
     let loop_signal = event_loop.get_signal();
+    #[cfg(feature = "consolekit")]
+    let (consolekit_power_sender, consolekit_power_channel) = channel::channel();
     let signals = signals::Signals::new(&[
         signals::Signal::SIGUSR1,
         signals::Signal::SIGUSR2,
@@ -184,7 +188,7 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
     let mut sessiond = Sessiond {
         cgroup_manager: cgroup::CgroupManager::new(event_loop.handle())?,
         #[cfg(feature = "consolekit")]
-        consolekit: consolekit::Server::start(),
+        consolekit: consolekit::Server::start(consolekit_power_sender),
         shutting_down: false,
         loop_signal,
         world: World::new(),
@@ -256,6 +260,28 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
             _ = socket.dispatch_events(state, false);
             Ok(calloop::PostAction::Continue)
         })?;
+
+    #[cfg(feature = "consolekit")]
+    event_loop
+        .handle()
+        .insert_source(consolekit_power_channel, move |event, (), state| {
+            let channel::Event::Msg(request) = event else {
+                return;
+            };
+
+            match request.kind {
+                consolekit::PowerRequestKind::Execute(action) => {
+                    let result = state.handle_power_action(action, &request.creds);
+                    let _ = request.reply.send(consolekit::PowerResponse::Done(result));
+                }
+                consolekit::PowerRequestKind::Can(action) => {
+                    let _ = action;
+                    let can = state.can_control_power(&request.creds);
+                    let _ = request.reply.send(consolekit::PowerResponse::Can(can));
+                }
+            }
+        })
+        .map_err(|err| anyhow::anyhow!("failed to insert ConsoleKit power source: {err}"))?;
 
     event_loop
         .handle()

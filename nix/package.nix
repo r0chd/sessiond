@@ -13,8 +13,6 @@ rustPlatform.buildRustPackage {
   pname = "sessiond";
   inherit (cargoToml.workspace.package) version;
 
-  doCheck = false;
-
   cargoLock = {
     lockFile = ../Cargo.lock;
     outputHashes = {
@@ -41,16 +39,15 @@ rustPlatform.buildRustPackage {
 
   nativeBuildInputs = [
     pkg-config
-    linux-pam
     installShellFiles
   ];
 
-  cargoBuildFlags = [
-    "--workspace"
-  ]
-  ++ lib.optionals withConsoleKit [
-    "--features"
-    "daemon/consolekit"
+  buildInputs = [
+    linux-pam
+  ];
+
+  buildFeatures = lib.optionals withConsoleKit [
+    "consolekit"
   ];
 
   postInstall = ''
@@ -89,6 +86,5 @@ rustPlatform.buildRustPackage {
     license = lib.licenses.gpl3;
     maintainers = builtins.attrValues { inherit (lib.maintainers) r0chd; };
     platforms = lib.platforms.linux;
-    mainProgram = "sessiond";
   };
 }

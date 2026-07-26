@@ -9,7 +9,7 @@ use bevy_ecs::{entity, world};
 use hyprwire::server;
 use rustix::system;
 use std::collections::BTreeMap;
-use std::{fs, num, time};
+use std::{num, process, time};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct SessionId(u32);
@@ -464,6 +464,33 @@ impl crate::Sessiond {
                 .all(|(uid, session_class)| {
                     uid.0 == creds.uid.as_raw() || *session_class != ecs::SessionClass::User
                 })
+    }
+
+    fn run_power_command(command: &[String], action: &str) -> Result<(), String> {
+        let Some((program, args)) = command.split_first() else {
+            log::warn!("{action} command is not configured");
+            return Err(format!("no {action} command configured"));
+        };
+
+        log::info!(
+            program = program.as_str(),
+            args:? = args;
+            "running {action} command"
+        );
+
+        match process::Command::new(program).args(args).status() {
+            Ok(status) if status.success() => Ok(()),
+            Ok(status) => {
+                log::error!(program = program.as_str(), status = status.to_string().as_str(); "{action} command failed");
+                Err(format!("{action} command {program:?} exited with {status}"))
+            }
+            Err(err) => {
+                log::error!(program = program.as_str(), error = err.to_string().as_str(); "failed to start {action} command");
+                Err(format!(
+                    "failed to start {action} command {program:?}: {err}"
+                ))
+            }
+        }
     }
 
     pub fn user_config(&self, username: &str) -> config::UserConfig {
@@ -1022,12 +1049,15 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
 
                 rustix::fs::sync();
 
-                if let Err(err) = fs::write("/sys/power/state", "mem") {
-                    log::error!(error = err.to_string().as_str(); "suspend failed");
-                    object.send_error(
-                        session_core_v1::ErrorCode::Io,
-                        format!("failed to suspend: {err}"),
-                    );
+                let suspend_cmd = &self
+                    .world
+                    .resource::<ecs::DaemonConfig>()
+                    .0
+                    .power
+                    .suspend_cmd;
+
+                if let Err(err) = Self::run_power_command(suspend_cmd, "suspend") {
+                    object.send_error(session_core_v1::ErrorCode::Io, err);
                     return;
                 }
 
@@ -1053,12 +1083,15 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
 
                 rustix::fs::sync();
 
-                if let Err(err) = fs::write("/sys/power/state", "disk") {
-                    log::error!(error = err.to_string().as_str(); "hibernate failed");
-                    object.send_error(
-                        session_core_v1::ErrorCode::Io,
-                        format!("failed to hibernate: {err}"),
-                    );
+                let hibernate_cmd = &self
+                    .world
+                    .resource::<ecs::DaemonConfig>()
+                    .0
+                    .power
+                    .hibernate_cmd;
+
+                if let Err(err) = Self::run_power_command(hibernate_cmd, "hibernate") {
+                    object.send_error(session_core_v1::ErrorCode::Io, err);
                     return;
                 }
 

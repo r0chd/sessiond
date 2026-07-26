@@ -134,6 +134,15 @@ fn default_runtime_dir() -> String {
     "/run/user/{uid}".to_string()
 }
 
+#[derive(serde::Deserialize, Default)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub struct PowerConfig {
+    #[serde(default)]
+    pub suspend_cmd: Vec<String>,
+    #[serde(default)]
+    pub hibernate_cmd: Vec<String>,
+}
+
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Config {
@@ -145,6 +154,8 @@ pub struct Config {
     pub seats: BTreeMap<String, SeatConfig>,
     #[serde(default = "default_seat")]
     pub default_seat: String,
+    #[serde(default)]
+    pub power: PowerConfig,
 }
 
 impl Default for Config {
@@ -154,6 +165,7 @@ impl Default for Config {
             users: BTreeMap::new(),
             seats: default_seats(),
             default_seat: "seat0".to_string(),
+            power: PowerConfig::default(),
         }
     }
 }

@@ -138,9 +138,13 @@ fn default_runtime_dir() -> String {
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct PowerConfig {
     #[serde(default)]
-    pub suspend_cmd: Vec<String>,
+    pub reboot: Vec<String>,
     #[serde(default)]
-    pub hibernate_cmd: Vec<String>,
+    pub poweroff: Vec<String>,
+    #[serde(default)]
+    pub suspend: Vec<String>,
+    #[serde(default)]
+    pub hibernate: Vec<String>,
 }
 
 #[derive(serde::Deserialize)]

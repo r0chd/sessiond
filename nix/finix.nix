@@ -17,9 +17,8 @@ in
       services.sessiond = {
         description = "session management daemon";
         conditions = [ "service/syslogd/ready" ];
-        command = "${cfg.package}/bin/sessiond --config ${daemonConfig}";
+        command = "${cfg.package}/bin/sessiond --config ${daemonConfig} --log-target syslog";
         environment.LOG_LEVEL = cfg.logLevel;
-        log = true;
       };
     };
 

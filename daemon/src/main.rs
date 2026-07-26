@@ -45,7 +45,7 @@ mod tests;
 
 use bevy_ecs::prelude::*;
 use calloop::{generic, signals};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use hyprwire::server;
 use rustix::process;
 use session_core_v1::{session_core_session, session_core_user};
@@ -59,6 +59,14 @@ struct Args {
     socket_path: path::PathBuf,
     #[arg(short, long, help = "Path to configuration file")]
     config: Option<path::PathBuf>,
+    #[arg(long, value_enum, default_value_t = LogTarget::Stderr)]
+    log_target: LogTarget,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum LogTarget {
+    Stderr,
+    Syslog,
 }
 
 #[derive(Clone, Copy)]
@@ -347,9 +355,16 @@ fn main() -> anyhow::Result<()> {
         _ => log::LevelFilter::Info,
     };
 
-    env_logger::Builder::new()
-        .filter(Some("daemon"), log_level)
-        .init();
+    match args.log_target {
+        LogTarget::Stderr => {
+            env_logger::Builder::new()
+                .filter(Some("daemon"), log_level)
+                .init();
+        }
+        LogTarget::Syslog => {
+            syslog::init(syslog::Facility::LOG_DAEMON, log_level, Some("sessiond"))?;
+        }
+    }
 
     log::info!("sessiond daemon starting");
 

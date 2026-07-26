@@ -936,23 +936,6 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
 
                 log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(); "reboot accepted");
 
-                for session_id in entities(&self.world)
-                    .into_iter()
-                    .filter_map(|entity| self.world.get::<ecs::SessionId>(entity))
-                {
-                    if let Err(err) = self.cgroup_manager.terminate_session(session_id.0) {
-                        log::error!(session_id = session_id.0.as_raw(), error = err.to_string().as_str(); "failed to terminate session before reboot");
-                        object.send_error(
-                            session_core_v1::ErrorCode::Io,
-                            format!(
-                                "failed to terminate session {}: {err}",
-                                session_id.0.as_raw()
-                            ),
-                        );
-                        return;
-                    }
-                }
-
                 rustix::fs::sync();
 
                 let reboot = &self.world.resource::<ecs::DaemonConfig>().0.power.reboot;

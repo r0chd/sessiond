@@ -8,6 +8,7 @@ let
   inherit (lib) types;
   cfg = config.services.sessiond;
   settingsFormat = pkgs.formats.toml { };
+  normalUsers = lib.filterAttrs (_: user: user.isNormalUser or false) config.users.users;
   seatGroups = lib.unique (
     lib.filter (group: group != null) (
       lib.mapAttrsToList (_: seat: seat.group or null) (cfg.settings.seats or { })
@@ -53,7 +54,7 @@ in
       };
       users = lib.mapAttrs (_userName: _userCfg: {
         env.DBUS_SESSION_BUS_ADDRESS = lib.mkDefault "unix:path={runtime-dir}/bus";
-      }) config.users.users;
+      }) normalUsers;
     };
 
     environment.systemPackages = [ cfg.package ];

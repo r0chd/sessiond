@@ -31,6 +31,7 @@ See [Clients](docs/CLIENTS.md) for known `sessiond` clients.
 ## Documentation
 
 - [Installation](docs/INSTALL.md)
+- [Configuration](docs/CONFIGURATION.md)
 - [Seat manager](docs/SEAT_MANAGER.md)
 - [Clients](docs/CLIENTS.md)
 - [Known issues](docs/KNOWN_ISSUES.md).

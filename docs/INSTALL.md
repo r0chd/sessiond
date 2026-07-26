@@ -48,6 +48,9 @@ in
 }
 ```
 
+See [Configuration](CONFIGURATION.md) for `services.sessiond.settings` and the
+equivalent `sessiond.toml` format.
+
 The PAM module registers a session with `sessiond`.
 It is enabled for the `login` service by default;
 enable it for any other session-opening PAM service

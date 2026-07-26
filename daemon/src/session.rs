@@ -7,7 +7,6 @@ use crate::{
 use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 use hyprwire::server;
-use rustix::system;
 use std::collections::BTreeMap;
 use std::{num, process, time};
 
@@ -956,12 +955,10 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
 
                 rustix::fs::sync();
 
-                if let Err(err) = system::reboot(system::RebootCommand::Restart) {
-                    log::error!(error = err.to_string().as_str(); "reboot syscall failed");
-                    object.send_error(
-                        session_core_v1::ErrorCode::Io,
-                        format!("failed to reboot: {err}"),
-                    );
+                let reboot = &self.world.resource::<ecs::DaemonConfig>().0.power.reboot;
+
+                if let Err(err) = Self::run_power_command(reboot, "reboot") {
+                    object.send_error(session_core_v1::ErrorCode::Io, err);
                     return;
                 }
 
@@ -970,23 +967,8 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
             session_core_manager::Event::Poweroff => {
                 let client = object.client();
 
-                // let user poweroff only if there are no other user sessions active
-                let foreign_session_count = entities(&self.world)
-                    .into_iter()
-                    .filter_map(|entity| {
-                        Some((
-                            self.world.get::<ecs::Uid>(entity)?,
-                            self.world.get::<ecs::SessionClass>(entity)?,
-                        ))
-                    })
-                    .filter(|(uid, session_class)| {
-                        uid.0 != client.creds().uid.as_raw()
-                            && **session_class == ecs::SessionClass::User
-                    })
-                    .count();
-
                 if !self.can_control_power(client.creds()) {
-                    log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "poweroff denied: multiple sessions active");
+                    log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(); "poweroff denied: multiple sessions active");
                     object.send_error(
                         session_core_v1::ErrorCode::ActiveSessions,
                         "cannot power off while multiple sessions are active (root privileges required)",
@@ -994,33 +976,14 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                     return;
                 }
 
-                log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "poweroff accepted");
-
-                for session_id in entities(&self.world)
-                    .into_iter()
-                    .filter_map(|entity| self.world.get::<ecs::SessionId>(entity))
-                {
-                    if let Err(err) = self.cgroup_manager.terminate_session(session_id.0) {
-                        log::error!(session_id = session_id.0.as_raw(), error = err.to_string().as_str(); "failed to terminate session before poweroff");
-                        object.send_error(
-                            session_core_v1::ErrorCode::Io,
-                            format!(
-                                "failed to terminate session {}: {err}",
-                                session_id.0.as_raw()
-                            ),
-                        );
-                        return;
-                    }
-                }
+                log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(); "poweroff accepted");
 
                 rustix::fs::sync();
 
-                if let Err(err) = system::reboot(system::RebootCommand::PowerOff) {
-                    log::error!(error = err.to_string().as_str(); "poweroff syscall failed");
-                    object.send_error(
-                        session_core_v1::ErrorCode::Io,
-                        format!("failed to power off: {err}"),
-                    );
+                let poweroff = &self.world.resource::<ecs::DaemonConfig>().0.power.poweroff;
+
+                if let Err(err) = Self::run_power_command(poweroff, "poweroff") {
+                    object.send_error(session_core_v1::ErrorCode::Io, err);
                     return;
                 }
 
@@ -1029,15 +992,8 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
             session_core_manager::Event::Suspend => {
                 let client = object.client();
 
-                // let user suspend only if there are no other user sessions active
-                let foreign_session_count = entities(&self.world)
-                    .into_iter()
-                    .filter_map(|entity| self.world.get::<ecs::Uid>(entity))
-                    .filter(|session| session.0 != client.creds().uid.as_raw())
-                    .count();
-
                 if !self.can_control_power(client.creds()) {
-                    log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "suspend denied: multiple sessions active");
+                    log::warn!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(); "suspend denied: multiple sessions active");
                     object.send_error(
                         session_core_v1::ErrorCode::ActiveSessions,
                         "cannot suspend while multiple sessions are active (root privileges required)",
@@ -1045,18 +1001,13 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                     return;
                 }
 
-                log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(), foreign_session_count; "suspend accepted");
+                log::info!(uid = client.creds().uid.as_raw(), pid = client.creds().pid.as_raw_pid(); "suspend accepted");
 
                 rustix::fs::sync();
 
-                let suspend_cmd = &self
-                    .world
-                    .resource::<ecs::DaemonConfig>()
-                    .0
-                    .power
-                    .suspend_cmd;
+                let suspend = &self.world.resource::<ecs::DaemonConfig>().0.power.suspend;
 
-                if let Err(err) = Self::run_power_command(suspend_cmd, "suspend") {
+                if let Err(err) = Self::run_power_command(suspend, "suspend") {
                     object.send_error(session_core_v1::ErrorCode::Io, err);
                     return;
                 }
@@ -1083,14 +1034,9 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
 
                 rustix::fs::sync();
 
-                let hibernate_cmd = &self
-                    .world
-                    .resource::<ecs::DaemonConfig>()
-                    .0
-                    .power
-                    .hibernate_cmd;
+                let hibernate = &self.world.resource::<ecs::DaemonConfig>().0.power.hibernate;
 
-                if let Err(err) = Self::run_power_command(hibernate_cmd, "hibernate") {
+                if let Err(err) = Self::run_power_command(hibernate, "hibernate") {
                     object.send_error(session_core_v1::ErrorCode::Io, err);
                     return;
                 }

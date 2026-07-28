@@ -831,9 +831,9 @@ dependencies = [
 
 [[package]]
 name = "hyprwire"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6fd51359acd6fa46ec3e95c2b2cb985cd1eb3d9cc5836d19be242d12db8354fb"
+checksum = "8b50723c9685352232486a20c8435544833926a2119a142868cf478f2642f266"
 dependencies = [
  "hyprwire-core",
  "hyprwire-scanner",
@@ -843,15 +843,15 @@ dependencies = [
 
 [[package]]
 name = "hyprwire-core"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59e850238bfcfc1de9dfb9ee129b9f82f253b21381bb12655298db4a7e8553e2"
+checksum = "cbed3858de0e63414aa82ba0049672b7f3edf23b40e9fa497929d8f4c749d62b"
 
 [[package]]
 name = "hyprwire-scanner"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79e3283f2df57693e2789aba4d2e257d7975bb54cf0b6c4195fecf309adf13bf"
+checksum = "726d74a6c38d8ee1ca2fee6f113b18daf93e92548ea0576a890eb700b2c84698"
 dependencies = [
  "hyprwire-core",
  "prettyplease",

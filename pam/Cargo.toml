@@ -19,8 +19,8 @@ workspace = true
 pamsm = { git = "https://github.com/r0chd/pam_sm_rust", rev = "fcb5a16c9655eb55a569ad311b3423433355e3ed", features = [
   "libpam",
 ] }
-hyprwire = "0.5.0"
 uzers = "0.12.2"
+hyprwire = "0.5.1"
 
 [build-dependencies]
-hyprwire-scanner = "0.5.0"
+hyprwire-scanner = "0.5.1"

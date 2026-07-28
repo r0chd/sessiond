@@ -1,27 +1,19 @@
 mod session_management_v1 {
-    #![allow(clippy::expect_used, clippy::use_self)]
-
     hyprwire::include_protocol!("session_management_v1");
     pub use server::*;
     pub use spec::*;
 }
 mod session_management_v2 {
-    #![allow(clippy::expect_used, clippy::use_self)]
-
     hyprwire::include_protocol!("session_management_v2");
     pub use server::*;
     pub use spec::*;
 }
 mod session_core_v1 {
-    #![allow(clippy::expect_used, clippy::use_self)]
-
     hyprwire::include_protocol!("session_core_v1");
     pub use server::*;
     pub use spec::*;
 }
 mod seat_v1 {
-    #![allow(clippy::expect_used, clippy::use_self)]
-
     hyprwire::include_protocol!("seat_v1");
     pub use server::*;
     pub use spec::*;

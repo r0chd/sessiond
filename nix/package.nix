@@ -1,9 +1,10 @@
 {
-  withConsoleKit ? true,
-  rustPlatform,
   lib,
-  pkg-config,
+  stdenv,
   linux-pam,
+  pkg-config,
+  rustPlatform,
+  withConsoleKit ? true,
   installShellFiles,
 }:
 let
@@ -31,6 +32,7 @@ rustPlatform.buildRustPackage {
         "ctl"
         "pam"
         "daemon"
+        "data"
         "protocols"
         "Cargo.toml"
         "Cargo.lock"
@@ -55,7 +57,8 @@ rustPlatform.buildRustPackage {
     mv $out/lib/libpam.so $out/lib/security/pam_sessiond.so
     mv $out/bin/daemon $out/bin/sessiond
     mv $out/bin/ctl $out/bin/sessionctl
-
+  ''
+  + lib.optionalString (stdenv.buildPlatform.canExecute stdenv.hostPlatform) ''
     installShellCompletion --cmd sessionctl \
       --bash <($out/bin/sessionctl completions bash) \
       --zsh <($out/bin/sessionctl completions zsh) \
@@ -63,25 +66,12 @@ rustPlatform.buildRustPackage {
       --nushell <($out/bin/sessionctl completions nushell)
   ''
   + lib.optionalString withConsoleKit ''
-    mkdir -p $out/share/dbus-1/system.d
-    cat > $out/share/dbus-1/system.d/org.freedesktop.ConsoleKit.conf <<'EOF'
-    <!DOCTYPE busconfig PUBLIC
-      "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
-      "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
-    <busconfig>
-      <policy user="root">
-        <allow own="org.freedesktop.ConsoleKit"/>
-        <allow send_destination="org.freedesktop.ConsoleKit"/>
-      </policy>
-      <policy context="default">
-        <allow send_destination="org.freedesktop.ConsoleKit"/>
-      </policy>
-    </busconfig>
-    EOF
+    install -Dm644 data/dbus-1/system.d/org.freedesktop.ConsoleKit.conf \
+      $out/share/dbus-1/system.d/org.freedesktop.ConsoleKit.conf
   '';
 
   meta = {
-    description = "session and seat management daemon";
+    description = "Session and seat management daemon";
     homepage = "https://tangled.org/r0chd.pl/sessiond";
     license = lib.licenses.gpl3;
     maintainers = builtins.attrValues { inherit (lib.maintainers) r0chd; };

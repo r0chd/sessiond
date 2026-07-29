@@ -4,7 +4,7 @@
 
 Initial public release of `sessiond`.
 
-## Unreleased
+## v0.1.1 - 2026-07-28
 
 ### Added
 - Added a DBus system policy for the ConsoleKit interface

@@ -5,7 +5,6 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 use calloop::signals;
 use hyprwire::server;
-use rustix::io;
 use std::num;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -645,30 +644,18 @@ impl hyprwire::Dispatch<seat_manager::SeatManager> for crate::Sessiond {
             seat_manager::Event::OpenSeat { seat } => {
                 let server_client = object.client();
                 let creds = server_client.creds();
-                if !self.world.resource::<ecs::AccessRules>().seat.allows(creds) {
-                    log::warn!(
-                        pid = creds.pid.as_raw_pid(),
-                        uid = creds.uid.as_raw(),
-                        gid = creds.gid.as_raw();
-                        "rejected seat open from unauthorized client"
-                    );
-                    seat.error(
-                        io::Errno::PERM.raw_os_error().cast_unsigned(),
-                        "seat access denied",
-                    );
-                    return;
-                }
 
-                let opener_pid = creds.pid.as_raw_pid().cast_unsigned();
-                let opener_session_id = {
-                    let pid = opener_pid;
-                    match self.cgroup_manager.find_session_by_pid(pid) {
-                        Ok(session_id) => session_id,
-                        Err(err) => {
-                            log::error!("Could not find session for seat opener {pid}: {err}");
-                            None
-                        }
-                    }
+                let pid = creds.pid.as_raw_pid().cast_unsigned();
+                let Some(session_id) = self
+                    .cgroup_manager
+                    .find_session_by_pid(pid)
+                    .inspect_err(|err| {
+                        log::error!("Could not find session for seat opener {pid}: {err}");
+                    })
+                    .ok()
+                    .flatten()
+                else {
+                    return;
                 };
 
                 let Some(seat_entity) = first(&self.world) else {
@@ -677,8 +664,7 @@ impl hyprwire::Dispatch<seat_manager::SeatManager> for crate::Sessiond {
                     return;
                 };
 
-                let client_entity =
-                    client::spawn(&mut self.world, seat.clone(), opener_pid, opener_session_id);
+                let client_entity = client::spawn(&mut self.world, seat.clone(), pid, session_id);
                 if let Err(err) = client::add(&mut self.world, seat_entity, client_entity) {
                     log::error!("Could not add client to seat: {err}");
                     seat.send_disabled();
@@ -700,31 +686,28 @@ impl hyprwire::Dispatch<seat_manager::SeatManager> for crate::Sessiond {
                     return;
                 };
 
-                if let Some(session_id) = opener_session_id {
-                    if let Some(entity) = session::entity(&self.world, session_id) {
-                        if self
-                            .world
-                            .get::<ecs::SessionSeat>(entity)
-                            .is_none_or(|seat| seat.0 != seat_entity)
-                        {
-                            log::info!(session_id = session_id.as_raw(), seat = name.as_str(); "session seat changed");
-                            self.world.entity_mut(entity).insert((
-                                ecs::SeatName(name.clone()),
-                                ecs::SessionSeat(seat_entity),
-                            ));
-                        }
-                        if let Some(objects) = self
-                            .world
-                            .resource::<ecs::ProtocolObjects>()
-                            .session_objects(entity)
-                        {
-                            for object in objects {
-                                object.send_seat(&name);
-                            }
-                        }
-                    } else {
-                        log::warn!(session_id = session_id.as_raw(); "seat opened for unknown session");
+                if let Some(entity) = session::entity(&self.world, session_id) {
+                    if self
+                        .world
+                        .get::<ecs::SessionSeat>(entity)
+                        .is_none_or(|seat| seat.0 != seat_entity)
+                    {
+                        log::info!(session_id = session_id.as_raw(), seat = name.as_str(); "session seat changed");
+                        self.world
+                            .entity_mut(entity)
+                            .insert((ecs::SeatName(name.clone()), ecs::SessionSeat(seat_entity)));
                     }
+                    if let Some(objects) = self
+                        .world
+                        .resource::<ecs::ProtocolObjects>()
+                        .session_objects(entity)
+                    {
+                        for object in objects {
+                            object.send_seat(&name);
+                        }
+                    }
+                } else {
+                    log::warn!(session_id = session_id.as_raw(); "seat opened for unknown session");
                 }
             }
             seat_manager::Event::Destroy => {}

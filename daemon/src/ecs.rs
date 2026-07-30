@@ -329,6 +329,7 @@ pub struct ClientBundle {
     pub seat_object: SeatObject,
     pub pid: ClientPid,
     pub state: SeatState,
+    pub session: ClientSession,
 }
 
 #[derive(Bundle)]

@@ -7,20 +7,17 @@ pub fn spawn(
     world: &mut world::World,
     object: seat_v1::seat::Seat,
     pid: u32,
-    session: Option<session::SessionId>,
+    session: session::SessionId,
 ) -> entity::Entity {
-    let mut cmd = world.spawn(ecs::ClientBundle {
-        marker: ecs::Client,
-        seat_object: ecs::SeatObject(object),
-        pid: ecs::ClientPid(pid),
-        state: ecs::SeatState(seat::SeatState::New),
-    });
-
-    if let Some(session) = session {
-        cmd.insert(ecs::ClientSession(session));
-    }
-
-    cmd.id()
+    world
+        .spawn(ecs::ClientBundle {
+            marker: ecs::Client,
+            seat_object: ecs::SeatObject(object),
+            pid: ecs::ClientPid(pid),
+            state: ecs::SeatState(seat::SeatState::New),
+            session: ecs::ClientSession(session),
+        })
+        .id()
 }
 
 pub const fn state_event(state: seat::SeatState) -> session_core_v1::SeatClientState {

@@ -74,37 +74,56 @@ fn notify_seat_clients(
     objects: Res<ecs::ProtocolObjects>,
     mut batch: ResMut<ecs::NotifyBatch>,
     mut state: ResMut<ecs::SeatNotifyState>,
-    seats: Query<(Entity, Option<&ecs::ActiveClient>, Option<&ecs::NextClient>), With<ecs::Seat>>,
+    seats: Query<
+        (
+            Entity,
+            Option<&ecs::ActiveClients>,
+            Option<&ecs::NextClients>,
+        ),
+        With<ecs::Seat>,
+    >,
 ) {
-    for (seat_entity, active_client, next_client) in &seats {
-        let active_client = active_client.map(|client| client.0);
-        let previous_active = match active_client {
-            Some(active_client) => state.active_clients.insert(seat_entity, active_client),
-            None => state.active_clients.remove(&seat_entity),
-        };
-
-        if previous_active != active_client {
-            if let Some(previous_active) = previous_active {
-                send_client_active(&objects, &mut batch, previous_active, false);
-            }
-            if let Some(active_client) = active_client {
-                send_client_active(&objects, &mut batch, active_client, true);
-            }
+    for (seat_entity, active_clients, next_clients) in &seats {
+        let active_clients = active_clients
+            .map(|clients| clients.0.clone())
+            .filter(|clients| !clients.is_empty())
+            .unwrap_or_default();
+        let previous_active = state
+            .active_clients
+            .insert(seat_entity, active_clients.clone())
+            .unwrap_or_default();
+        for client in previous_active
+            .iter()
+            .filter(|client| !active_clients.contains(client))
+        {
+            send_client_active(&objects, &mut batch, *client, false);
+        }
+        for client in active_clients
+            .iter()
+            .filter(|client| !previous_active.contains(client))
+        {
+            send_client_active(&objects, &mut batch, *client, true);
         }
 
-        let next_client = next_client.map(|client| client.0);
-        let previous_next = match next_client {
-            Some(next_client) => state.next_clients.insert(seat_entity, next_client),
-            None => state.next_clients.remove(&seat_entity),
-        };
-
-        if previous_next != next_client {
-            if let Some(previous_next) = previous_next {
-                send_client_next(&objects, &mut batch, previous_next, false);
-            }
-            if let Some(next_client) = next_client {
-                send_client_next(&objects, &mut batch, next_client, true);
-            }
+        let next_clients = next_clients
+            .map(|clients| clients.0.clone())
+            .filter(|clients| !clients.is_empty())
+            .unwrap_or_default();
+        let previous_next = state
+            .next_clients
+            .insert(seat_entity, next_clients.clone())
+            .unwrap_or_default();
+        for client in previous_next
+            .iter()
+            .filter(|client| !next_clients.contains(client))
+        {
+            send_client_next(&objects, &mut batch, *client, false);
+        }
+        for client in next_clients
+            .iter()
+            .filter(|client| !previous_next.contains(client))
+        {
+            send_client_next(&objects, &mut batch, *client, true);
         }
     }
 }

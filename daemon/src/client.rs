@@ -35,8 +35,8 @@ pub fn is_active(
     client_entity: entity::Entity,
 ) -> bool {
     world
-        .get::<ecs::ActiveClient>(seat_entity)
-        .is_some_and(|active_client| active_client.0 == client_entity)
+        .get::<ecs::ActiveClients>(seat_entity)
+        .is_some_and(|active_client| active_client.0.contains(&client_entity))
 }
 
 pub fn session_id(
@@ -72,8 +72,8 @@ pub fn add_object(
     object.send_active(u32::from(is_active(world, seat_entity, client_entity)));
     object.send_next(u32::from(
         world
-            .get::<ecs::NextClient>(seat_entity)
-            .is_some_and(|next| next.0 == client_entity),
+            .get::<ecs::NextClients>(seat_entity)
+            .is_some_and(|next| next.0.contains(&client_entity)),
     ));
     if let Some(pid) = world.get::<ecs::ClientPid>(client_entity) {
         object.send_pid(pid.0);
@@ -232,40 +232,26 @@ pub fn add(
         return Err(anyhow::anyhow!("client cannot be reused"));
     }
 
+    if let Some(pid) = world.get::<ecs::ClientPid>(client_entity).map(|pid| pid.0)
+        && seat::clients(world, seat_entity).into_iter().any(|client| {
+            world
+                .get::<ecs::ClientPid>(client)
+                .is_some_and(|client_pid| client_pid.0 == pid)
+        })
+    {
+        return Err(anyhow::anyhow!("PID is already attached to the seat"));
+    }
+
     let name = seat::name(world, seat_entity)?;
     seat::refresh_current_vt(world, seat_entity);
 
     let mode = seat::mode(world, seat_entity)?;
     let session_id = match mode {
         ecs::SeatKind::VtBound => {
-            if let Some(active_client) = world.get::<ecs::ActiveClient>(seat_entity) {
-                let active_state = world
-                    .get::<ecs::SeatState>(active_client.0)
-                    .map(|state| state.0);
-                if active_state != Some(seat::SeatState::PendingDisabled) {
-                    log::error!("Could not add client: seat is VT-bound and has an active client");
-                    return Err(anyhow::anyhow!("seat is VT-bound and has an active client"));
-                }
-            }
-
             let vt = world
                 .get::<ecs::CurrentVt>(seat_entity)
                 .map(|vt| vt.0)
                 .ok_or_else(|| anyhow::anyhow!("could not determine VT for client"))?;
-
-            let already_pending = seat::clients(world, seat_entity).into_iter().any(|client| {
-                world
-                    .get::<ecs::SessionId>(client)
-                    .is_some_and(|session| session.0.as_raw() == vt.get())
-            });
-            if world.get::<ecs::ActiveClient>(seat_entity).is_some() && already_pending {
-                log::error!(
-                    "Could not add client: seat is VT-bound and already has pending client"
-                );
-                return Err(anyhow::anyhow!(
-                    "seat is VT-bound and already has pending client"
-                ));
-            }
 
             session::SessionId::from_raw(vt.get())
         }
@@ -283,7 +269,13 @@ pub fn add(
         }
     };
 
-    if mode == ecs::SeatKind::VtBound {
+    if mode == ecs::SeatKind::VtBound
+        && !seat::clients(world, seat_entity).into_iter().any(|client| {
+            world
+                .get::<ecs::SessionId>(client)
+                .is_some_and(|session| session.0 == session_id)
+        })
+    {
         seat::vt_open(session_id.as_raw())?;
     }
 
@@ -323,18 +315,6 @@ pub fn open(
     if state != seat::SeatState::New && state != seat::SeatState::Disabled {
         log::error!("Could not enable client: client is not new or disabled");
         return Err(anyhow::anyhow!("client is not new or disabled"));
-    }
-
-    if let Some(active_client) = world.get::<ecs::ActiveClient>(seat_entity) {
-        let active_state = world
-            .get::<ecs::SeatState>(active_client.0)
-            .map(|state| state.0);
-        if !seat::is_vt_bound(world, seat_entity)
-            || active_state != Some(seat::SeatState::PendingDisabled)
-        {
-            log::error!("Could not enable client: seat already has an active client");
-            return Err(anyhow::anyhow!("seat already has an active client"));
-        }
     }
 
     if seat::is_vt_bound(world, seat_entity) {
@@ -407,8 +387,14 @@ pub fn ack_disable(
         return Ok(());
     }
 
-    seat::set_active_client(world, seat_entity, None);
-    let _ = seat::activate(world, seat_entity);
+    if let Some(mut active_clients) = world.get_mut::<ecs::ActiveClients>(seat_entity) {
+        active_clients.0.retain(|client| *client != client_entity);
+        let no_active_clients = active_clients.0.is_empty();
+        if no_active_clients {
+            seat::set_active_client(world, seat_entity, None);
+            let _ = seat::activate(world, seat_entity);
+        }
+    }
 
     Ok(())
 }

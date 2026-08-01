@@ -66,8 +66,8 @@ impl NotifyBatch {
 
 #[derive(Resource, Default)]
 pub struct SeatNotifyState {
-    pub active_clients: HashMap<Entity, Entity>,
-    pub next_clients: HashMap<Entity, Entity>,
+    pub active_clients: HashMap<Entity, Vec<Entity>>,
+    pub next_clients: HashMap<Entity, Vec<Entity>>,
 }
 
 #[derive(Resource, Default)]
@@ -337,6 +337,7 @@ pub struct SeatBundle {
     pub marker: Seat,
     pub name: SeatName,
     pub mode: SeatMode,
+    pub active_clients: ActiveClients,
 }
 
 #[derive(Bundle)]
@@ -488,11 +489,11 @@ pub struct SeatMode(pub SeatKind);
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CurrentVt(pub num::NonZeroU32);
 
-#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ActiveClient(pub Entity);
+#[derive(Component, Debug, Clone, PartialEq, Eq)]
+pub struct ActiveClients(pub Vec<Entity>);
 
-#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub struct NextClient(pub Entity);
+#[derive(Component, Debug, Clone, PartialEq, Eq)]
+pub struct NextClients(pub Vec<Entity>);
 
 // Client components
 

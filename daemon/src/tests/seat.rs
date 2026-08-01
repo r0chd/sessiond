@@ -17,6 +17,16 @@ fn make_client(world: &mut World) -> Entity {
         .id()
 }
 
+fn make_client_with_pid(world: &mut World, pid: u32) -> Entity {
+    world
+        .spawn((
+            ecs::Client,
+            ecs::ClientPid(pid),
+            ecs::SeatState(seat::SeatState::New),
+        ))
+        .id()
+}
+
 #[test]
 fn add_assigns_session_id_1() {
     let mut world = test_world();
@@ -66,8 +76,69 @@ fn add_sets_active_client() {
     let client = make_client(&mut world);
     client::add(&mut world, seat, client).unwrap();
     assert_eq!(
-        world.get::<ecs::ActiveClient>(seat).map(|a| a.0),
-        Some(client)
+        world.get::<ecs::ActiveClients>(seat).map(|a| a.0.clone()),
+        Some(vec![client])
+    );
+}
+
+#[test]
+fn add_keeps_multiple_clients_active() {
+    let mut world = test_world();
+    let seat = make_seat(&mut world);
+    let c1 = make_client_with_pid(&mut world, 100);
+    let c2 = make_client_with_pid(&mut world, 200);
+    client::add(&mut world, seat, c1).unwrap();
+    client::add(&mut world, seat, c2).unwrap();
+    assert_eq!(
+        world
+            .get::<ecs::ActiveClients>(seat)
+            .map(|clients| clients.0.clone()),
+        Some(vec![c1, c2])
+    );
+}
+
+#[test]
+fn add_rejects_duplicate_pid() {
+    let mut world = test_world();
+    let seat = make_seat(&mut world);
+    let c1 = make_client_with_pid(&mut world, 100);
+    let c2 = make_client_with_pid(&mut world, 100);
+    client::add(&mut world, seat, c1).unwrap();
+    assert!(client::add(&mut world, seat, c2).is_err());
+}
+
+#[test]
+fn removing_one_active_client_preserves_the_others() {
+    let mut world = test_world();
+    let seat = make_seat(&mut world);
+    let c1 = make_client_with_pid(&mut world, 100);
+    let c2 = make_client_with_pid(&mut world, 200);
+    client::add(&mut world, seat, c1).unwrap();
+    client::add(&mut world, seat, c2).unwrap();
+    seat::remove_client(&mut world, seat, c1).unwrap();
+    assert_eq!(
+        world
+            .get::<ecs::ActiveClients>(seat)
+            .map(|clients| clients.0.clone()),
+        Some(vec![c2])
+    );
+}
+
+#[test]
+fn acknowledging_one_disabled_client_preserves_other_active_clients() {
+    let mut world = test_world();
+    let seat = make_seat(&mut world);
+    let c1 = make_client_with_pid(&mut world, 100);
+    let c2 = make_client_with_pid(&mut world, 200);
+    client::add(&mut world, seat, c1).unwrap();
+    client::add(&mut world, seat, c2).unwrap();
+    client::disable(&mut world, seat, c1).unwrap();
+    client::ack_disable(&mut world, seat, c1).unwrap();
+    assert_eq!(
+        world
+            .get::<ecs::ActiveClients>(seat)
+            .map(|clients| clients.0.clone()),
+        Some(vec![c2])
     );
 }
 
@@ -162,12 +233,15 @@ fn ack_disable_activates_next_queued_client() {
         .entity_mut(c2)
         .insert(ecs::SeatName("seat0".to_string()));
     world.entity_mut(c2).insert(ecs::ClientSeat(seat));
-    world.entity_mut(seat).insert(ecs::NextClient(c2));
+    world.entity_mut(seat).insert(ecs::NextClients(vec![c2]));
 
     client::disable(&mut world, seat, c1).unwrap();
     client::ack_disable(&mut world, seat, c1).unwrap();
 
-    assert_eq!(world.get::<ecs::ActiveClient>(seat).map(|a| a.0), Some(c2));
+    assert_eq!(
+        world.get::<ecs::ActiveClients>(seat).map(|a| a.0.clone()),
+        Some(vec![c2])
+    );
 }
 
 #[test]
@@ -178,7 +252,7 @@ fn set_next_session_switches_to_self_is_noop() {
     client::add(&mut world, seat, client).unwrap();
     let session_id = world.get::<ecs::SessionId>(client).unwrap().0.as_raw();
     seat::set_next_session(&mut world, seat, client, session_id).unwrap();
-    assert!(world.get::<ecs::NextClient>(seat).is_none());
+    assert!(world.get::<ecs::NextClients>(seat).is_none());
 }
 
 #[test]
@@ -200,7 +274,10 @@ fn set_next_session_queues_switch() {
     client::add(&mut world, seat, c2).unwrap();
     let c1_session = world.get::<ecs::SessionId>(c1).unwrap().0.as_raw();
     seat::set_next_session(&mut world, seat, c2, c1_session).unwrap();
-    assert_eq!(world.get::<ecs::NextClient>(seat).map(|n| n.0), Some(c1));
+    assert_eq!(
+        world.get::<ecs::NextClients>(seat).map(|n| n.0.clone()),
+        Some(vec![c1])
+    );
 }
 
 #[test]
@@ -210,6 +287,6 @@ fn remove_client_cleans_up() {
     let client = make_client(&mut world);
     client::add(&mut world, seat, client).unwrap();
     seat::remove_client(&mut world, seat, client).unwrap();
-    assert!(world.get::<ecs::ActiveClient>(seat).is_none());
+    assert!(world.get::<ecs::ActiveClients>(seat).is_none());
     assert!(seat::clients(&world, seat).is_empty());
 }

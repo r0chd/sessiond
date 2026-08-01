@@ -2,9 +2,9 @@
 
 This document lists known `sessiond` clients.
 
-## User service managers
+## Session startup helpers
 
-- [sessiond-dinit](https://tangled.org/r0chd.pl/sessiond-dinit): manages user `dinit`
+- [sessiond-hooks](https://tangled.org/r0chd.pl/sessiond-hooks): runs commands when a user session opens
 
 ## Device access helpers
 

@@ -198,7 +198,7 @@ pub fn deactivate_devices(world: &mut world::World, client_entity: entity::Entit
     let devices = device::devices(world, client_entity);
 
     for device_entity in devices {
-        if let Err(err) = device::deactivate(world, device_entity) {
+        if let Err(err) = device::deactivate(world, device_entity, true) {
             let path = device::path_display(world, device_entity);
             log::error!("Could not deactivate {path}: {err}");
             continue;

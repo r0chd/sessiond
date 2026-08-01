@@ -156,7 +156,7 @@ fn close(
         return Ok(());
     }
 
-    if let Err(err) = deactivate(world, device_entity) {
+    if let Err(err) = deactivate(world, device_entity, false) {
         log::error!(
             "Could not deactivate device {} for client {} on {}: {err}",
             path.display(),
@@ -407,7 +407,13 @@ pub fn activate(world: &mut world::World, entity: entity::Entity) -> anyhow::Res
     Ok(())
 }
 
-pub fn deactivate(world: &mut world::World, entity: entity::Entity) -> anyhow::Result<()> {
+pub fn deactivate(
+    world: &mut world::World,
+    entity: entity::Entity,
+    // EVIOCREVOKE/HIDIOCREVOKE revoke all open clients for the device, so
+    // only use them when disabling a seat, not when one client closes its fd.
+    revoke: bool,
+) -> anyhow::Result<()> {
     if world.get::<ecs::DeviceActive>(entity).is_none() {
         return Ok(());
     }
@@ -423,7 +429,7 @@ pub fn deactivate(world: &mut world::World, entity: entity::Entity) -> anyhow::R
                 return Err(err.into());
             }
         }
-        DeviceKind::Evdev => {
+        DeviceKind::Evdev if revoke => {
             let fd = world
                 .get::<ecs::DeviceFd>(entity)
                 .ok_or_else(|| anyhow::anyhow!("device has no fd"))?;
@@ -432,7 +438,7 @@ pub fn deactivate(world: &mut world::World, entity: entity::Entity) -> anyhow::R
                 return Err(err.into());
             }
         }
-        DeviceKind::Hidraw => {
+        DeviceKind::Hidraw if revoke => {
             let fd = world
                 .get::<ecs::DeviceFd>(entity)
                 .ok_or_else(|| anyhow::anyhow!("device has no fd"))?;
@@ -441,6 +447,7 @@ pub fn deactivate(world: &mut world::World, entity: entity::Entity) -> anyhow::R
                 return Err(err.into());
             }
         }
+        DeviceKind::Evdev | DeviceKind::Hidraw => {}
         DeviceKind::Wscons => {}
     }
 

@@ -11,7 +11,6 @@ pkgs.mkShell {
       npins
       linux-pam
 
-      seatd
       pkg-config
       libabigail
       ;

@@ -30,8 +30,8 @@
   </description>
   <c2s name="create_session">
    <description summary="[unsafe: can leak the session] register a session without an owning object">
-    Registers a session and replies on this object with session_id, seat,
-    env variables, and done. Any env variables sent before create_session
+    Registers a session and replies on this object with session_id, env
+    variables, and done. Any env variables sent before create_session
     are attached to the created session. The caller must pair it with
     destroy_session or the session's resources (cgroup, runtime
     directory) leak.
@@ -44,9 +44,6 @@
   </c2s>
   <s2c name="session_id">
    <arg name="session_id" type="uint" summary="unique session identifier"/>
-  </s2c>
-  <s2c name="seat">
-   <arg name="seat" type="varchar" summary="seat name assigned to the session"/>
   </s2c>
   <s2c name="env">
    <arg name="name" type="varchar" summary="environment variable name"/>

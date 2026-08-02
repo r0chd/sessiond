@@ -135,7 +135,7 @@ sessiondTest {
     machine.wait_until_succeeds("sessionctl session list --json > /tmp/sessions.json && jq -e '.sessions | length >= 1' /tmp/sessions.json >/dev/null")
     machine.succeed("jq -e '[.sessions[] | select(.active == \"active\")] | length == 1' /tmp/sessions.json >/dev/null")
     machine.succeed("jq -e '.sessions[] | select(.active == \"active\" and .vt == 1 and .tty == \"tty1\")' /tmp/sessions.json >/dev/null")
-    machine.succeed("jq -e 'all(.sessions[]; .seat == \"seat0\" and .uid == 1000 and .username == \"user_1\" and .leader > 0 and .timestamp > 0)' /tmp/sessions.json >/dev/null")
+    machine.succeed("jq -e 'all(.sessions[]; .uid == 1000 and .username == \"user_1\" and .leader > 0 and .timestamp > 0)' /tmp/sessions.json >/dev/null")
 
     user_2_uid = machine.succeed("id -u user_2").strip()
     user_3_uid = machine.succeed("id -u user_3").strip()

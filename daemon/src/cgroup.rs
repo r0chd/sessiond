@@ -1,10 +1,10 @@
 use crate::{session, user};
 use anyhow::Context;
-use calloop::generic;
+use calloop::{generic, timer};
 use rustix::process;
 use std::io::{Read, Seek};
 use std::os::fd::AsRawFd;
-use std::{fs, io, path};
+use std::{fs, io, path, time};
 
 pub struct CgroupManager {
     root_path: Option<&'static path::Path>,
@@ -197,6 +197,27 @@ impl CgroupManager {
         }
 
         self.poll_destroy(session_id)?;
+
+        let path = cgroup.path.clone();
+        self.loop_handle
+            .insert_source(
+                timer::Timer::from_duration(time::Duration::from_secs(5)),
+                move |_, (), _| {
+                    if path.exists()
+                        && let Err(err) = fs::write(path.join("cgroup.kill"), b"1")
+                    {
+                        log::error!(
+                            session_id = session_id.as_raw(),
+                            error = err.to_string().as_str();
+                            "failed to force-terminate session"
+                        );
+                    }
+                    timer::TimeoutAction::Drop
+                },
+            )
+            .map_err(|err| {
+                anyhow::anyhow!("failed to schedule session termination fallback: {err:?}")
+            })?;
         Ok(())
     }
 

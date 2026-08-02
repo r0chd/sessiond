@@ -127,7 +127,6 @@ sessiondTest {
     machine.succeed(f"${pkgs.systemd}/bin/busctl --system call org.freedesktop.ConsoleKit {session} org.freedesktop.ConsoleKit.Session GetUser")
     machine.succeed(f"${pkgs.systemd}/bin/busctl --system call org.freedesktop.ConsoleKit {session} org.freedesktop.ConsoleKit.Session IsActive")
     machine.succeed(f"${pkgs.systemd}/bin/busctl --system call org.freedesktop.ConsoleKit {session} org.freedesktop.ConsoleKit.Session IsLocal")
-    machine.succeed(f"${pkgs.systemd}/bin/busctl --system call org.freedesktop.ConsoleKit {session} org.freedesktop.ConsoleKit.Session GetSeatId")
 
     machine.succeed("test -f /run/current-system/sw/share/polkit-1/actions/org.sessiond.consolekit-test.policy")
     machine.succeed("pkaction --verbose --action-id org.sessiond.consolekit-test")

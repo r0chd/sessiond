@@ -13,24 +13,17 @@ mod session_core_v1 {
     pub use server::*;
     pub use spec::*;
 }
-mod seat_v1 {
-    hyprwire::include_protocol!("seat_v1");
-    pub use server::*;
-    pub use spec::*;
-}
 
 mod cgroup;
-mod client;
 mod config;
 #[cfg(feature = "consolekit")]
 mod consolekit;
-mod device;
 mod ecs;
 mod reconcile;
-mod seat;
 mod session;
 mod terminal;
 mod user;
+mod vt;
 
 #[cfg(test)]
 mod tests;
@@ -38,14 +31,14 @@ mod tests;
 use bevy_ecs::prelude::*;
 #[cfg(feature = "consolekit")]
 use calloop::channel;
-use calloop::{generic, signals};
+use calloop::{generic, signals, timer};
 use clap::{Parser, ValueEnum};
 use hyprwire::server;
 use rustix::process;
-use session_core_v1::{session_core_session, session_core_user};
+use session_core_v1::session_core_user;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
-use std::{env, fs, path};
+use std::{env, fs, path, time::Duration};
 
 #[derive(Parser)]
 struct Args {
@@ -143,23 +136,7 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
         signals::Signal::SIGINT,
     ])?;
 
-    anyhow::ensure!(
-        !config.seats.is_empty(),
-        "at least one seat must be configured"
-    );
-    let seat_config = config
-        .seats
-        .get(&config.default_seat)
-        .ok_or_else(|| anyhow::anyhow!("configured `default-seat` not found"))?;
-
-    let vtbound = seat_config.kind == config::SeatKind::VtBound;
-    let default_seat = config.default_seat.clone();
-
     let access_rules = ecs::AccessRules {
-        seat: Access::new(
-            resolve_user(&seat_config.user)?,
-            resolve_group(&seat_config.group)?,
-        ),
         management: Access::new(
             resolve_user(&config.management.user)?,
             resolve_group(&config.management.group)?,
@@ -201,17 +178,6 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
     sessiond.world.insert_resource(access_rules);
     sessiond.world.insert_resource(ecs::DaemonConfig(config));
 
-    seat::spawn(
-        &mut sessiond.world,
-        default_seat,
-        if vtbound {
-            ecs::SeatKind::VtBound
-        } else {
-            ecs::SeatKind::NonVtBound
-        },
-        0,
-    );
-
     for (uid, runtime_dir) in lingering_users {
         user::create(&mut sessiond.world, uid, true);
         user::create_runtime_dir(uid, &runtime_dir);
@@ -231,7 +197,6 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
     socket.add_implementation::<session_management_v1::SessionManagementV1, _>(&mut sessiond, 1);
     socket.add_implementation::<session_management_v2::SessionManagementV2, _>(&mut sessiond, 1);
     socket.add_implementation::<session_core_v1::SessionCoreV1, _>(&mut sessiond, 1);
-    socket.add_implementation::<seat_v1::SeatV1, _>(&mut sessiond, 1);
 
     let fd_wrapper = unsafe { generic::FdWrapper::new(socket.extract_loop_fd().as_raw_fd()) };
     let source = generic::Generic::new(
@@ -251,7 +216,8 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
 
             _ = socket.dispatch_events(state, false);
             Ok(calloop::PostAction::Continue)
-        })?;
+        })
+        .map_err(|err| anyhow::anyhow!("failed to insert VT watcher: {err:?}"))?;
 
     #[cfg(feature = "consolekit")]
     event_loop
@@ -277,10 +243,22 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
 
     event_loop
         .handle()
+        .insert_source(
+            timer::Timer::from_duration(Duration::from_millis(100)),
+            |_, (), state| {
+                vt::refresh_current_vts(&mut state.world);
+                user::sync_all(&mut state.world);
+                timer::TimeoutAction::ToDuration(Duration::from_millis(100))
+            },
+        )
+        .map_err(|err| anyhow::anyhow!("failed to insert VT watcher: {err:?}"))?;
+
+    event_loop
+        .handle()
         .insert_source(signals, move |event, (), state| {
             let session_updates = match event.signal() {
                 signals::Signal::SIGUSR1 | signals::Signal::SIGUSR2 => {
-                    seat::handle_vt_signal(&mut state.world, event.signal())
+                    vt::handle_vt_signal(&mut state.world, event.signal())
                 }
                 signals::Signal::SIGTERM | signals::Signal::SIGINT => {
                     if state.shutting_down {
@@ -396,7 +374,7 @@ fn resolve_user(user: &str) -> anyhow::Result<process::Uid> {
 
     uzers::get_user_by_name(user)
         .map(|user: uzers::User| process::Uid::from_raw(user.uid()))
-        .ok_or_else(|| anyhow::anyhow!("unknown seat user {user:?}"))
+        .ok_or_else(|| anyhow::anyhow!("unknown user {user:?}"))
 }
 
 fn resolve_group(group: &str) -> anyhow::Result<process::Gid> {
@@ -406,5 +384,5 @@ fn resolve_group(group: &str) -> anyhow::Result<process::Gid> {
 
     uzers::get_group_by_name(group)
         .map(|group: uzers::Group| process::Gid::from_raw(group.gid()))
-        .ok_or_else(|| anyhow::anyhow!("unknown seat group {group:?}"))
+        .ok_or_else(|| anyhow::anyhow!("unknown group {group:?}"))
 }

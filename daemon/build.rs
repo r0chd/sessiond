@@ -7,7 +7,6 @@ fn main() -> io::Result<()> {
             "../protocols/session_management_v1.xml",
             "../protocols/session_management_v2.xml",
             "../protocols/session_core_v1.xml",
-            "../protocols/seat_v1.xml",
         ])?;
 
     Ok(())

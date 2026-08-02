@@ -71,7 +71,7 @@ rustPlatform.buildRustPackage {
   '';
 
   meta = {
-    description = "Session and seat management daemon";
+    description = "Session management daemon";
     homepage = "https://tangled.org/r0chd.pl/sessiond";
     license = lib.licenses.gpl3;
     maintainers = builtins.attrValues { inherit (lib.maintainers) r0chd; };

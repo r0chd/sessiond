@@ -10,7 +10,6 @@ use session_management_v1::session_manager;
 
 struct Session {
     id: Option<u32>,
-    seat: Option<String>,
     env: Vec<(String, String)>,
     done: bool,
 }
@@ -24,9 +23,6 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Session {
         match event {
             session_manager::Event::SessionId { session_id } => {
                 self.id = Some(session_id);
-            }
-            session_manager::Event::Seat { seat } => {
-                self.seat = Some(seat);
             }
             session_manager::Event::Env { name, value } => {
                 self.env.push((name, value));
@@ -49,7 +45,6 @@ impl PamServiceModule for Pam {
         fn inner(pamh: &pamsm::Pam) -> Result<(), pamsm::PamError> {
             let mut session = Session {
                 id: None,
-                seat: None,
                 env: Vec::new(),
                 done: false,
             };
@@ -157,7 +152,6 @@ impl PamServiceModule for Pam {
 
             let mut session = Session {
                 id: None,
-                seat: None,
                 env: Vec::new(),
                 done: false,
             };

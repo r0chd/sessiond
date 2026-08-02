@@ -21,7 +21,6 @@ const DATABASE_TMP_PATH: &str = "/var/run/ConsoleKit/database~";
 pub struct SessionInfo {
     pub id: session::SessionId,
     pub uid: u32,
-    pub seat: String,
     pub timestamp: time::SystemTime,
     pub is_local: bool,
     pub active: session_core_v1::ActiveState,
@@ -36,9 +35,6 @@ impl SessionInfo {
         Some(Self {
             id,
             uid: world.get::<ecs::Uid>(entity)?.0,
-            seat: world
-                .get::<ecs::SeatName>(entity)
-                .map_or_else(|| "seat0".to_string(), |seat| seat.0.clone()),
             timestamp: world.get::<ecs::Timestamp>(entity)?.0,
             is_local: world.get::<ecs::IsLocal>(entity).is_some(),
             active: world.get::<ecs::ActiveState>(entity)?.0,
@@ -303,18 +299,6 @@ impl Session {
     #[zbus(name = "IsLocal")]
     fn is_local(&self) -> fdo::Result<bool> {
         self.with_session(|session| session.is_local)
-    }
-
-    #[zbus(name = "GetSeatId")]
-    fn get_seat_id(&self) -> fdo::Result<zvariant::OwnedObjectPath> {
-        self.with_session(|session| {
-            let seat = if session.seat.is_empty() {
-                "seat0"
-            } else {
-                session.seat.as_str()
-            };
-            object_path(&format!("/org/freedesktop/ConsoleKit/Seat/{seat}"))
-        })?
     }
 
     #[zbus(name = "GetId")]
@@ -593,26 +577,8 @@ fn write_database(state: &SharedState) -> io::Result<()> {
 }
 
 pub fn append_database(database: &mut String, sessions: &[SessionInfo]) {
-    let seats = sessions
-        .iter()
-        .map(|session| seat_name(session).to_string())
-        .fold(Vec::<String>::new(), |mut seats, seat| {
-            if !seats.contains(&seat) {
-                seats.push(seat);
-            }
-            seats
-        });
-
-    let _ = writeln!(database, "[Seats]");
-    let _ = writeln!(database, "seats={}", key_file_list(seats.iter()));
-    let _ = writeln!(database);
-
     for session in sessions {
         append_session_group(database, session, &session_path_string(session.id));
-    }
-
-    for seat in &seats {
-        append_seat_group(database, seat, sessions);
     }
 
     append_user_groups(database, sessions);
@@ -621,7 +587,6 @@ pub fn append_database(database: &mut String, sessions: &[SessionInfo]) {
 fn append_session_group(database: &mut String, session: &SessionInfo, id: &str) {
     let _ = writeln!(database, "[Session {id}]");
     let _ = writeln!(database, "uid={}", session.uid);
-    let _ = writeln!(database, "seat={}", key_file_escape(seat_name(session)));
     let _ = writeln!(database, "type=unspecified");
     let _ = writeln!(database, "display_device=");
     let _ = writeln!(database, "remote_host_name=");
@@ -633,27 +598,6 @@ fn append_session_group(database: &mut String, session: &SessionInfo, id: &str) 
         "creation_time={}",
         key_file_escape(&timestamp_string(session.timestamp))
     );
-    let _ = writeln!(database);
-}
-
-fn append_seat_group(database: &mut String, seat: &str, sessions: &[SessionInfo]) {
-    let session_paths = sessions
-        .iter()
-        .filter(|session| seat_name(session) == seat)
-        .map(|session| session_path_string(session.id))
-        .collect::<Vec<_>>();
-
-    let _ = writeln!(database, "[Seat {}]", key_file_escape(seat));
-    let _ = writeln!(database, "sessions={}", key_file_list(session_paths.iter()));
-    if let Some(active) = sessions
-        .iter()
-        .find(|session| {
-            seat_name(session) == seat && session.active == session_core_v1::ActiveState::Active
-        })
-        .map(|session| session_path_string(session.id))
-    {
-        let _ = writeln!(database, "active_session={}", key_file_escape(&active));
-    }
     let _ = writeln!(database);
 }
 
@@ -680,14 +624,6 @@ fn append_user_groups(database: &mut String, sessions: &[SessionInfo]) {
         let _ = writeln!(database, "is_local={}", key_file_bool(is_local));
         let _ = writeln!(database, "sessions={}", key_file_list(session_paths.iter()));
         let _ = writeln!(database);
-    }
-}
-
-pub const fn seat_name(session: &SessionInfo) -> &str {
-    if session.seat.is_empty() {
-        "seat0"
-    } else {
-        session.seat.as_str()
     }
 }
 

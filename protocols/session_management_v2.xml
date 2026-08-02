@@ -32,8 +32,8 @@
     Returns a session_management_session object bound to the calling
     connection. The session is not created yet: the client may send vt,
     remote_host, and env on the returned object to stage optional fields,
-    then must send done to commit. The daemon then pushes session_id and
-    seat, followed by done, or error if creation failed.
+    then must send done to commit. The daemon then pushes session_id,
+    followed by done, or error if creation failed.
    </description>
    <arg name="uid" type="uint" summary="user id"/>
    <returns iface="session_management_session"/>
@@ -82,15 +82,12 @@
   <c2s name="done">
    <description summary="commit staged fields and create the session">
     Creates the session using uid and any staged vt/remote_host/env. The
-    daemon responds with session_id and seat, followed by done, or with
+    daemon responds with session_id, followed by done, or with
     error if creation failed.
    </description>
   </c2s>
   <s2c name="session_id">
    <arg name="session_id" type="uint" summary="unique session identifier"/>
-  </s2c>
-  <s2c name="seat">
-   <arg name="seat" type="varchar" summary="seat name assigned to the session"/>
   </s2c>
   <s2c name="env">
    <arg name="name" type="varchar" summary="environment variable name"/>

@@ -6,16 +6,9 @@ Use `sessiond --config <path>` to load a different file.
 ## Example
 
 ```toml
-default-seat = "custom-seat"
-
 [management]
 user = "root"
 group = "root"
-
-[seats.custom-seat]
-user = "root"
-group = "seat"
-kind = "vt-bound"
 
 [users.alice]
 linger = true
@@ -33,32 +26,18 @@ hibernate = ["/run/current-system/sw/bin/zzz", "-Z"]
 
 ## Top-level Fields
 
-- `default-seat`: name of the seat created on startup. Defaults to `seat0`.
-  It must match an entry in `seats`.
 - `management`: access rules for session management operations. Defaults to
   `root:root`.
-- `seats`: configured seats. Defaults to a single `seat0`. (Currently `sessiond` only supports single seat setups)
 - `users`: per-user session defaults, keyed by user name.
 - `power`: commands used by `sessionctl reboot`, `sessionctl poweroff`,
   `sessionctl suspend`, and `sessionctl hibernate`.
 
 Unknown fields are rejected.
 
-## Seats
-
-Each seat has these fields:
-
-- `user`: user allowed to acquire seat devices. Defaults to `root`.
-- `group`: group allowed to acquire seat devices. Defaults to `root`.
-- `kind`: either `vt-bound` or `non-vt`. Defaults to `vt-bound`.
-
-A `vt-bound` seat tracks the active virtual terminal. A `non-vt` seat is not
-bound to VT switching.
-
 ## Management Access
 
 `management.user` and `management.group` grant privileged session management
-access. Management access can modify users and seats and can run power commands
+access. Management access can modify users and can run power commands
 even when other users have active sessions.
 
 Both fields default to `root`.

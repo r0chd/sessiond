@@ -3,35 +3,6 @@ use std::collections::BTreeMap;
 use std::{fs, io, path};
 use uzers::os::unix::UserExt;
 
-#[derive(serde::Deserialize, Default, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum SeatKind {
-    #[default]
-    VtBound,
-    NonVt,
-}
-
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SeatConfig {
-    #[serde(default = "default_user")]
-    pub user: String,
-    #[serde(default = "default_group")]
-    pub group: String,
-    #[serde(default)]
-    pub kind: SeatKind,
-}
-
-impl Default for SeatConfig {
-    fn default() -> Self {
-        Self {
-            user: "root".to_string(),
-            group: "root".to_string(),
-            kind: SeatKind::VtBound,
-        }
-    }
-}
-
 fn default_user() -> String {
     "root".to_string()
 }
@@ -89,7 +60,6 @@ impl UserConfig {
         &self,
         uid: u32,
         session_id: u32,
-        seat: Option<&str>,
         term: Option<&str>,
     ) -> BTreeMap<String, String> {
         let runtime_dir = self.runtime_dir(uid);
@@ -111,10 +81,6 @@ impl UserConfig {
                 "SHELL".to_string(),
                 user.shell().to_string_lossy().to_string(),
             );
-        }
-
-        if let Some(seat) = seat.filter(|seat| !seat.is_empty()) {
-            env.insert("XDG_SEAT".to_string(), seat.to_string());
         }
 
         for (name, value) in &self.env {
@@ -149,37 +115,14 @@ pub struct PowerConfig {
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
+#[derive(Default)]
 pub struct Config {
     #[serde(default)]
     pub management: ManagementConfig,
     #[serde(default)]
     pub users: BTreeMap<String, UserConfig>,
-    #[serde(default = "default_seats")]
-    pub seats: BTreeMap<String, SeatConfig>,
-    #[serde(default = "default_seat")]
-    pub default_seat: String,
     #[serde(default)]
     pub power: PowerConfig,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            management: ManagementConfig::default(),
-            users: BTreeMap::new(),
-            seats: default_seats(),
-            default_seat: "seat0".to_string(),
-            power: PowerConfig::default(),
-        }
-    }
-}
-
-fn default_seats() -> BTreeMap<String, SeatConfig> {
-    BTreeMap::from([("seat0".to_string(), SeatConfig::default())])
-}
-
-fn default_seat() -> String {
-    "seat0".to_string()
 }
 
 impl Config {

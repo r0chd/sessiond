@@ -1,9 +1,7 @@
 use crate::session_core_v1::{session_core_manager, session_core_session};
 use crate::session_management_v1::session_manager as session_manager_v1;
 use crate::session_management_v2::{session_management_session, session_manager};
-use crate::{
-    config, ecs, seat, session_core_v1, session_management_v1, session_management_v2, user,
-};
+use crate::{config, ecs, session_core_v1, session_management_v1, session_management_v2, user, vt};
 use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 use hyprwire::server;
@@ -69,8 +67,6 @@ pub fn spawn(
     uid: u32,
     username: String,
     vt: Option<u32>,
-    seat: Option<String>,
-    session_seat: Option<entity::Entity>,
     leader_id: i32,
     remote_host: Option<String>,
     active_state: session_core_v1::ActiveState,
@@ -94,12 +90,6 @@ pub fn spawn(
         cmd.insert(ecs::RemoteHost(remote_host));
     } else {
         cmd.insert(ecs::IsLocal);
-    }
-    if let Some(name) = seat {
-        cmd.insert(ecs::SeatName(name));
-    }
-    if let Some(entity) = session_seat {
-        cmd.insert(ecs::SessionSeat(entity));
     }
     if let Some(session_object) = session_object {
         cmd.insert(ecs::SessionObject(session_object));
@@ -141,18 +131,6 @@ pub fn entities_by_uid(world: &world::World, uid: u32) -> Vec<entity::Entity> {
     sessions
         .iter(world)
         .filter_map(|(entity, session_uid)| (session_uid.0 == uid).then_some(entity))
-        .collect()
-}
-
-pub fn entities_by_seat_name(world: &world::World, name: &str) -> Vec<entity::Entity> {
-    let Some(mut sessions) =
-        world.try_query_filtered::<(Entity, &ecs::SeatName), With<ecs::Session>>()
-    else {
-        return Vec::new();
-    };
-    sessions
-        .iter(world)
-        .filter_map(|(entity, session_seat)| (session_seat.0 == name).then_some(entity))
         .collect()
 }
 
@@ -386,9 +364,6 @@ pub fn add_object(
         entity,
         object.client().creds(),
     )));
-    if let Some(seat) = world.get::<ecs::SeatName>(entity) {
-        object.send_seat(&seat.0);
-    }
     if let Some(leader_id) = world.get::<ecs::LeaderId>(entity) {
         object.send_leader(leader_id.0.cast_unsigned());
     }
@@ -417,8 +392,7 @@ pub fn add_object(
 }
 
 pub fn sync_vt_session_states(world: &mut world::World) {
-    seat::refresh_current_vts(world);
-    seat::sync_states(world);
+    vt::refresh_current_vts(world);
     user::sync_all(world);
 }
 
@@ -638,7 +612,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for crate::Sessiond {
                     log::error!(session_id = session_id.as_raw(), error = e.to_string().as_str(); "failed to create session cgroup");
                 }
 
-                seat::refresh_current_vts(&mut self.world);
+                vt::refresh_current_vts(&mut self.world);
 
                 user::create_runtime_dir(uid, &self.user_config(&username).runtime_dir(uid));
 
@@ -648,8 +622,6 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for crate::Sessiond {
                     ecs::SessionClass::User,
                     uid,
                     username,
-                    None,
-                    None,
                     None,
                     leader_id,
                     None,
@@ -697,45 +669,17 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                     log::error!(session_id = session_id.as_raw(), error = e.to_string().as_str(); "failed to create session cgroup");
                 }
 
-                seat::refresh_current_vts(&mut self.world);
+                vt::refresh_current_vts(&mut self.world);
 
                 let is_local = is_local != 0;
                 let session_vt = num::NonZeroU32::new(vt);
-                let mut session_seat_entity = if session_vt.is_some() {
-                    seat::first(&self.world)
-                } else {
-                    None
-                };
-                let mut session_seat = session_seat_entity.and_then(|seat_entity| {
-                    self.world
-                        .get::<ecs::SeatName>(seat_entity)
-                        .map(|seat| seat.0.clone())
-                        .filter(|seat| !seat.is_empty())
-                });
                 let mut active_state = session_core_v1::ActiveState::Online;
 
-                user::create_runtime_dir(uid, &self.user_config(&username).runtime_dir(uid));
-
-                if let Some((seat_entity, seat)) =
-                    seat::entities(&self.world)
-                        .into_iter()
-                        .find_map(|seat_entity| {
-                            let mode = self.world.get::<ecs::SeatMode>(seat_entity)?;
-                            if mode.0 != ecs::SeatKind::VtBound {
-                                return None;
-                            }
-                            let current_vt = self.world.get::<ecs::CurrentVt>(seat_entity)?.0;
-                            (Some(current_vt) == session_vt && is_local).then(|| {
-                                self.world
-                                    .get::<ecs::SeatName>(seat_entity)
-                                    .map(|seat| (seat_entity, seat.0.clone()))
-                            })?
-                        })
-                {
-                    session_seat_entity = Some(seat_entity);
-                    session_seat = Some(seat);
+                if session_vt.is_some_and(|vt| vt::current_vt().ok() == Some(vt)) && is_local {
                     active_state = session_core_v1::ActiveState::Active;
                 }
+
+                user::create_runtime_dir(uid, &self.user_config(&username).runtime_dir(uid));
 
                 let pending_env = self
                     .world
@@ -746,7 +690,6 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                 let mut env = self.user_config(&username).environment(
                     uid,
                     session_id.as_raw(),
-                    session_seat.as_deref(),
                     pending_env
                         .as_ref()
                         .and_then(|env| env.get("TERM"))
@@ -761,8 +704,6 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                     uid,
                     username,
                     session_vt.map(num::NonZeroU32::get),
-                    session_seat.clone(),
-                    session_seat_entity,
                     client.creds().pid.as_raw_pid(),
                     if is_local { None } else { Some(remote_host) },
                     active_state,
@@ -781,7 +722,6 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                 user::sync_all(&mut self.world);
 
                 object.send_session_id(session_id.as_raw());
-                object.send_seat(session_seat.as_deref().unwrap_or_default());
                 for (name, value) in env {
                     object.send_env(name.as_str(), value.as_str());
                 }
@@ -849,54 +789,14 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                     .map(|username| username.0.clone());
                 let session_vt = self.world.get::<ecs::Vt>(entity).map(|vt| vt.0);
                 let is_local = self.world.get::<ecs::IsLocal>(entity).is_some();
-                seat::refresh_current_vts(&mut self.world);
+                vt::refresh_current_vts(&mut self.world);
 
-                let mut session_seat_entity = if session_vt.is_some() {
-                    seat::first(&self.world)
-                } else {
-                    None
-                };
-                let mut session_seat = session_seat_entity.and_then(|seat_entity| {
-                    self.world
-                        .get::<ecs::SeatName>(seat_entity)
-                        .map(|seat| seat.0.clone())
-                        .filter(|seat| !seat.is_empty())
-                });
-
-                let active_state = if let Some((seat_entity, seat)) = seat::entities(&self.world)
-                    .into_iter()
-                    .find_map(|seat_entity| {
-                        let mode = self.world.get::<ecs::SeatMode>(seat_entity)?;
-                        if mode.0 != ecs::SeatKind::VtBound {
-                            return None;
-                        }
-                        let current_vt = self.world.get::<ecs::CurrentVt>(seat_entity)?.0;
-                        (Some(current_vt) == session_vt && is_local).then(|| {
-                            self.world
-                                .get::<ecs::SeatName>(seat_entity)
-                                .map(|seat| (seat_entity, seat.0.clone()))
-                        })?
-                    }) {
-                    session_seat_entity = Some(seat_entity);
-                    session_seat = Some(seat);
-                    session_core_v1::ActiveState::Active
-                } else {
-                    session_core_v1::ActiveState::Online
-                };
-
-                {
-                    let mut session = self.world.entity_mut(entity);
-                    if let Some(seat) = session_seat.as_ref() {
-                        session.insert(ecs::SeatName(seat.clone()));
+                let active_state =
+                    if session_vt.is_some_and(|vt| vt::current_vt().ok() == Some(vt)) && is_local {
+                        session_core_v1::ActiveState::Active
                     } else {
-                        session.remove::<ecs::SeatName>();
-                    }
-                    if let Some(seat_entity) = session_seat_entity {
-                        session.insert(ecs::SessionSeat(seat_entity));
-                    } else {
-                        session.remove::<ecs::SessionSeat>();
-                    }
-                }
+                        session_core_v1::ActiveState::Online
+                    };
 
                 set_active_state(&mut self.world, entity, active_state);
                 #[cfg(feature = "consolekit")]
@@ -904,19 +804,15 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                 user::sync_all(&mut self.world);
 
                 object.send_session_id(session_id.as_raw());
-                object.send_seat(session_seat.as_deref().unwrap_or_default());
                 if let (Some(uid), Some(username)) = (uid, username) {
                     let term = self
                         .world
                         .get::<ecs::SessionEnv>(entity)
                         .and_then(|env| env.0.get("TERM"))
                         .map(String::as_str);
-                    let mut env = self.user_config(&username).environment(
-                        uid,
-                        session_id.as_raw(),
-                        session_seat.as_deref(),
-                        term,
-                    );
+                    let mut env =
+                        self.user_config(&username)
+                            .environment(uid, session_id.as_raw(), term);
                     env.extend(session_envs_by_uid(&self.world, uid, Some(entity)));
 
                     for (name, value) in env {
@@ -1054,22 +950,6 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                 send_power_result(
                     object,
                     self.handle_power_action(PowerAction::Hibernate, client.creds()),
-                );
-            }
-            session_core_manager::Event::GetSeat {
-                session_core_seat,
-                seat,
-            } => {
-                let Some(seat_entity) = seat::entity_by_name(&self.world, &seat) else {
-                    session_core_seat.send_destroyed();
-                    return;
-                };
-                let management_access = self.world.resource::<ecs::AccessRules>().management;
-                seat::add_object(
-                    &mut self.world,
-                    seat_entity,
-                    session_core_seat,
-                    management_access,
                 );
             }
             session_core_manager::Event::Destroy => {

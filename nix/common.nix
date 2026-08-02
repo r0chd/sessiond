@@ -9,11 +9,6 @@ let
   cfg = config.services.sessiond;
   settingsFormat = pkgs.formats.toml { };
   normalUsers = lib.filterAttrs (_: user: user.isNormalUser or false) config.users.users;
-  seatGroups = lib.unique (
-    lib.filter (group: group != null) (
-      lib.mapAttrsToList (_: seat: seat.group or null) (cfg.settings.seats or { })
-    )
-  );
 in
 {
   options.services.sessiond = {
@@ -39,19 +34,7 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    assertions = lib.mkIf cfg.enable [
-      {
-        assertion = builtins.hasAttr cfg.settings.default-seat (cfg.settings.seats or { });
-        message = "services.sessiond.settings.default-seat must name a configured seat.";
-      }
-    ];
-
     services.sessiond.settings = {
-      default-seat = lib.mkDefault "seat0";
-      seats.seat0 = {
-        user = lib.mkDefault "root";
-        group = lib.mkDefault "seat";
-      };
       users = lib.mapAttrs (_userName: _userCfg: {
         env.DBUS_SESSION_BUS_ADDRESS = lib.mkDefault "unix:path={runtime-dir}/bus";
       }) normalUsers;
@@ -60,6 +43,5 @@ in
     environment.systemPackages = [ cfg.package ];
     services.dbus.packages = [ cfg.package ];
 
-    users.groups = lib.genAttrs seatGroups (_: { });
   };
 }

@@ -2,7 +2,6 @@
   lib,
   pkgs,
   sessiond,
-  seattest,
   ...
 }:
 let
@@ -128,7 +127,6 @@ in
   environment.systemPackages = [
     pkgs.systemd
     polkitTestAction
-    seattest.packages.default
   ];
 
   users.users = {

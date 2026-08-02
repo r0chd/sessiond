@@ -8,3 +8,8 @@ Initial public release of `sessiond`.
 
 ### Added
 - Added a DBus system policy for the ConsoleKit interface
+
+## UNRELEASED
+
+### Removed
+- Removed seat management

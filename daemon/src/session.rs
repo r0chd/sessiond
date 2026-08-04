@@ -409,8 +409,13 @@ pub fn set_active_state(
         .get::<ecs::Vt>(entity)
         .map(|vt| vt.0.get())
         .unwrap_or_default();
-    log::info!(session_id, vt; "session state changed");
+
     if let Some(mut active_state) = world.get_mut::<ecs::ActiveState>(entity) {
+        if active_state.0 == state {
+            return;
+        }
+
+        log::info!(session_id, vt; "session state changed");
         active_state.0 = state;
     }
 }

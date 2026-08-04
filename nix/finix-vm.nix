@@ -51,6 +51,7 @@ in
     sessiond = {
       enable = true;
       package = sessiond;
+      logLevel = "trace";
       settings.power = {
         suspend = lib.mkDefault [ "${pkgs.zzz}/bin/zzz" ];
         hibernate = lib.mkDefault [ "${pkgs.zzz}/bin/ZZZ" ];

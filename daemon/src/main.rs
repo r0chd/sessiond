@@ -31,14 +31,14 @@ mod tests;
 use bevy_ecs::prelude::*;
 #[cfg(feature = "consolekit")]
 use calloop::channel;
-use calloop::{generic, signals, timer};
+use calloop::{generic, signals};
 use clap::{Parser, ValueEnum};
 use hyprwire::server;
 use rustix::process;
 use session_core_v1::session_core_user;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
-use std::{env, fs, path, time::Duration};
+use std::{env, fs, path};
 
 #[derive(Parser)]
 struct Args {
@@ -243,22 +243,70 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
 
     event_loop
         .handle()
-        .insert_source(
-            timer::Timer::from_duration(Duration::from_millis(100)),
-            |_, (), state| {
-                vt::refresh_current_vts(&mut state.world);
-                user::sync_all(&mut state.world);
-                timer::TimeoutAction::ToDuration(Duration::from_millis(100))
-            },
-        )
-        .map_err(|err| anyhow::anyhow!("failed to insert VT watcher: {err:?}"))?;
-
-    event_loop
-        .handle()
         .insert_source(signals, move |event, (), state| {
-            let session_updates = match event.signal() {
+            match event.signal() {
                 signals::Signal::SIGUSR1 | signals::Signal::SIGUSR2 => {
-                    vt::handle_vt_signal(&mut state.world, event.signal())
+                    let terminal = match terminal::Terminal::open(0) {
+                        Ok(terminal) => terminal,
+                        Err(error) => {
+                            log::error!(
+                                error = error.to_string().as_str();
+                                "failed to open terminal to handle VT signal"
+                            );
+                            return;
+                        }
+                    };
+
+                    match event.signal() {
+                        signals::Signal::SIGUSR1 => {
+                            if let Err(error) = terminal.ack_release() {
+                                log::error!(
+                                    error = error.to_string().as_str();
+                                    "failed to acknowledge VT release"
+                                );
+                            }
+                            return;
+                        }
+                        signals::Signal::SIGUSR2 => {
+                            if let Err(error) = terminal.ack_acquire() {
+                                log::error!(
+                                    error = error.to_string().as_str();
+                                    "failed to acknowledge VT acquire"
+                                );
+                            }
+                        }
+                        _ => return,
+                    }
+                    let Ok(current) = vt::current_vt() else {
+                        return;
+                    };
+
+                    {
+                        let mut sessions = state.world.query_filtered::<(
+                            &ecs::Vt,
+                            &ecs::IsLocal,
+                            &mut ecs::ActiveState,
+                        ), With<ecs::Session>>(
+                        );
+                        for (vt, _, mut active_state) in sessions.iter_mut(&mut state.world) {
+                            let desired = if vt.0 == current {
+                                session_core_v1::ActiveState::Active
+                            } else {
+                                session_core_v1::ActiveState::Online
+                            };
+                            if active_state.0 != desired {
+                                active_state.0 = desired;
+                            }
+                        }
+                    }
+
+                    // TODO: move this into ECS reconciliation
+                    #[cfg(feature = "consolekit")]
+                    for entity in session::entities(&state.world) {
+                        if let Some(session_id) = session::id(&state.world, entity) {
+                            state.sync_consolekit_session(session_id, entity);
+                        }
+                    }
                 }
                 signals::Signal::SIGTERM | signals::Signal::SIGINT => {
                     if state.shutting_down {
@@ -287,52 +335,17 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
                     return;
                 }
                 _ => unreachable!(),
-            };
-
-            for (vt, active_state) in session_updates {
-                let mut state_updates = Vec::new();
-
-                if active_state == session_core_v1::ActiveState::Active {
-                    state_updates.extend(session::entities(&state.world).into_iter().filter_map(
-                        |entity| {
-                            let session_vt = state.world.get::<ecs::Vt>(entity)?.0.get();
-                            let session_state = state.world.get::<ecs::ActiveState>(entity)?.0;
-
-                            if session_vt != vt.get()
-                                && session_state == session_core_v1::ActiveState::Active
-                            {
-                                return Some((entity, session_core_v1::ActiveState::Online));
-                            }
-
-                            None
-                        },
-                    ));
-                }
-
-                state_updates.extend(session::entities(&state.world).into_iter().filter_map(
-                    |entity| {
-                        let session_vt = state.world.get::<ecs::Vt>(entity)?.0.get();
-                        (session_vt == vt.get()).then_some((entity, active_state))
-                    },
-                ));
-
-                for (entity, active_state) in state_updates {
-                    let Some(session_id) = session::id(&state.world, entity) else {
-                        continue;
-                    };
-                    session::set_active_state(&mut state.world, entity, active_state);
-                    let _ = session_id;
-                    #[cfg(feature = "consolekit")]
-                    state.sync_consolekit_session(session_id, entity);
-                }
             }
 
             user::sync_all(&mut state.world);
         })?;
 
+    terminal::Terminal::open(0)?.set_process_switching(true)?;
     event_loop.run(None, &mut sessiond, |state| {
         state.notify_schedule.run(&mut state.world);
     })?;
+
+    terminal::Terminal::open(0)?.set_process_switching(false)?;
 
     let _ = fs::remove_file(socket_path);
 

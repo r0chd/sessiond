@@ -28,6 +28,18 @@ fn active_state_updates() {
 }
 
 #[test]
+fn setting_the_same_active_state_is_not_a_change() {
+    let mut world = World::new();
+    let entity = make_session(&mut world, 1, session_core_v1::ActiveState::Online);
+
+    world.clear_trackers();
+    session::set_active_state(&mut world, entity, session_core_v1::ActiveState::Online);
+
+    let mut query = world.query_filtered::<Entity, Changed<ecs::ActiveState>>();
+    assert!(query.iter(&world).next().is_none());
+}
+
+#[test]
 fn sessions_are_not_seat_bound() {
     let mut world = World::new();
     let entity = make_session(&mut world, 1, session_core_v1::ActiveState::Online);

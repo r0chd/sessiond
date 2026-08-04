@@ -1,6 +1,5 @@
 use crate::{ecs, session, session_core_v1, terminal};
 use bevy_ecs::prelude::*;
-use calloop::signals;
 use std::num;
 
 pub fn current_vt() -> anyhow::Result<num::NonZeroU32> {
@@ -26,18 +25,4 @@ pub fn refresh_current_vt(world: &mut World) {
 
 pub fn refresh_current_vts(world: &mut World) {
     refresh_current_vt(world);
-}
-
-pub fn handle_vt_signal(
-    world: &mut World,
-    signal: signals::Signal,
-) -> Vec<(num::NonZeroU32, session_core_v1::ActiveState)> {
-    if !matches!(signal, signals::Signal::SIGUSR1 | signals::Signal::SIGUSR2) {
-        return Vec::new();
-    }
-    let Ok(current) = current_vt() else {
-        return Vec::new();
-    };
-    refresh_current_vt(world);
-    vec![(current, session_core_v1::ActiveState::Active)]
 }

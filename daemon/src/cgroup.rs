@@ -225,23 +225,16 @@ impl CgroupManager {
         &self,
         pid: u32,
     ) -> anyhow::Result<Option<session::SessionId>> {
-        if self.root_path.is_none() {
-            return Ok(None);
-        }
+        _ = self;
+        let contents = fs::read_to_string(format!("/proc/{pid}/cgroup"))?;
 
-        for cgroup in &self.cgroups {
-            let procs = fs::read_to_string(cgroup.path.join("cgroup.procs"))?;
+        let session_id = contents.lines().find_map(|line| {
+            let path = line.rsplit_once(':')?.1;
+            path.split('/')
+                .find_map(|component| component.strip_prefix("session-")?.parse().ok())
+        });
 
-            if procs
-                .lines()
-                .filter_map(|line| line.trim().parse::<u32>().ok())
-                .any(|cgroup_pid| cgroup_pid == pid)
-            {
-                return Ok(Some(cgroup.session_id));
-            }
-        }
-
-        Ok(None)
+        Ok(session_id.map(session::SessionId::from_raw))
     }
 
     fn take_cgroup(&mut self, session_id: session::SessionId) -> Option<(u32, path::PathBuf)> {

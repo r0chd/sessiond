@@ -34,9 +34,10 @@ use calloop::channel;
 use calloop::{generic, signals};
 use clap::{Parser, ValueEnum};
 use hyprwire::server;
-use rustix::process;
+use rustix::{net, process};
 use session_core_v1::session_core_user;
 use std::os::fd::AsRawFd;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
 use std::{env, fs, path};
 
@@ -122,6 +123,21 @@ impl Sessiond {
             self.consolekit.upsert_session(info);
         }
     }
+}
+
+fn notify(message: &[u8]) -> rustix::io::Result<()> {
+    let Some(socket_path) = env::var_os("NOTIFY_SOCKET") else {
+        return Ok(());
+    };
+
+    let address = socket_path.as_bytes().strip_prefix(b"@").map_or_else(
+        || net::SocketAddrUnix::new(&socket_path),
+        net::SocketAddrUnix::new_abstract_name,
+    )?;
+    let socket = net::socket(net::AddressFamily::UNIX, net::SocketType::DGRAM, None)?;
+    net::connect(&socket, &address)?;
+    net::send(&socket, message, net::SendFlags::empty())?;
+    Ok(())
 }
 
 fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
@@ -313,6 +329,10 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
                         return;
                     }
 
+                    if let Err(e) = notify(b"STOPPING=1\n") {
+                        log::warn!("Failed to send shutdown notification: {e}");
+                    }
+
                     state.shutting_down = true;
 
                     for session_id in session::entities(&state.world)
@@ -341,13 +361,16 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
         })?;
 
     terminal::Terminal::open(0)?.set_process_switching(true)?;
+
+    if let Err(e) = notify(b"READY=1\n") {
+        log::warn!("Failed to send readiness notification: {e}");
+    }
+
     event_loop.run(None, &mut sessiond, |state| {
         state.notify_schedule.run(&mut state.world);
     })?;
 
     terminal::Terminal::open(0)?.set_process_switching(false)?;
-
-    let _ = fs::remove_file(socket_path);
 
     Ok(())
 }

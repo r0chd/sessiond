@@ -1,11 +1,18 @@
 #![allow(clippy::needless_pass_by_value, clippy::type_complexity)]
-use crate::ecs;
+use crate::{ecs, power};
 use bevy_ecs::prelude::*;
 use std::mem;
 
 pub fn notify_schedule() -> Schedule {
     let mut schedule = Schedule::new(ecs::Notify);
-    schedule.add_systems((notify_session_active_states, notify_user_states).before(send_done));
+    schedule.add_systems(
+        (
+            notify_session_active_states,
+            notify_user_states,
+            power::notify_power_control,
+        )
+            .before(send_done),
+    );
     schedule.add_systems(send_done);
     schedule
 }

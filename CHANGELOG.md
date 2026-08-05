@@ -12,7 +12,8 @@ Initial public release of `sessiond`.
 ## UNRELEASED
 
 ### Removed
-- Removed seat management
+- Removed seat management in favor of separate seat client
 
 ### Added
 - sd_notify lifecycle notifications (STOPPING, READY)
+- Added the `session_power_v1` protocol for system power control

@@ -1,7 +1,10 @@
 use crate::session_core_v1::{session_core_manager, session_core_session, session_core_user};
 use crate::session_management_v1::session_manager;
 use crate::session_management_v2::session_management_session;
-use crate::{config, session, session_core_v1, session_management_v1, session_management_v2};
+use crate::{
+    config, session, session_core_v1, session_management_v1, session_management_v2,
+    session_power_v1,
+};
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::ScheduleLabel;
 use std::collections::{BTreeMap, HashMap};
@@ -20,6 +23,9 @@ pub struct DaemonConfig(pub config::Config);
 
 #[derive(Resource, Default)]
 pub struct SessionInfoManagers(pub Vec<session_core_manager::SessionCoreManager>);
+
+#[derive(Resource, Default)]
+pub struct PowerManagers(pub Vec<session_power_v1::session_power_manager::SessionPowerManager>);
 
 #[derive(Resource, Default)]
 pub struct NotifyBatch {

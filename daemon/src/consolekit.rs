@@ -1,4 +1,5 @@
-use crate::{ecs, session, session_core_v1};
+use crate::{ecs, power, session, session_core_v1};
+use power::{PowerAction, PowerError};
 use bevy_ecs::{entity, world};
 use calloop::channel;
 use rustix::process;
@@ -84,12 +85,12 @@ pub struct PowerRequest {
 }
 
 pub enum PowerRequestKind {
-    Execute(session::PowerAction),
-    Can(session::PowerAction),
+    Execute(PowerAction),
+    Can(PowerAction),
 }
 
 pub enum PowerResponse {
-    Done(Result<(), session::PowerError>),
+    Done(Result<(), PowerError>),
     Can(bool),
 }
 
@@ -110,12 +111,12 @@ struct Manager {
 impl Manager {
     #[zbus(name = "Restart")]
     fn restart(&self, #[zbus(header)] header: message::Header<'_>) -> fdo::Result<()> {
-        self.execute_power(session::PowerAction::Reboot, &header)
+        self.execute_power(PowerAction::Reboot, &header)
     }
 
     #[zbus(name = "Stop")]
     fn stop(&self, #[zbus(header)] header: message::Header<'_>) -> fdo::Result<()> {
-        self.execute_power(session::PowerAction::Poweroff, &header)
+        self.execute_power(PowerAction::Poweroff, &header)
     }
 
     #[zbus(name = "Suspend")]
@@ -124,7 +125,7 @@ impl Manager {
         #[allow(unused_variables)] policykit_interactivity: bool,
         #[zbus(header)] header: message::Header<'_>,
     ) -> fdo::Result<()> {
-        self.execute_power(session::PowerAction::Suspend, &header)
+        self.execute_power(PowerAction::Suspend, &header)
     }
 
     #[zbus(name = "Hibernate")]
@@ -133,27 +134,27 @@ impl Manager {
         #[allow(unused_variables)] policykit_interactivity: bool,
         #[zbus(header)] header: message::Header<'_>,
     ) -> fdo::Result<()> {
-        self.execute_power(session::PowerAction::Hibernate, &header)
+        self.execute_power(PowerAction::Hibernate, &header)
     }
 
     #[zbus(name = "CanRestart")]
     fn can_restart(&self, #[zbus(header)] header: message::Header<'_>) -> fdo::Result<bool> {
-        self.can_power(session::PowerAction::Reboot, &header)
+        self.can_power(PowerAction::Reboot, &header)
     }
 
     #[zbus(name = "CanStop")]
     fn can_stop(&self, #[zbus(header)] header: message::Header<'_>) -> fdo::Result<bool> {
-        self.can_power(session::PowerAction::Poweroff, &header)
+        self.can_power(PowerAction::Poweroff, &header)
     }
 
     #[zbus(name = "CanSuspend")]
     fn can_suspend(&self, #[zbus(header)] header: message::Header<'_>) -> fdo::Result<String> {
-        self.can_power_string(session::PowerAction::Suspend, &header)
+        self.can_power_string(PowerAction::Suspend, &header)
     }
 
     #[zbus(name = "CanHibernate")]
     fn can_hibernate(&self, #[zbus(header)] header: message::Header<'_>) -> fdo::Result<String> {
-        self.can_power_string(session::PowerAction::Hibernate, &header)
+        self.can_power_string(PowerAction::Hibernate, &header)
     }
 
     #[zbus(name = "GetSessionForUnixProcess")]
@@ -199,15 +200,15 @@ impl Manager {
 impl Manager {
     fn execute_power(
         &self,
-        action: session::PowerAction,
+        action: PowerAction,
         header: &message::Header<'_>,
     ) -> fdo::Result<()> {
         match self.send_power_request(PowerRequestKind::Execute(action), header)? {
             PowerResponse::Done(Ok(())) => Ok(()),
-            PowerResponse::Done(Err(session::PowerError::ActiveSessions(message))) => {
+            PowerResponse::Done(Err(PowerError::ActiveSessions(message))) => {
                 Err(fdo::Error::AccessDenied(message))
             }
-            PowerResponse::Done(Err(session::PowerError::Io(message))) => {
+            PowerResponse::Done(Err(PowerError::Io(message))) => {
                 Err(fdo::Error::Failed(message))
             }
             PowerResponse::Can(_) => Err(fdo::Error::Failed(
@@ -218,7 +219,7 @@ impl Manager {
 
     fn can_power(
         &self,
-        action: session::PowerAction,
+        action: PowerAction,
         header: &message::Header<'_>,
     ) -> fdo::Result<bool> {
         match self.send_power_request(PowerRequestKind::Can(action), header)? {
@@ -231,7 +232,7 @@ impl Manager {
 
     fn can_power_string(
         &self,
-        action: session::PowerAction,
+        action: PowerAction,
         header: &message::Header<'_>,
     ) -> fdo::Result<String> {
         self.can_power(action, header)

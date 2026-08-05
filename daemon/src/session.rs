@@ -6,41 +6,7 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 use hyprwire::server;
 use std::collections::BTreeMap;
-use std::{num, process, time};
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PowerAction {
-    Reboot,
-    Poweroff,
-    Suspend,
-    Hibernate,
-}
-
-impl PowerAction {
-    const fn name(self) -> &'static str {
-        match self {
-            Self::Reboot => "reboot",
-            Self::Poweroff => "poweroff",
-            Self::Suspend => "suspend",
-            Self::Hibernate => "hibernate",
-        }
-    }
-
-    const fn display_name(self) -> &'static str {
-        match self {
-            Self::Reboot => "reboot",
-            Self::Poweroff => "power off",
-            Self::Suspend => "suspend",
-            Self::Hibernate => "hibernate",
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum PowerError {
-    ActiveSessions(String),
-    Io(String),
-}
+use std::{num, time};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct SessionId(u32);
@@ -448,7 +414,6 @@ impl hyprwire::Handler<session_core_v1::SessionCoreV1> for crate::Sessiond {
             .for_each(|session_id| {
                 object.send_session_added(session_id.as_raw());
             });
-        object.send_can_control_power(u32::from(self.can_control_power(object.client().creds())));
         object.send_done();
         self.world
             .resource_mut::<ecs::SessionInfoManagers>()
@@ -458,110 +423,6 @@ impl hyprwire::Handler<session_core_v1::SessionCoreV1> for crate::Sessiond {
 }
 
 impl crate::Sessiond {
-    // Allows to manage power commands (power off, reboot) only
-    // if no other sessions are active or user has root permissions
-    pub fn can_control_power(&self, creds: &hyprwire::Creds) -> bool {
-        self.world
-            .resource::<ecs::AccessRules>()
-            .management
-            .allows(creds)
-            || entities(&self.world)
-                .into_iter()
-                .filter_map(|entity| {
-                    Some((
-                        self.world.get::<ecs::Uid>(entity)?,
-                        self.world.get::<ecs::SessionClass>(entity)?,
-                    ))
-                })
-                .all(|(uid, session_class)| {
-                    uid.0 == creds.uid.as_raw() || *session_class != ecs::SessionClass::User
-                })
-    }
-
-    fn run_power_command(command: &[String], action: &str) -> Result<(), String> {
-        let Some((program, args)) = command.split_first() else {
-            log::warn!("{action} command is not configured");
-            return Err(format!("no {action} command configured"));
-        };
-
-        log::info!(
-            program = program.as_str(),
-            args:? = args;
-            "running {action} command"
-        );
-
-        match process::Command::new(program).args(args).status() {
-            Ok(status) if status.success() => Ok(()),
-            Ok(status) => {
-                log::error!(program = program.as_str(), status = status.to_string().as_str(); "{action} command failed");
-                Err(format!("{action} command {program:?} exited with {status}"))
-            }
-            Err(err) => {
-                log::error!(program = program.as_str(), error = err.to_string().as_str(); "failed to start {action} command");
-                Err(format!(
-                    "failed to start {action} command {program:?}: {err}"
-                ))
-            }
-        }
-    }
-
-    pub fn handle_power_action(
-        &self,
-        action: PowerAction,
-        creds: &hyprwire::Creds,
-    ) -> Result<(), PowerError> {
-        let foreign_session_count = entities(&self.world)
-            .into_iter()
-            .filter_map(|entity| {
-                Some((
-                    self.world.get::<ecs::Uid>(entity)?,
-                    self.world.get::<ecs::SessionClass>(entity)?,
-                ))
-            })
-            .filter(|(uid, session_class)| {
-                uid.0 != creds.uid.as_raw() && **session_class == ecs::SessionClass::User
-            })
-            .count();
-
-        if !self.can_control_power(creds) {
-            log::warn!(
-                uid = creds.uid.as_raw(),
-                pid = creds.pid.as_raw_pid(),
-                foreign_session_count,
-                action = action.name();
-                "power action denied: multiple sessions active"
-            );
-            return Err(PowerError::ActiveSessions(format!(
-                "cannot {} while multiple sessions are active (root privileges required)",
-                action.display_name()
-            )));
-        }
-
-        log::info!(
-            uid = creds.uid.as_raw(),
-            pid = creds.pid.as_raw_pid(),
-            foreign_session_count,
-            action = action.name();
-            "power action accepted"
-        );
-
-        rustix::fs::sync();
-
-        let config = &self.world.resource::<ecs::DaemonConfig>().0.power;
-        let command = match action {
-            PowerAction::Reboot => &config.reboot,
-            PowerAction::Poweroff => &config.poweroff,
-            PowerAction::Suspend => &config.suspend,
-            PowerAction::Hibernate => &config.hibernate,
-        };
-
-        if let Err(err) = Self::run_power_command(command, action.name()) {
-            return Err(PowerError::Io(err));
-        }
-
-        Ok(())
-    }
-
     pub fn user_config(&self, username: &str) -> config::UserConfig {
         self.world
             .resource::<ecs::DaemonConfig>()
@@ -570,21 +431,6 @@ impl crate::Sessiond {
             .get(username)
             .cloned()
             .unwrap_or_default()
-    }
-}
-
-fn send_power_result(
-    object: &session_core_manager::SessionCoreManager,
-    result: Result<(), PowerError>,
-) {
-    match result {
-        Ok(()) => object.send_done(),
-        Err(PowerError::ActiveSessions(message)) => {
-            object.send_error(session_core_v1::ErrorCode::ActiveSessions, message);
-        }
-        Err(PowerError::Io(message)) => {
-            object.send_error(session_core_v1::ErrorCode::Io, message);
-        }
     }
 }
 
@@ -929,34 +775,6 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                     entity,
                     session_core_user,
                     management_access,
-                );
-            }
-            session_core_manager::Event::Reboot => {
-                let client = object.client();
-                send_power_result(
-                    object,
-                    self.handle_power_action(PowerAction::Reboot, client.creds()),
-                );
-            }
-            session_core_manager::Event::Poweroff => {
-                let client = object.client();
-                send_power_result(
-                    object,
-                    self.handle_power_action(PowerAction::Poweroff, client.creds()),
-                );
-            }
-            session_core_manager::Event::Suspend => {
-                let client = object.client();
-                send_power_result(
-                    object,
-                    self.handle_power_action(PowerAction::Suspend, client.creds()),
-                );
-            }
-            session_core_manager::Event::Hibernate => {
-                let client = object.client();
-                send_power_result(
-                    object,
-                    self.handle_power_action(PowerAction::Hibernate, client.creds()),
                 );
             }
             session_core_manager::Event::Destroy => {

@@ -77,28 +77,9 @@
    <arg name="uid" type="uint" summary="user ID to query"/>
    <returns iface="session_core_user"/>
   </c2s>
-  <c2s name="reboot">
-   <description summary="reboot the system"/>
-  </c2s>
-  <c2s name="poweroff">
-   <description summary="power off the system"/>
-  </c2s>
-  <c2s name="suspend">
-   <description summary="suspend the system"/>
-  </c2s>
-  <c2s name="hibernate">
-   <description summary="hibernate the system"/>
-  </c2s>
   <c2s name="destroy" destructor="true">
    <description summary="destroy this object"/>
   </c2s>
-  <s2c name="can_control_power">
-   <description summary="client may run power operations">
-    Non-zero if this client can reboot, power off, suspend, or hibernate
-    without first closing other users' sessions.
-   </description>
-   <arg name="can_control_power" type="uint" summary="non-zero if power operations are currently allowed"/>
-  </s2c>
  </object>
  <object name="session_core_session" version="1">
   <description summary="per-session information">

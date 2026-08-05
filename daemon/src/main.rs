@@ -13,12 +13,18 @@ mod session_core_v1 {
     pub use server::*;
     pub use spec::*;
 }
+mod session_power_v1 {
+    hyprwire::include_protocol!("session_power_v1");
+    pub use server::*;
+    pub use spec::*;
+}
 
 mod cgroup;
 mod config;
 #[cfg(feature = "consolekit")]
 mod consolekit;
 mod ecs;
+mod power;
 mod reconcile;
 mod session;
 mod terminal;
@@ -189,6 +195,9 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
     sessiond
         .world
         .insert_resource(ecs::SessionInfoManagers::default());
+    sessiond
+        .world
+        .insert_resource(ecs::PowerManagers::default());
     ecs::init_resources(&mut sessiond.world);
 
     sessiond.world.insert_resource(access_rules);
@@ -213,6 +222,7 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
     socket.add_implementation::<session_management_v1::SessionManagementV1, _>(&mut sessiond, 1);
     socket.add_implementation::<session_management_v2::SessionManagementV2, _>(&mut sessiond, 1);
     socket.add_implementation::<session_core_v1::SessionCoreV1, _>(&mut sessiond, 1);
+    socket.add_implementation::<session_power_v1::SessionPowerV1, _>(&mut sessiond, 1);
 
     let fd_wrapper = unsafe { generic::FdWrapper::new(socket.extract_loop_fd().as_raw_fd()) };
     let source = generic::Generic::new(
@@ -250,7 +260,7 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
                 }
                 consolekit::PowerRequestKind::Can(action) => {
                     let _ = action;
-                    let can = state.can_control_power(&request.creds);
+                    let can = power::can_control_power(&state.world, &request.creds);
                     let _ = request.reply.send(consolekit::PowerResponse::Can(can));
                 }
             }

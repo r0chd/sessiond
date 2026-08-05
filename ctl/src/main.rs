@@ -3,6 +3,10 @@ mod session_core_v1 {
     pub use client::*;
     pub use spec::*;
 }
+mod session_power_v1 {
+    hyprwire::include_protocol!("session_power_v1");
+    pub use client::*;
+}
 
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{Shell, generate};
@@ -10,6 +14,7 @@ use clap_complete_nushell::Nushell;
 use hyprwire::client;
 use serde_json::json;
 use session_core_v1::{session_core_manager, session_core_session, session_core_user};
+use session_power_v1::session_power_manager;
 use std::io;
 
 struct Session {
@@ -95,13 +100,27 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for State {
                 self.done = false;
             }
             session_core_manager::Event::Done => self.done = true,
-            session_core_manager::Event::CanControlPower { can_control_power } => {
-                self.can_control_power = can_control_power != 0;
-            }
             session_core_manager::Event::Error { message, .. } => {
                 self.error = Some(message);
                 self.done = true;
             }
+        }
+    }
+}
+impl hyprwire::Dispatch<session_power_manager::SessionPowerManager> for State {
+    fn event(
+        &mut self,
+        _object: &session_power_manager::SessionPowerManager,
+        event: <session_power_manager::SessionPowerManager as hyprwire::Object>::Event<'_>,
+    ) {
+        match event {
+            session_power_manager::Event::CanControl { can_control } => {
+                self.can_control_power = can_control != 0;
+            }
+            session_power_manager::Event::Error { message, .. } => {
+                self.error = Some(message);
+            }
+            session_power_manager::Event::Done => {}
         }
     }
 }
@@ -284,9 +303,12 @@ fn main() -> anyhow::Result<()> {
     let mut socket = client::Client::connect("/run/sessiond.sock")?;
     let queue = socket.new_event_queue();
     socket.add_implementation::<session_core_v1::SessionCoreV1>();
+    socket.add_implementation::<session_power_v1::SessionPowerV1>();
     queue.wait_for_handshake(&mut state)?;
     let manager =
         socket.bind::<session_core_manager::SessionCoreManager, _>(&queue, &mut state, 1)?;
+    let power_manager =
+        socket.bind::<session_power_manager::SessionPowerManager, _>(&queue, &mut state, 1)?;
     queue.roundtrip(&mut state)?;
     while !state.done {
         queue.dispatch_events(&mut state, true)?;
@@ -396,10 +418,10 @@ fn main() -> anyhow::Result<()> {
                 "power operation is not permitted while other users have active sessions"
             );
             match cli.command {
-                Command::Reboot => manager.send_reboot(),
-                Command::Poweroff => manager.send_poweroff(),
-                Command::Suspend => manager.send_suspend(),
-                Command::Hibernate => manager.send_hibernate(),
+                Command::Reboot => power_manager.send_reboot(),
+                Command::Poweroff => power_manager.send_poweroff(),
+                Command::Suspend => power_manager.send_suspend(),
+                Command::Hibernate => power_manager.send_hibernate(),
                 _ => unreachable!(),
             }
         }

@@ -19,6 +19,7 @@ in
         conditions = [ "service/syslogd/ready" ];
         command = "${cfg.package}/bin/sessiond --config ${daemonConfig} --log-target syslog";
         environment.LOG_LEVEL = cfg.logLevel;
+        notify = "systemd";
       };
     };
 

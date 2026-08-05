@@ -13,3 +13,6 @@ Initial public release of `sessiond`.
 
 ### Removed
 - Removed seat management
+
+### Added
+- sd_notify lifecycle notifications (STOPPING, READY)

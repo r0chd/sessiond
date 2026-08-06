@@ -227,9 +227,6 @@ impl crate::Sessiond {
         if let Err(err) = self.cgroup_manager.kill_session(session_id) {
             log::error!(session_id = session_id.as_raw(), err = err.to_string().as_str(); "kill failed");
         }
-        #[cfg(feature = "consolekit")]
-        self.sync_consolekit_session(session_id, entity);
-
         self.finish_session_destroy(session_id);
     }
 
@@ -248,9 +245,6 @@ impl crate::Sessiond {
         if let Err(err) = self.cgroup_manager.terminate_session(session_id) {
             log::error!(session_id = session_id.as_raw(), err = err.to_string().as_str(); "terminate failed");
         }
-        #[cfg(feature = "consolekit")]
-        self.sync_consolekit_session(session_id, entity);
-
         self.finish_session_destroy(session_id);
     }
 
@@ -467,7 +461,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for crate::Sessiond {
 
                 user::create_runtime_dir(uid, &self.user_config(&username).runtime_dir(uid));
 
-                let session_entity = spawn(
+                spawn(
                     &mut self.world,
                     session_id,
                     ecs::SessionClass::User,
@@ -479,11 +473,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for crate::Sessiond {
                     session_core_v1::ActiveState::Opening,
                     Some(session_management_session),
                 );
-                #[cfg(not(feature = "consolekit"))]
-                let _ = session_entity;
 
-                #[cfg(feature = "consolekit")]
-                self.sync_consolekit_session(session_id, session_entity);
                 user::sync_all(&mut self.world);
             }
         }
@@ -570,8 +560,6 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                     session_env.0 = pending_env;
                 }
 
-                #[cfg(feature = "consolekit")]
-                self.sync_consolekit_session(session_id, session_entity);
                 user::sync_all(&mut self.world);
 
                 object.send_session_id(session_id.as_raw());
@@ -652,8 +640,6 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                     };
 
                 set_active_state(&mut self.world, entity, active_state);
-                #[cfg(feature = "consolekit")]
-                self.sync_consolekit_session(session_id, entity);
                 user::sync_all(&mut self.world);
 
                 object.send_session_id(session_id.as_raw());

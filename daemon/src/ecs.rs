@@ -27,6 +27,10 @@ pub struct SessionInfoManagers(pub Vec<session_core_manager::SessionCoreManager>
 #[derive(Resource, Default)]
 pub struct PowerManagers(pub Vec<session_power_v1::session_power_manager::SessionPowerManager>);
 
+#[cfg(feature = "consolekit")]
+#[derive(Resource)]
+pub struct ConsoleKit(pub crate::consolekit::Server);
+
 #[derive(Resource, Default)]
 pub struct NotifyBatch {
     pub sessions: Vec<Entity>,

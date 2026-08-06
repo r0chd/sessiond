@@ -103,8 +103,6 @@ impl Access {
 
 struct Sessiond {
     cgroup_manager: cgroup::CgroupManager,
-    #[cfg(feature = "consolekit")]
-    consolekit: consolekit::Server,
     shutting_down: bool,
     loop_signal: calloop::LoopSignal,
     world: World,
@@ -119,15 +117,11 @@ impl Sessiond {
             .remove_session_objects(entity);
         self.world.despawn(entity);
         #[cfg(feature = "consolekit")]
-        self.consolekit.remove_session(session_id);
+        self.world
+            .resource::<ecs::ConsoleKit>()
+            .0
+            .remove_session(session_id);
         Some(entity)
-    }
-
-    #[cfg(feature = "consolekit")]
-    fn sync_consolekit_session(&self, session_id: session::SessionId, entity: Entity) {
-        if let Some(info) = consolekit::SessionInfo::from_world(&self.world, entity, session_id) {
-            self.consolekit.upsert_session(info);
-        }
     }
 }
 
@@ -178,8 +172,6 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
 
     let mut sessiond = Sessiond {
         cgroup_manager: cgroup::CgroupManager::new(event_loop.handle())?,
-        #[cfg(feature = "consolekit")]
-        consolekit: consolekit::Server::start(consolekit_power_sender),
         shutting_down: false,
         loop_signal,
         world: World::new(),
@@ -198,6 +190,10 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
     sessiond
         .world
         .insert_resource(ecs::PowerManagers::default());
+    #[cfg(feature = "consolekit")]
+    sessiond.world.insert_resource(ecs::ConsoleKit(
+        consolekit::Server::start(consolekit_power_sender),
+    ));
     ecs::init_resources(&mut sessiond.world);
 
     sessiond.world.insert_resource(access_rules);
@@ -323,14 +319,6 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
                             if active_state.0 != desired {
                                 active_state.0 = desired;
                             }
-                        }
-                    }
-
-                    // TODO: move this into ECS reconciliation
-                    #[cfg(feature = "consolekit")]
-                    for entity in session::entities(&state.world) {
-                        if let Some(session_id) = session::id(&state.world, entity) {
-                            state.sync_consolekit_session(session_id, entity);
                         }
                     }
                 }

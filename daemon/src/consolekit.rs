@@ -1,6 +1,5 @@
-use crate::{ecs, power, session, session_core_v1};
+use crate::{power, session, session_core_v1};
 use power::{PowerAction, PowerError};
-use bevy_ecs::{entity, world};
 use calloop::channel;
 use rustix::process;
 use std::collections::HashMap;
@@ -25,22 +24,6 @@ pub struct SessionInfo {
     pub timestamp: time::SystemTime,
     pub is_local: bool,
     pub active: session_core_v1::ActiveState,
-}
-
-impl SessionInfo {
-    pub fn from_world(
-        world: &world::World,
-        entity: entity::Entity,
-        id: session::SessionId,
-    ) -> Option<Self> {
-        Some(Self {
-            id,
-            uid: world.get::<ecs::Uid>(entity)?.0,
-            timestamp: world.get::<ecs::Timestamp>(entity)?.0,
-            is_local: world.get::<ecs::IsLocal>(entity).is_some(),
-            active: world.get::<ecs::ActiveState>(entity)?.0,
-        })
-    }
 }
 
 pub struct Server {

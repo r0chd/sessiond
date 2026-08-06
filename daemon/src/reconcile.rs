@@ -10,11 +10,38 @@ pub fn notify_schedule() -> Schedule {
             notify_session_active_states,
             notify_user_states,
             power::notify_power_control,
+            #[cfg(feature = "consolekit")]
+            sync_consolekit_sessions,
         )
             .before(send_done),
     );
     schedule.add_systems(send_done);
     schedule
+}
+
+#[cfg(feature = "consolekit")]
+fn sync_consolekit_sessions(
+    consolekit: Res<ecs::ConsoleKit>,
+    sessions: Query<
+        (
+            &ecs::SessionId,
+            &ecs::Uid,
+            &ecs::Timestamp,
+            Option<&ecs::IsLocal>,
+            &ecs::ActiveState,
+        ),
+        (With<ecs::Session>, Or<(Added<ecs::Session>, Changed<ecs::ActiveState>)>),
+    >,
+) {
+    for (session_id, uid, timestamp, is_local, active_state) in &sessions {
+        consolekit.0.upsert_session(crate::consolekit::SessionInfo {
+            id: session_id.0,
+            uid: uid.0,
+            timestamp: timestamp.0,
+            is_local: is_local.is_some(),
+            active: active_state.0,
+        });
+    }
 }
 
 fn notify_session_active_states(

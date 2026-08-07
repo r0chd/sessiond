@@ -386,6 +386,17 @@ fn main() -> anyhow::Result<()> {
     while state.sessions.iter().any(|s| !s.done) {
         queue.dispatch_events(&mut state, true)?;
     }
+
+    if matches!(&cli.command, Command::User { .. }) {
+        let uids: Vec<_> = state.sessions.iter().map(|s| s.uid).collect();
+        for uid in uids {
+            state.user(&manager, uid);
+        }
+        while state.users.iter().any(|u| !u.done) {
+            queue.dispatch_events(&mut state, true)?;
+        }
+    }
+
     match cli.command {
         Command::Session {
             command: SessionCommand::List { json: output_json },
@@ -445,13 +456,6 @@ fn main() -> anyhow::Result<()> {
         Command::User {
             command: UserCommand::List { json: output_json },
         } => {
-            let uids: Vec<_> = state.sessions.iter().map(|s| s.uid).collect();
-            for uid in uids {
-                state.user(&manager, uid);
-            }
-            while state.users.iter().any(|u| !u.done) {
-                queue.dispatch_events(&mut state, true)?;
-            }
             if output_json {
                 return json(
                     &json!({"users": state.users.iter().map(|u| json!({"uid":u.uid,"username":u.username,"state":user_state_name(u.state),"lingering":u.lingering})).collect::<Vec<_>>() }),

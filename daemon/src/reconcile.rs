@@ -1,5 +1,5 @@
 #![allow(clippy::needless_pass_by_value, clippy::type_complexity)]
-use crate::{ecs, power};
+use crate::{ecs, power, state};
 use bevy_ecs::prelude::*;
 use std::mem;
 
@@ -7,6 +7,7 @@ pub fn notify_schedule() -> Schedule {
     let mut schedule = Schedule::new(ecs::Notify);
     schedule.add_systems(
         (
+            state::write_state,
             notify_session_active_states,
             notify_user_states,
             power::notify_power_control,
@@ -30,7 +31,10 @@ fn sync_consolekit_sessions(
             Option<&ecs::IsLocal>,
             &ecs::ActiveState,
         ),
-        (With<ecs::Session>, Or<(Added<ecs::Session>, Changed<ecs::ActiveState>)>),
+        (
+            With<ecs::Session>,
+            Or<(Added<ecs::Session>, Changed<ecs::ActiveState>)>,
+        ),
     >,
 ) {
     for (session_id, uid, timestamp, is_local, active_state) in &sessions {

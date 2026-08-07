@@ -21,6 +21,9 @@ in
         ExecStart = "${cfg.package}/bin/sessiond --config ${daemonConfig}";
         Environment = "LOG_LEVEL=${cfg.logLevel}";
         Delegate = true;
+        RuntimeDirectory = "sessiond";
+        RuntimeDirectoryMode = "0755";
+        RuntimeDirectoryPreserve = "restart";
       };
     };
 

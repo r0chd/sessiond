@@ -97,7 +97,7 @@ sessiondTest {
     machine.wait_for_console_text("finix - stage 2")
     machine.wait_for_console_text("entering runlevel 2")
 
-    machine.wait_until_succeeds("test -S /run/sessiond.sock")
+    machine.wait_until_succeeds("test -S /run/sessiond/sessiond.sock")
     machine.wait_until_succeeds("test -S /run/dbus/system_bus_socket")
     machine.wait_for_console_text("__SESSIOND_TEST_LOGIN_READY__:user_1")
     machine.succeed("sessionctl session list --json > /tmp/sessions.json")

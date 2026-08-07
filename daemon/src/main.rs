@@ -49,7 +49,7 @@ use std::{env, fs, path};
 
 #[derive(Parser)]
 struct Args {
-    #[arg(long, default_value = "/run/sessiond.sock")]
+    #[arg(long, default_value = "/run/sessiond/sessiond.sock")]
     socket_path: path::PathBuf,
     #[arg(short, long, help = "Path to configuration file")]
     config: Option<path::PathBuf>,
@@ -191,9 +191,11 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
         .world
         .insert_resource(ecs::PowerManagers::default());
     #[cfg(feature = "consolekit")]
-    sessiond.world.insert_resource(ecs::ConsoleKit(
-        consolekit::Server::start(consolekit_power_sender),
-    ));
+    sessiond
+        .world
+        .insert_resource(ecs::ConsoleKit(consolekit::Server::start(
+            consolekit_power_sender,
+        )));
     ecs::init_resources(&mut sessiond.world);
 
     sessiond.world.insert_resource(access_rules);
@@ -212,8 +214,13 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
     }
     sessiond.world.clear_trackers();
 
+    if let Some(parent) = socket_path.parent() {
+        fs::create_dir_all(parent)?;
+        fs::set_permissions(parent, fs::Permissions::from_mode(0o755))?;
+    }
+
     let mut socket = server::Server::bind(&socket_path)?;
-    fs::set_permissions(socket_path, fs::Permissions::from_mode(0o777))?;
+    fs::set_permissions(socket_path, fs::Permissions::from_mode(0o666))?;
 
     socket.add_implementation::<session_management_v1::SessionManagementV1, _>(&mut sessiond, 1);
     socket.add_implementation::<session_management_v2::SessionManagementV2, _>(&mut sessiond, 1);

@@ -49,7 +49,7 @@ impl PamServiceModule for Pam {
                 done: false,
             };
 
-            let mut socket = client::Client::connect("/run/sessiond.sock")
+            let mut socket = client::Client::connect("/run/sessiond/sessiond.sock")
                 .map_err(|_| pamsm::PamError::SESSION_ERR)?;
             let event_queue = socket.new_event_queue();
 
@@ -156,7 +156,7 @@ impl PamServiceModule for Pam {
                 done: false,
             };
 
-            let mut socket = client::Client::connect("/run/sessiond.sock")
+            let mut socket = client::Client::connect("/run/sessiond/sessiond.sock")
                 .map_err(|_| pamsm::PamError::SESSION_ERR)?;
             let event_queue = socket.new_event_queue();
 

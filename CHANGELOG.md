@@ -11,6 +11,9 @@ Initial public release of `sessiond`.
 
 ## UNRELEASED
 
+### Changed
+- Changed the default sessiond socket path to `/run/sessiond/sessiond.sock`
+
 ### Removed
 - Removed seat management in favor of separate seat client
 

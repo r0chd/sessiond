@@ -80,7 +80,7 @@ sessiondTest {
     machine.wait_for_console_text("finix - stage 1")
     machine.wait_for_console_text("finix - stage 2")
     machine.wait_for_console_text("entering runlevel 2")
-    machine.wait_until_succeeds("test -S /run/sessiond.sock")
+    machine.wait_until_succeeds("test -S /run/sessiond/sessiond.sock")
 
     def wait_session_count(count):
         machine.wait_until_succeeds(f"sessionctl session list --json > /tmp/sessions.json && jq -e '.sessions | length == {count}' /tmp/sessions.json >/dev/null")

@@ -85,7 +85,7 @@ sessiondTest {
     machine.wait_for_console_text("finix - stage 2")
     machine.wait_for_console_text("entering runlevel 2")
 
-    machine.wait_until_succeeds("test -S /run/sessiond.sock")
+    machine.wait_until_succeeds("test -S /run/sessiond/sessiond.sock")
     machine.succeed("test -x ${sessiondPackage}/bin/sessiond")
     machine.succeed("pam_path=$(awk '/pam_sessiond.so/ {print $3}' /etc/pam.d/login); test -e \"$pam_path\"")
 

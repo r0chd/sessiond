@@ -300,7 +300,7 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
     let mut state = State::default();
-    let mut socket = client::Client::connect("/run/sessiond.sock")?;
+    let mut socket = client::Client::connect("/run/sessiond/sessiond.sock")?;
     let queue = socket.new_event_queue();
     socket.add_implementation::<session_core_v1::SessionCoreV1>();
     socket.add_implementation::<session_power_v1::SessionPowerV1>();

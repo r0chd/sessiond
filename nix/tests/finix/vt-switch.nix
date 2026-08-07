@@ -87,7 +87,7 @@ sessiondTest {
     machine.wait_for_console_text("finix - stage 2")
     machine.wait_for_console_text("entering runlevel 2")
 
-    machine.wait_until_succeeds("test -S /run/sessiond.sock")
+    machine.wait_until_succeeds("test -S /run/sessiond/sessiond.sock")
 
     machine.succeed("chvt 1")
     machine.wait_until_succeeds("fgconsole | grep -qx 1")

@@ -9,13 +9,12 @@ mod session_power_v1 {
 }
 
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
-use clap_complete::{Shell, generate};
-use clap_complete_nushell::Nushell;
+use comfy_table::presets;
 use hyprwire::client;
 use serde_json::json;
 use session_core_v1::{session_core_manager, session_core_session, session_core_user};
 use session_power_v1::session_power_manager;
-use std::io;
+use std::{io, time};
 
 struct Session {
     object: Option<session_core_session::SessionCoreSession>,
@@ -238,12 +237,42 @@ impl CompletionShell {
     fn generate(self, command: &mut clap::Command) {
         let mut stdout = io::stdout();
         match self {
-            Self::Bash => generate(Shell::Bash, command, "sessionctl", &mut stdout),
-            Self::Elvish => generate(Shell::Elvish, command, "sessionctl", &mut stdout),
-            Self::Fish => generate(Shell::Fish, command, "sessionctl", &mut stdout),
-            Self::Nushell => generate(Nushell, command, "sessionctl", &mut stdout),
-            Self::Powershell => generate(Shell::PowerShell, command, "sessionctl", &mut stdout),
-            Self::Zsh => generate(Shell::Zsh, command, "sessionctl", &mut stdout),
+            Self::Bash => clap_complete::generate(
+                clap_complete::Shell::Bash,
+                command,
+                "sessionctl",
+                &mut stdout,
+            ),
+            Self::Elvish => clap_complete::generate(
+                clap_complete::Shell::Elvish,
+                command,
+                "sessionctl",
+                &mut stdout,
+            ),
+            Self::Fish => clap_complete::generate(
+                clap_complete::Shell::Fish,
+                command,
+                "sessionctl",
+                &mut stdout,
+            ),
+            Self::Nushell => clap_complete::generate(
+                clap_complete_nushell::Nushell,
+                command,
+                "sessionctl",
+                &mut stdout,
+            ),
+            Self::Powershell => clap_complete::generate(
+                clap_complete::Shell::PowerShell,
+                command,
+                "sessionctl",
+                &mut stdout,
+            ),
+            Self::Zsh => clap_complete::generate(
+                clap_complete::Shell::Zsh,
+                command,
+                "sessionctl",
+                &mut stdout,
+            ),
         }
     }
 }
@@ -286,6 +315,40 @@ const fn user_state_name(s: session_core_v1::UserState) -> &'static str {
         session_core_v1::UserState::Active => "active",
         session_core_v1::UserState::Closing => "closing",
     }
+}
+
+fn format_since(timestamp: u32) -> String {
+    let Some(start) = time::UNIX_EPOCH.checked_add(time::Duration::from_secs(u64::from(timestamp)))
+    else {
+        return String::from("?");
+    };
+    let Ok(elapsed) = start.elapsed() else {
+        return String::from("?");
+    };
+
+    let seconds = elapsed.as_secs();
+    let hours = seconds / 3600;
+    let minutes = (seconds % 3600) / 60;
+    let seconds = seconds % 60;
+    if hours > 0 {
+        format!("{hours}h {minutes}min ago")
+    } else if minutes > 0 {
+        format!("{minutes}min {seconds}s ago")
+    } else {
+        format!("{seconds}s ago")
+    }
+}
+
+fn new_table() -> comfy_table::Table {
+    let mut table = comfy_table::Table::new();
+    table.load_preset(presets::NOTHING);
+    table
+        .set_style(comfy_table::TableComponent::LeftHeaderIntersection, '─')
+        .set_style(comfy_table::TableComponent::HeaderLines, '─')
+        .set_style(comfy_table::TableComponent::MiddleHeaderIntersections, '─')
+        .set_style(comfy_table::TableComponent::RightHeaderIntersection, '─')
+        .set_style(comfy_table::TableComponent::VerticalLines, '│');
+    table
 }
 
 fn json(v: &serde_json::Value) -> anyhow::Result<()> {
@@ -332,22 +395,30 @@ fn main() -> anyhow::Result<()> {
                     &json!({ "sessions": state.sessions.iter().map(|s| json!({"id":s.id,"uid":s.uid,"username":s.username,"class":class_name(s.class),"vt":s.vt,"tty":s.vt.checked_sub(1).map(|_| format!("tty{}", s.vt)),"leader":s.leader,"timestamp":s.timestamp,"active":active_name(s.active),"can_modify":s.can_modify})).collect::<Vec<_>>() }),
                 );
             }
-            println!("  ID  UID  USER  CLASS  TTY  STATE");
+
+            if state.sessions.is_empty() {
+                println!("No active sessions.");
+                return Ok(());
+            }
+
+            let mut table = new_table();
+            table.set_header(["ID", "UID", "USER", "CLASS", "TTY", "STATE", "SINCE"]);
             for s in state.sessions {
-                println!(
-                    "  {:<3} {:<4} {:<5} {:<6} {:<4} {}",
-                    s.id,
-                    s.uid,
+                table.add_row([
+                    s.id.to_string(),
+                    s.uid.to_string(),
                     s.username,
-                    class_name(s.class),
+                    class_name(s.class).to_owned(),
                     if s.vt == 0 {
-                        "-".into()
+                        "-".to_owned()
                     } else {
                         format!("tty{}", s.vt)
                     },
-                    active_name(s.active)
-                );
+                    active_name(s.active).to_owned(),
+                    format_since(s.timestamp),
+                ]);
             }
+            println!("{table}");
         }
         Command::Session {
             command: SessionCommand::Close { ids },
@@ -386,9 +457,20 @@ fn main() -> anyhow::Result<()> {
                     &json!({"users": state.users.iter().map(|u| json!({"uid":u.uid,"username":u.username,"state":user_state_name(u.state),"lingering":u.lingering})).collect::<Vec<_>>() }),
                 );
             }
-            for u in state.users {
-                println!("{} {} {}", u.uid, u.username, user_state_name(u.state));
+            if state.users.is_empty() {
+                return Ok(());
             }
+            let mut table = new_table();
+            table.set_header(["UID", "USER", "STATE", "LINGERING"]);
+            for u in state.users {
+                table.add_row([
+                    u.uid.to_string(),
+                    u.username,
+                    user_state_name(u.state).to_owned(),
+                    u.lingering.to_string(),
+                ]);
+            }
+            println!("{table}");
         }
         Command::User {
             command: UserCommand::Terminate { uids },

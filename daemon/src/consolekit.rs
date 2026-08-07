@@ -1,6 +1,6 @@
 use crate::{power, session, session_core_v1};
-use power::{PowerAction, PowerError};
 use calloop::channel;
+use power::{PowerAction, PowerError};
 use rustix::process;
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -181,30 +181,20 @@ impl Manager {
 }
 
 impl Manager {
-    fn execute_power(
-        &self,
-        action: PowerAction,
-        header: &message::Header<'_>,
-    ) -> fdo::Result<()> {
+    fn execute_power(&self, action: PowerAction, header: &message::Header<'_>) -> fdo::Result<()> {
         match self.send_power_request(PowerRequestKind::Execute(action), header)? {
             PowerResponse::Done(Ok(())) => Ok(()),
             PowerResponse::Done(Err(PowerError::ActiveSessions(message))) => {
                 Err(fdo::Error::AccessDenied(message))
             }
-            PowerResponse::Done(Err(PowerError::Io(message))) => {
-                Err(fdo::Error::Failed(message))
-            }
+            PowerResponse::Done(Err(PowerError::Io(message))) => Err(fdo::Error::Failed(message)),
             PowerResponse::Can(_) => Err(fdo::Error::Failed(
                 "unexpected ConsoleKit power response".to_string(),
             )),
         }
     }
 
-    fn can_power(
-        &self,
-        action: PowerAction,
-        header: &message::Header<'_>,
-    ) -> fdo::Result<bool> {
+    fn can_power(&self, action: PowerAction, header: &message::Header<'_>) -> fdo::Result<bool> {
         match self.send_power_request(PowerRequestKind::Can(action), header)? {
             PowerResponse::Can(can) => Ok(can),
             PowerResponse::Done(_) => Err(fdo::Error::Failed(

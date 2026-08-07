@@ -27,6 +27,7 @@ mod ecs;
 mod power;
 mod reconcile;
 mod session;
+mod state;
 mod terminal;
 mod user;
 mod vt;
@@ -45,12 +46,12 @@ use session_core_v1::session_core_user;
 use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
-use std::{env, fs, path};
+use std::{env, fs, num, path};
 
 #[derive(Parser)]
 struct Args {
-    #[arg(long, default_value = "/run/sessiond/sessiond.sock")]
-    socket_path: path::PathBuf,
+    #[arg(long, default_value = "/run/sessiond")]
+    runtime_dir: path::PathBuf,
     #[arg(short, long, help = "Path to configuration file")]
     config: Option<path::PathBuf>,
     #[arg(long, value_enum, default_value_t = LogTarget::Stderr)]
@@ -140,7 +141,7 @@ fn notify(message: &[u8]) -> rustix::io::Result<()> {
     Ok(())
 }
 
-fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
+fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
     let mut event_loop = calloop::EventLoop::try_new()?;
     let loop_signal = event_loop.get_signal();
     #[cfg(feature = "consolekit")]
@@ -200,6 +201,10 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
 
     sessiond.world.insert_resource(access_rules);
     sessiond.world.insert_resource(ecs::DaemonConfig(config));
+    let state_path = runtime_dir.join("state.toml");
+    sessiond
+        .world
+        .insert_resource(state::StateWriter(state_path.clone()));
 
     for (uid, runtime_dir) in lingering_users {
         user::create(&mut sessiond.world, uid, true);
@@ -214,11 +219,80 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
     }
     sessiond.world.clear_trackers();
 
-    if let Some(parent) = socket_path.parent() {
-        fs::create_dir_all(parent)?;
-        fs::set_permissions(parent, fs::Permissions::from_mode(0o755))?;
+    fs::create_dir_all(runtime_dir)?;
+    fs::set_permissions(runtime_dir, fs::Permissions::from_mode(0o755))?;
+
+    if state_path.exists() {
+        match state::State::load(&state_path) {
+            Ok(saved_state) => {
+                sessiond.world.resource_mut::<ecs::NextSessionId>().0 =
+                    session::SessionId::from_raw(saved_state.next_session_id);
+                vt::refresh_current_vts(&mut sessiond.world);
+
+                for (raw_id, saved_session) in saved_state.sessions {
+                    let Ok(raw_id) = raw_id.parse::<u32>() else {
+                        log::warn!(session_id = raw_id.as_str(); "ignoring invalid session ID in state");
+                        continue;
+                    };
+                    let session_id = session::SessionId::from_raw(raw_id);
+
+                    if let Err(error) = sessiond
+                        .cgroup_manager
+                        .restore_session_cgroup(saved_session.uid, session_id)
+                    {
+                        log::warn!(session_id = raw_id, error = error.to_string().as_str(); "ignoring session with an unusable cgroup");
+                        continue;
+                    }
+
+                    user::create_runtime_dir(
+                        saved_session.uid,
+                        &sessiond
+                            .user_config(&saved_session.username)
+                            .runtime_dir(saved_session.uid),
+                    );
+
+                    let active_state = if saved_session
+                        .vt
+                        .and_then(num::NonZeroU32::new)
+                        .is_some_and(|vt| vt::current_vt().ok() == Some(vt))
+                        && saved_session.remote_host.is_none()
+                    {
+                        session_core_v1::ActiveState::Active
+                    } else {
+                        session_core_v1::ActiveState::Online
+                    };
+
+                    let entity = session::spawn(
+                        &mut sessiond.world,
+                        session_id,
+                        saved_session.class(),
+                        saved_session.uid,
+                        saved_session.username.clone(),
+                        saved_session.vt,
+                        saved_session.leader,
+                        saved_session.remote_host.clone(),
+                        active_state,
+                        None,
+                    );
+                    sessiond
+                        .world
+                        .entity_mut(entity)
+                        .insert(ecs::Timestamp(saved_session.timestamp()));
+                    sessiond
+                        .world
+                        .entity_mut(entity)
+                        .insert(ecs::SessionEnv(saved_session.env.clone()));
+                }
+
+                user::sync_all(&mut sessiond.world);
+            }
+            Err(error) => {
+                log::error!(error = error.to_string().as_str(); "failed to load session state");
+            }
+        }
     }
 
+    let socket_path = runtime_dir.join("sessiond.sock");
     let mut socket = server::Server::bind(&socket_path)?;
     fs::set_permissions(socket_path, fs::Permissions::from_mode(0o666))?;
 
@@ -339,24 +413,7 @@ fn run(socket_path: &path::Path, config: config::Config) -> anyhow::Result<()> {
                     }
 
                     state.shutting_down = true;
-
-                    for session_id in session::entities(&state.world)
-                        .into_iter()
-                        .filter_map(|entity| state.world.get::<ecs::SessionId>(entity))
-                    {
-                        if let Err(err) = state.cgroup_manager.terminate_session(session_id.0) {
-                            log::error!(
-                                session_id = session_id.0.as_raw(),
-                                error = err.to_string().as_str();
-                                "failed to terminate session during shutdown"
-                            );
-                        }
-                    }
-
-                    if state.cgroup_manager.is_empty() {
-                        state.loop_signal.stop();
-                    }
-
+                    state.loop_signal.stop();
                     return;
                 }
                 _ => unreachable!(),
@@ -405,7 +462,7 @@ fn main() -> anyhow::Result<()> {
 
     log::info!("sessiond daemon starting");
 
-    run(&args.socket_path, config::Config::load(args.config)?)
+    run(&args.runtime_dir, config::Config::load(args.config)?)
 }
 
 fn resolve_user(user: &str) -> anyhow::Result<process::Uid> {

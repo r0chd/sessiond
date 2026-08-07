@@ -90,6 +90,31 @@ impl CgroupManager {
         Ok(())
     }
 
+    pub(crate) fn restore_session_cgroup(
+        &mut self,
+        uid: u32,
+        session_id: session::SessionId,
+    ) -> anyhow::Result<()> {
+        let user_cgroup_path = self.user_cgroup_path(uid)?;
+        let session_cgroup_path = user_cgroup_path.join(format!("session-{}", session_id.as_raw()));
+        if !session_cgroup_path.exists() {
+            anyhow::bail!("session cgroup does not exist");
+        }
+
+        let events = fs::read_to_string(session_cgroup_path.join("cgroup.events"))?;
+        if events.contains("populated 0") {
+            anyhow::bail!("session cgroup is empty");
+        }
+
+        self.cgroups.push(Cgroup {
+            session_id,
+            uid,
+            path: session_cgroup_path,
+        });
+
+        Ok(())
+    }
+
     fn poll_destroy(&self, session_id: session::SessionId) -> anyhow::Result<()> {
         let cgroup = self
             .cgroups

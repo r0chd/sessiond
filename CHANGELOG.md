@@ -9,7 +9,7 @@ Initial public release of `sessiond`.
 ### Added
 - Added a DBus system policy for the ConsoleKit interface
 
-## UNRELEASED
+## v0.2.0 - 2026-08-08
 
 ### Changed
 - Changed the default sessiond socket path to `/run/sessiond/sessiond.sock`

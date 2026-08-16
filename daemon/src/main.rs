@@ -103,7 +103,6 @@ impl Access {
 }
 
 struct Sessiond {
-    cgroup_manager: cgroup::CgroupManager,
     shutting_down: bool,
     loop_signal: calloop::LoopSignal,
     world: World,
@@ -171,45 +170,59 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
         })
         .collect::<Vec<_>>();
 
+    let mut world = World::new();
+    world.init_resource::<ecs::PendingSessionEnvs>();
+    world.insert_resource(ecs::NextSessionId(session::SessionId::from_raw(1)));
+    world.init_resource::<ecs::SessionInfoManagers>();
+    world.init_resource::<ecs::PowerManagers>();
+    world.init_resource::<ecs::ProtocolObjects>();
+    world.init_resource::<ecs::NotifyBatch>();
+    world.insert_resource(access_rules);
+    world.insert_resource(cgroup::CgroupManager::new()?);
+    world.insert_resource(ecs::DaemonConfig(config));
+    let state_path = runtime_dir.join("state.toml");
+    world.insert_resource(state::StateWriter(state_path.clone()));
+    world.insert_non_send(event_loop.handle());
+    #[cfg(feature = "consolekit")]
+    world.insert_resource(ecs::ConsoleKit(consolekit::Server::start(
+        consolekit_power_sender,
+    )));
+
+    let mut schedule = Schedule::new(ecs::Notify);
+    schedule.add_systems(
+        user::reconcile_user_states
+            .before(state::write_state)
+            .before(reconcile::notify_session_active_states)
+            .before(power::notify_power_control)
+            .before(reconcile::send_done),
+    );
+    schedule.add_systems(
+        (
+            state::write_state,
+            reconcile::notify_session_active_states,
+            power::notify_power_control,
+            #[cfg(feature = "consolekit")]
+            reconcile::sync_consolekit_sessions,
+        )
+            .before(reconcile::send_done),
+    );
+    schedule.add_systems(reconcile::send_done);
+
     let mut sessiond = Sessiond {
-        cgroup_manager: cgroup::CgroupManager::new(event_loop.handle())?,
         shutting_down: false,
         loop_signal,
-        world: World::new(),
-        notify_schedule: reconcile::notify_schedule(),
+        world,
+        notify_schedule: schedule,
     };
-
-    sessiond
-        .world
-        .insert_resource(ecs::PendingSessionEnvs::default());
-    sessiond
-        .world
-        .insert_resource(ecs::NextSessionId(session::SessionId::from_raw(1)));
-    sessiond
-        .world
-        .insert_resource(ecs::SessionInfoManagers::default());
-    sessiond
-        .world
-        .insert_resource(ecs::PowerManagers::default());
-    #[cfg(feature = "consolekit")]
-    sessiond
-        .world
-        .insert_resource(ecs::ConsoleKit(consolekit::Server::start(
-            consolekit_power_sender,
-        )));
-    ecs::init_resources(&mut sessiond.world);
-
-    sessiond.world.insert_resource(access_rules);
-    sessiond.world.insert_resource(ecs::DaemonConfig(config));
-    let state_path = runtime_dir.join("state.toml");
-    sessiond
-        .world
-        .insert_resource(state::StateWriter(state_path.clone()));
 
     for (uid, runtime_dir) in lingering_users {
         user::create(&mut sessiond.world, uid, true);
         user::create_runtime_dir(uid, &runtime_dir);
-        if let Err(e) = sessiond.cgroup_manager.ensure_user_cgroup(uid) {
+        if let Err(e) = sessiond
+            .world
+            .resource::<cgroup::CgroupManager>()
+            .ensure_user_cgroup(uid)
+        {
             log::error!(
                 uid,
                 error = e.to_string().as_str();
@@ -237,7 +250,8 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
                     let session_id = session::SessionId::from_raw(raw_id);
 
                     if let Err(error) = sessiond
-                        .cgroup_manager
+                        .world
+                        .resource_mut::<cgroup::CgroupManager>()
                         .restore_session_cgroup(saved_session.uid, session_id)
                     {
                         log::warn!(session_id = raw_id, error = error.to_string().as_str(); "ignoring session with an unusable cgroup");
@@ -283,8 +297,6 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
                         .entity_mut(entity)
                         .insert(ecs::SessionEnv(saved_session.env.clone()));
                 }
-
-                user::sync_all(&mut sessiond.world);
             }
             Err(error) => {
                 log::error!(error = error.to_string().as_str(); "failed to load session state");
@@ -312,7 +324,7 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
     );
     event_loop
         .handle()
-        .insert_source(source, move |_, _, state| {
+        .insert_source(source, move |_, _, state: &mut Sessiond| {
             if state.shutting_down {
                 return Ok(calloop::PostAction::Continue);
             }
@@ -346,80 +358,75 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
 
     event_loop
         .handle()
-        .insert_source(signals, move |event, (), state| {
-            match event.signal() {
-                signals::Signal::SIGUSR1 | signals::Signal::SIGUSR2 => {
-                    let terminal = match terminal::Terminal::open(0) {
-                        Ok(terminal) => terminal,
-                        Err(error) => {
+        .insert_source(signals, move |event, (), state| match event.signal() {
+            signals::Signal::SIGUSR1 | signals::Signal::SIGUSR2 => {
+                let terminal = match terminal::Terminal::open(0) {
+                    Ok(terminal) => terminal,
+                    Err(error) => {
+                        log::error!(
+                            error = error.to_string().as_str();
+                            "failed to open terminal to handle VT signal"
+                        );
+                        return;
+                    }
+                };
+
+                match event.signal() {
+                    signals::Signal::SIGUSR1 => {
+                        if let Err(error) = terminal.ack_release() {
                             log::error!(
                                 error = error.to_string().as_str();
-                                "failed to open terminal to handle VT signal"
+                                "failed to acknowledge VT release"
                             );
-                            return;
                         }
-                    };
-
-                    match event.signal() {
-                        signals::Signal::SIGUSR1 => {
-                            if let Err(error) = terminal.ack_release() {
-                                log::error!(
-                                    error = error.to_string().as_str();
-                                    "failed to acknowledge VT release"
-                                );
-                            }
-                            return;
-                        }
-                        signals::Signal::SIGUSR2 => {
-                            if let Err(error) = terminal.ack_acquire() {
-                                log::error!(
-                                    error = error.to_string().as_str();
-                                    "failed to acknowledge VT acquire"
-                                );
-                            }
-                        }
-                        _ => return,
-                    }
-                    let Ok(current) = vt::current_vt() else {
                         return;
-                    };
+                    }
+                    signals::Signal::SIGUSR2 => {
+                        if let Err(error) = terminal.ack_acquire() {
+                            log::error!(
+                                error = error.to_string().as_str();
+                                "failed to acknowledge VT acquire"
+                            );
+                        }
+                    }
+                    _ => return,
+                }
+                let Ok(current) = vt::current_vt() else {
+                    return;
+                };
 
-                    {
-                        let mut sessions = state.world.query_filtered::<(
+                {
+                    let mut sessions = state.world.query_filtered::<(
                             &ecs::Vt,
                             &ecs::IsLocal,
                             &mut ecs::ActiveState,
                         ), With<ecs::Session>>(
                         );
-                        for (vt, _, mut active_state) in sessions.iter_mut(&mut state.world) {
-                            let desired = if vt.0 == current {
-                                session_core_v1::ActiveState::Active
-                            } else {
-                                session_core_v1::ActiveState::Online
-                            };
-                            if active_state.0 != desired {
-                                active_state.0 = desired;
-                            }
+                    for (vt, _, mut active_state) in sessions.iter_mut(&mut state.world) {
+                        let desired = if vt.0 == current {
+                            session_core_v1::ActiveState::Active
+                        } else {
+                            session_core_v1::ActiveState::Online
+                        };
+                        if active_state.0 != desired {
+                            active_state.0 = desired;
                         }
                     }
                 }
-                signals::Signal::SIGTERM | signals::Signal::SIGINT => {
-                    if state.shutting_down {
-                        return;
-                    }
-
-                    if let Err(e) = notify(b"STOPPING=1\n") {
-                        log::warn!("Failed to send shutdown notification: {e}");
-                    }
-
-                    state.shutting_down = true;
-                    state.loop_signal.stop();
+            }
+            signals::Signal::SIGTERM | signals::Signal::SIGINT => {
+                if state.shutting_down {
                     return;
                 }
-                _ => unreachable!(),
-            }
 
-            user::sync_all(&mut state.world);
+                if let Err(e) = notify(b"STOPPING=1\n") {
+                    log::warn!("Failed to send shutdown notification: {e}");
+                }
+
+                state.shutting_down = true;
+                state.loop_signal.stop();
+            }
+            _ => unreachable!(),
         })?;
 
     terminal::Terminal::open(0)?.set_process_switching(true)?;

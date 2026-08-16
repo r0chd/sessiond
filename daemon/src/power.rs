@@ -1,5 +1,6 @@
 use crate::session_power_v1::session_power_manager;
 use crate::{ecs, session, session_power_v1};
+use bevy_ecs::prelude::*;
 use std::process;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,10 +50,35 @@ impl hyprwire::Handler<session_power_v1::SessionPowerV1> for crate::Sessiond {
     }
 }
 
-pub fn notify_power_control(world: &bevy_ecs::world::World) {
-    let managers = world.resource::<ecs::PowerManagers>();
-    for object in &managers.0 {
-        object.send_can_control(u32::from(can_control_power(world, object.client().creds())));
+pub fn notify_power_control(
+    power_managers: Res<ecs::PowerManagers>,
+    access_rules: Res<ecs::AccessRules>,
+    changed_sessions: Query<
+        (),
+        (
+            With<ecs::Session>,
+            Or<(
+                Added<ecs::Session>,
+                Changed<ecs::Uid>,
+                Changed<ecs::SessionClass>,
+            )>,
+        ),
+    >,
+    sessions: Query<(&ecs::Uid, &ecs::SessionClass), With<ecs::Session>>,
+    mut removed_sessions: RemovedComponents<ecs::Session>,
+) {
+    if changed_sessions.is_empty() && removed_sessions.read().next().is_none() {
+        return;
+    }
+
+    for object in &power_managers.0 {
+        let can_control = access_rules.management.allows(object.client().creds())
+            || sessions
+                .iter()
+                .filter(|(_, class)| **class == ecs::SessionClass::User)
+                .all(|(uid, _)| uid.0 == object.client().creds().uid.as_raw());
+
+        object.send_can_control(u32::from(can_control));
     }
 }
 

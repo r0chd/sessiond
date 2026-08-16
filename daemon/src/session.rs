@@ -1,7 +1,9 @@
 use crate::session_core_v1::{session_core_manager, session_core_session};
 use crate::session_management_v1::session_manager as session_manager_v1;
 use crate::session_management_v2::{session_management_session, session_manager};
-use crate::{config, ecs, session_core_v1, session_management_v1, session_management_v2, user, vt};
+use crate::{
+    cgroup, config, ecs, session_core_v1, session_management_v1, session_management_v2, user, vt,
+};
 use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 use hyprwire::server;
@@ -174,11 +176,9 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
         match event {
             session_core_session::Event::Terminate => {
                 self.terminate_session(entity);
-                user::sync_all(&mut self.world);
             }
             session_core_session::Event::Kill => {
                 self.kill_session(entity);
-                user::sync_all(&mut self.world);
             }
             session_core_session::Event::Lock => {
                 log::info!(session_id = session_id.as_raw(); "lock requested");
@@ -224,7 +224,17 @@ impl crate::Sessiond {
             entity,
             session_core_v1::ActiveState::Closing,
         );
-        if let Err(err) = self.cgroup_manager.kill_session(session_id) {
+        let Some(loop_handle) = self
+            .world
+            .get_non_send::<calloop::LoopHandle<'static, Self>>()
+        else {
+            return;
+        };
+        if let Err(err) = self
+            .world
+            .resource::<cgroup::CgroupManager>()
+            .kill_session(loop_handle, session_id)
+        {
             log::error!(session_id = session_id.as_raw(), err = err.to_string().as_str(); "kill failed");
         }
         self.finish_session_destroy(session_id);
@@ -242,7 +252,17 @@ impl crate::Sessiond {
             entity,
             session_core_v1::ActiveState::Closing,
         );
-        if let Err(err) = self.cgroup_manager.terminate_session(session_id) {
+        let Some(loop_handle) = self
+            .world
+            .get_non_send::<calloop::LoopHandle<'static, Self>>()
+        else {
+            return;
+        };
+        if let Err(err) = self
+            .world
+            .resource::<cgroup::CgroupManager>()
+            .terminate_session(loop_handle, session_id)
+        {
             log::error!(session_id = session_id.as_raw(), err = err.to_string().as_str(); "terminate failed");
         }
         self.finish_session_destroy(session_id);
@@ -271,7 +291,6 @@ impl crate::Sessiond {
             }
         }
         let _ = self.remove_session(session_id);
-        user::sync_all(&mut self.world);
 
         self.cleanup_user_runtime_dir(uid);
     }
@@ -281,7 +300,10 @@ impl crate::Sessiond {
             return;
         };
 
-        if !self.cgroup_manager.has_uid_sessions(uid)
+        if !self
+            .world
+            .resource::<cgroup::CgroupManager>()
+            .has_uid_sessions(uid)
             && !user::is_lingering(&self.world, uid)
             && entities_by_uid(&self.world, uid).is_empty()
             && let Err(e) = user::remove_runtime_dir(
@@ -353,7 +375,6 @@ pub fn add_object(
 
 pub fn sync_vt_session_states(world: &mut world::World) {
     vt::refresh_current_vts(world);
-    user::sync_all(world);
 }
 
 pub fn set_active_state(
@@ -451,7 +472,8 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for crate::Sessiond {
                 let leader_id = client.creds().pid.as_raw_pid();
 
                 if let Err(e) = self
-                    .cgroup_manager
+                    .world
+                    .resource_mut::<cgroup::CgroupManager>()
                     .create_session_cgroup(uid, session_id, leader_id)
                 {
                     log::error!(session_id = session_id.as_raw(), error = e.to_string().as_str(); "failed to create session cgroup");
@@ -473,8 +495,6 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for crate::Sessiond {
                     session_core_v1::ActiveState::Opening,
                     Some(session_management_session),
                 );
-
-                user::sync_all(&mut self.world);
             }
         }
     }
@@ -502,11 +522,11 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                     .unwrap_or_default();
                 log::info!(session_id = session_id.as_raw(), uid, username = username.as_str(), vt, is_local, remote_host = remote_host.as_str(); "session created");
 
-                if let Err(e) = self.cgroup_manager.create_session_cgroup(
-                    uid,
-                    session_id,
-                    client.creds().pid.as_raw_pid(),
-                ) {
+                if let Err(e) = self
+                    .world
+                    .resource_mut::<cgroup::CgroupManager>()
+                    .create_session_cgroup(uid, session_id, client.creds().pid.as_raw_pid())
+                {
                     log::error!(session_id = session_id.as_raw(), error = e.to_string().as_str(); "failed to create session cgroup");
                 }
 
@@ -559,8 +579,6 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                 {
                     session_env.0 = pending_env;
                 }
-
-                user::sync_all(&mut self.world);
 
                 object.send_session_id(session_id.as_raw());
                 for (name, value) in env {
@@ -640,7 +658,6 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                     };
 
                 set_active_state(&mut self.world, entity, active_state);
-                user::sync_all(&mut self.world);
 
                 object.send_session_id(session_id.as_raw());
                 if let (Some(uid), Some(username)) = (uid, username) {
@@ -678,6 +695,9 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                     .entity_mut(entity)
                     .insert(ecs::SessionClass::from(class));
             }
+            session_management_session::Event::DelegateCgroup {
+                session_management_cgroup,
+            } => {}
             session_management_session::Event::Destroy => {
                 self.terminate_session(entity);
             }
@@ -713,7 +733,11 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
             } => {
                 sync_vt_session_states(&mut self.world);
 
-                let Ok(Some(session_id)) = self.cgroup_manager.find_session_by_pid(pid) else {
+                let Ok(Some(session_id)) = self
+                    .world
+                    .resource::<cgroup::CgroupManager>()
+                    .find_session_by_pid(pid)
+                else {
                     log::warn!(pid; "get_session_by_pid: no session found for pid");
                     session_core_session.send_destroyed();
                     return;

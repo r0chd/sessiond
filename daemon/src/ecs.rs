@@ -1,10 +1,10 @@
+#[cfg(feature = "consolekit")]
+use crate::consolekit;
 use crate::session_core_v1::{session_core_manager, session_core_session, session_core_user};
 use crate::session_management_v1::session_manager;
 use crate::session_management_v2::session_management_session;
-use crate::{
-    config, session, session_core_v1, session_management_v1, session_management_v2,
-    session_power_v1,
-};
+use crate::session_power_v1::session_power_manager;
+use crate::{config, session, session_core_v1, session_management_v1, session_management_v2};
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::ScheduleLabel;
 use std::collections::{BTreeMap, HashMap};
@@ -25,11 +25,11 @@ pub struct DaemonConfig(pub config::Config);
 pub struct SessionInfoManagers(pub Vec<session_core_manager::SessionCoreManager>);
 
 #[derive(Resource, Default)]
-pub struct PowerManagers(pub Vec<session_power_v1::session_power_manager::SessionPowerManager>);
+pub struct PowerManagers(pub Vec<session_power_manager::SessionPowerManager>);
 
 #[cfg(feature = "consolekit")]
 #[derive(Resource)]
-pub struct ConsoleKit(pub crate::consolekit::Server);
+pub struct ConsoleKit(pub consolekit::Server);
 
 #[derive(Resource, Default)]
 pub struct NotifyBatch {
@@ -137,11 +137,6 @@ impl ProtocolObjects {
     }
 }
 
-pub fn init_resources(world: &mut World) {
-    world.insert_resource(ProtocolObjects::default());
-    world.insert_resource(NotifyBatch::default());
-}
-
 #[derive(Bundle)]
 pub struct SessionBundle {
     pub marker: Session,
@@ -165,28 +160,40 @@ pub struct UserBundle {
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Session;
+
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct User;
+
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Lingering;
+
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IsLocal;
+
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Uid(pub u32);
+
 #[derive(Component, Debug, Clone, PartialEq, Eq)]
 pub struct Username(pub String);
+
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SessionId(pub session::SessionId);
+
 #[derive(Component)]
 pub struct UserState(pub session_core_v1::UserState);
+
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Vt(pub num::NonZeroU32);
+
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Timestamp(pub time::SystemTime);
+
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LeaderId(pub i32);
+
 #[derive(Component, Debug, Clone, PartialEq, Eq)]
 pub struct RemoteHost(pub String);
+
 #[derive(Component)]
 pub struct SessionEnv(pub BTreeMap<String, String>);
 
@@ -238,5 +245,6 @@ impl From<SessionClass> for session_core_v1::SessionClass {
 
 #[derive(Component)]
 pub struct ActiveState(pub session_core_v1::ActiveState);
+
 #[derive(Component)]
 pub struct SessionObject(pub session_management_session::SessionManagementSession);

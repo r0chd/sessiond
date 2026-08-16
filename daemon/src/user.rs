@@ -1,7 +1,14 @@
 use crate::{access, protocol, session, session_core_user, session_core_v1};
 use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
+use std::collections::HashMap;
 use std::{fs, io};
+
+#[derive(Resource, Default)]
+pub struct UserRegistry {
+    pub by_uid: HashMap<u32, Entity>,
+    pub by_object: HashMap<session_core_user::SessionCoreUser, Entity>,
+}
 
 #[derive(Bundle)]
 pub struct UserBundle {
@@ -38,7 +45,12 @@ pub fn spawn(
         cmd.insert(Lingering);
     }
 
-    cmd.id()
+    let entity = cmd.id();
+    world
+        .resource_mut::<UserRegistry>()
+        .by_uid
+        .insert(uid, entity);
+    entity
 }
 
 pub fn create_runtime_dir(uid: u32, path: &str) {
@@ -61,22 +73,6 @@ pub fn remove_runtime_dir(path: &str) -> io::Result<()> {
     }
 }
 
-pub fn entity_by_uid(world: &world::World, uid: u32) -> Option<entity::Entity> {
-    let mut users = world.try_query_filtered::<(Entity, &session::Uid), With<User>>()?;
-    users
-        .iter(world)
-        .find_map(|(entity, entity_uid)| (entity_uid.0 == uid).then_some(entity))
-}
-
-pub fn entity_by_object(
-    world: &world::World,
-    object: &session_core_user::SessionCoreUser,
-) -> Option<entity::Entity> {
-    world
-        .resource::<protocol::ProtocolObjects>()
-        .user_entity_by_object(object)
-}
-
 pub fn create(world: &mut world::World, uid: u32, lingering: bool) -> Option<entity::Entity> {
     let user = uzers::get_user_by_uid(uid)?;
     let state = compute_state(world, uid, lingering);
@@ -90,7 +86,9 @@ pub fn create(world: &mut world::World, uid: u32, lingering: bool) -> Option<ent
 }
 
 fn compute_state(world: &world::World, uid: u32, lingering: bool) -> session_core_v1::UserState {
-    let states = session::entities_by_uid(world, uid)
+    let states = world
+        .resource::<session::SessionRegistry>()
+        .entities_by_uid(uid)
         .into_iter()
         .filter_map(|entity| {
             world
@@ -182,7 +180,11 @@ pub fn add_object(
 
     world
         .resource_mut::<protocol::ProtocolObjects>()
-        .add_user_object(entity, object);
+        .add_user_object(entity, object.clone());
+    world
+        .resource_mut::<UserRegistry>()
+        .by_object
+        .insert(object, entity);
 }
 
 impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond {
@@ -191,13 +193,23 @@ impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond 
         object: &session_core_user::SessionCoreUser,
         event: <session_core_user::SessionCoreUser as hyprwire::Object>::Event<'_>,
     ) {
-        let Some(entity) = entity_by_object(&self.world, object) else {
+        let Some(entity) = self
+            .world
+            .resource::<UserRegistry>()
+            .by_object
+            .get(object)
+            .copied()
+        else {
             return;
         };
         let client = object.client();
 
         match event {
             session_core_user::Event::Destroy => {
+                self.world
+                    .resource_mut::<UserRegistry>()
+                    .by_object
+                    .remove(object);
                 self.world
                     .resource_mut::<protocol::ProtocolObjects>()
                     .remove_user_object(entity, object);
@@ -221,7 +233,10 @@ impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond 
                     return;
                 }
 
-                let entities = session::entities_by_uid(&self.world, uid);
+                let entities = self
+                    .world
+                    .resource::<session::SessionRegistry>()
+                    .entities_by_uid(uid);
                 for entity in entities {
                     self.terminate_session(entity);
                 }
@@ -247,7 +262,10 @@ impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond 
                     return;
                 }
 
-                let entities = session::entities_by_uid(&self.world, uid);
+                let entities = self
+                    .world
+                    .resource::<session::SessionRegistry>()
+                    .entities_by_uid(uid);
                 for entity in entities {
                     self.kill_session(entity);
                 }
@@ -259,7 +277,11 @@ impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond 
 }
 
 pub fn is_lingering(world: &world::World, uid: u32) -> bool {
-    entity_by_uid(world, uid)
+    world
+        .resource::<UserRegistry>()
+        .by_uid
+        .get(&uid)
+        .copied()
         .and_then(|entity| world.get::<Lingering>(entity))
         .is_some()
 }

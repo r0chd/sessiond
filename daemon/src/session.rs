@@ -11,6 +11,41 @@ use hyprwire::server;
 use std::collections::{BTreeMap, HashMap};
 use std::{num, time};
 
+#[allow(clippy::struct_field_names)]
+#[derive(Resource, Default)]
+pub struct SessionRegistry {
+    pub by_id: HashMap<SessionId, Entity>,
+    pub by_object: HashMap<session_core_session::SessionCoreSession, Entity>,
+    pub by_uid: HashMap<u32, Vec<Entity>>,
+    pub by_management_object: HashMap<session_management_session::SessionManagementSession, Entity>,
+}
+
+impl SessionRegistry {
+    pub fn entity_by_object(
+        &self,
+        object: &session_core_session::SessionCoreSession,
+    ) -> Option<Entity> {
+        self.by_object.get(object).copied()
+    }
+
+    pub fn entities_by_uid(&self, uid: u32) -> Vec<Entity> {
+        self.by_uid.get(&uid).cloned().unwrap_or_default()
+    }
+
+    pub fn remove_entity(&mut self, entity: Entity) {
+        self.by_id
+            .retain(|_, mapped_entity| *mapped_entity != entity);
+        self.by_object
+            .retain(|_, mapped_entity| *mapped_entity != entity);
+        self.by_management_object
+            .retain(|_, mapped_entity| *mapped_entity != entity);
+        self.by_uid.retain(|_, entities| {
+            entities.retain(|mapped_entity| *mapped_entity != entity);
+            !entities.is_empty()
+        });
+    }
+}
+
 #[derive(Resource)]
 pub struct NextSessionId(pub SessionId);
 
@@ -177,7 +212,18 @@ pub fn spawn(
     if let Some(session_object) = session_object {
         cmd.insert(SessionObject(session_object));
     }
-    cmd.id()
+
+    let entity = cmd.id();
+    let management_object = world
+        .get::<SessionObject>(entity)
+        .map(|object| object.0.clone());
+    let mut registry = world.resource_mut::<SessionRegistry>();
+    registry.by_id.insert(session_id, entity);
+    registry.by_uid.entry(uid).or_default().push(entity);
+    if let Some(session_object) = management_object {
+        registry.by_management_object.insert(session_object, entity);
+    }
+    entity
 }
 
 pub fn entities(world: &world::World) -> Vec<entity::Entity> {
@@ -194,47 +240,11 @@ pub fn id(world: &world::World, entity: entity::Entity) -> Option<SessionId> {
 }
 
 pub fn entity(world: &world::World, session_id: SessionId) -> Option<entity::Entity> {
-    let mut sessions =
-        world.try_query_filtered::<(Entity, &SessionIdComponent), With<Session>>()?;
-    sessions
-        .iter(world)
-        .find_map(|(entity, id)| (id.0 == session_id).then_some(entity))
-}
-
-pub fn entity_by_uid(world: &world::World, uid: u32) -> Option<entity::Entity> {
-    let mut sessions = world.try_query_filtered::<(Entity, &Uid), With<Session>>()?;
-    sessions
-        .iter(world)
-        .find_map(|(entity, session_uid)| (session_uid.0 == uid).then_some(entity))
-}
-
-pub fn entities_by_uid(world: &world::World, uid: u32) -> Vec<entity::Entity> {
-    let Some(mut sessions) = world.try_query_filtered::<(Entity, &Uid), With<Session>>() else {
-        return Vec::new();
-    };
-    sessions
-        .iter(world)
-        .filter_map(|(entity, session_uid)| (session_uid.0 == uid).then_some(entity))
-        .collect()
-}
-
-pub fn entity_by_object(
-    world: &world::World,
-    object: &session_core_session::SessionCoreSession,
-) -> Option<entity::Entity> {
     world
-        .resource::<protocol::ProtocolObjects>()
-        .session_entity_by_object(object)
-}
-
-pub fn entity_by_management_object(
-    world: &world::World,
-    object: &session_management_session::SessionManagementSession,
-) -> Option<entity::Entity> {
-    let mut sessions = world.try_query_filtered::<(Entity, &SessionObject), With<Session>>()?;
-    sessions
-        .iter(world)
-        .find_map(|(entity, session_object)| (session_object.0 == *object).then_some(entity))
+        .resource::<SessionRegistry>()
+        .by_id
+        .get(&session_id)
+        .copied()
 }
 
 pub fn can_modify(world: &world::World, entity: entity::Entity, creds: &hyprwire::Creds) -> bool {
@@ -248,7 +258,7 @@ pub fn session_envs_by_uid(
     exclude: Option<entity::Entity>,
 ) -> BTreeMap<String, String> {
     let mut env = BTreeMap::new();
-    for entity in entities_by_uid(world, uid) {
+    for entity in world.resource::<SessionRegistry>().entities_by_uid(uid) {
         if Some(entity) == exclude {
             continue;
         }
@@ -265,7 +275,11 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
         object: &session_core_session::SessionCoreSession,
         event: <session_core_session::SessionCoreSession as hyprwire::Object>::Event<'_>,
     ) {
-        let Some(entity) = entity_by_object(&self.world, object) else {
+        let Some(entity) = self
+            .world
+            .resource::<SessionRegistry>()
+            .entity_by_object(object)
+        else {
             return;
         };
         let Some(session_id) = id(&self.world, entity) else {
@@ -273,6 +287,10 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
         };
 
         if matches!(event, session_core_session::Event::Destroy) {
+            self.world
+                .resource_mut::<SessionRegistry>()
+                .by_object
+                .remove(object);
             self.world
                 .resource_mut::<protocol::ProtocolObjects>()
                 .remove_session_object(entity, object);
@@ -420,7 +438,11 @@ impl crate::Sessiond {
             .resource::<cgroup::CgroupManager>()
             .has_uid_sessions(uid)
             && !user::is_lingering(&self.world, uid)
-            && entities_by_uid(&self.world, uid).is_empty()
+            && self
+                .world
+                .resource::<SessionRegistry>()
+                .entities_by_uid(uid)
+                .is_empty()
             && let Err(e) = user::remove_runtime_dir(
                 &self
                     .user_config(&user.name().to_string_lossy())
@@ -485,7 +507,11 @@ pub fn add_object(
 
     world
         .resource_mut::<protocol::ProtocolObjects>()
-        .add_session_object(entity, object);
+        .add_session_object(entity, object.clone());
+    world
+        .resource_mut::<SessionRegistry>()
+        .by_object
+        .insert(object, entity);
 }
 
 pub fn sync_vt_session_states(world: &mut world::World) {
@@ -735,7 +761,13 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
             '_,
         >,
     ) {
-        let Some(entity) = entity_by_management_object(&self.world, object) else {
+        let Some(entity) = self
+            .world
+            .resource::<SessionRegistry>()
+            .by_management_object
+            .get(object)
+            .copied()
+        else {
             return;
         };
         let Some(session_id) = id(&self.world, entity) else {
@@ -810,7 +842,7 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                     .insert(SessionClass::from(class));
             }
             session_management_session::Event::DelegateCgroup {
-                session_management_cgroup,
+                session_management_cgroup: _,
             } => {}
             session_management_session::Event::Destroy => {
                 self.terminate_session(entity);
@@ -871,7 +903,16 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
             } => {
                 sync_vt_session_states(&mut self.world);
 
-                if let Some(entity) = entity_by_uid(&self.world, uid)
+                if let Some(entity) = self
+                    .world
+                    .resource::<SessionRegistry>()
+                    .entities_by_uid(uid)
+                    .into_iter()
+                    .find(|entity| {
+                        self.world
+                            .get::<SessionClass>(*entity)
+                            .is_some_and(|class| *class == SessionClass::User)
+                    })
                     && let Some(session_id) = id(&self.world, entity)
                 {
                     add_object(&mut self.world, session_id, entity, session_core_session);
@@ -885,7 +926,12 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                 session_core_user,
                 uid,
             } => {
-                let entity = entity_by_uid(&self.world, uid)
+                let entity = self
+                    .world
+                    .resource::<user::UserRegistry>()
+                    .by_uid
+                    .get(&uid)
+                    .copied()
                     .or_else(|| user::create(&mut self.world, uid, false));
                 let Some(entity) = entity else {
                     log::warn!(uid; "get_user requested for unknown user");

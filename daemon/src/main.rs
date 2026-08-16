@@ -79,6 +79,9 @@ impl Sessiond {
         self.world
             .resource_mut::<protocol::ProtocolObjects>()
             .remove_session_objects(entity);
+        self.world
+            .resource_mut::<session::SessionRegistry>()
+            .remove_entity(entity);
         self.world.despawn(entity);
         #[cfg(feature = "consolekit")]
         self.world
@@ -141,6 +144,8 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
     world.init_resource::<power::PowerManagers>();
     world.init_resource::<protocol::ProtocolObjects>();
     world.init_resource::<reconcile::NotifyBatch>();
+    world.init_resource::<session::SessionRegistry>();
+    world.init_resource::<user::UserRegistry>();
     world.insert_resource(access_rules);
     world.insert_resource(cgroup::CgroupManager::new()?);
     world.insert_resource(config::DaemonConfig(config));

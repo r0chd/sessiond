@@ -38,18 +38,6 @@ impl ProtocolObjects {
         self.sessions.remove(&entity);
     }
 
-    pub fn session_entity_by_object(
-        &self,
-        object: &session_core_session::SessionCoreSession,
-    ) -> Option<Entity> {
-        self.sessions.iter().find_map(|(entity, objects)| {
-            objects
-                .iter()
-                .any(|candidate| candidate == object)
-                .then_some(*entity)
-        })
-    }
-
     pub fn user_objects(&self, entity: Entity) -> Option<&[session_core_user::SessionCoreUser]> {
         self.users.get(&entity).map(Vec::as_slice)
     }
@@ -66,17 +54,5 @@ impl ProtocolObjects {
         if let Some(objects) = self.users.get_mut(&entity) {
             objects.retain(|candidate| candidate != object);
         }
-    }
-
-    pub fn user_entity_by_object(
-        &self,
-        object: &session_core_user::SessionCoreUser,
-    ) -> Option<Entity> {
-        self.users.iter().find_map(|(entity, objects)| {
-            objects
-                .iter()
-                .any(|candidate| candidate == object)
-                .then_some(*entity)
-        })
     }
 }

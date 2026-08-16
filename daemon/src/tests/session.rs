@@ -2,6 +2,7 @@ use crate::{session, session_core_v1};
 use bevy_ecs::prelude::*;
 
 fn make_session(world: &mut World, id: u32, state: session_core_v1::ActiveState) -> Entity {
+    world.init_resource::<session::SessionRegistry>();
     session::spawn(
         world,
         session::SessionId::from_raw(id),

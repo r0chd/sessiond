@@ -93,7 +93,6 @@ struct Manager {
     power_sender: channel::Sender<PowerRequest>,
 }
 
-#[allow(clippy::needless_pass_by_value)]
 #[interface(name = "org.freedesktop.ConsoleKit.Manager")]
 impl Manager {
     #[zbus(name = "Restart")]
@@ -151,7 +150,6 @@ impl Manager {
     }
 
     #[zbus(name = "GetCurrentSession")]
-    #[allow(clippy::needless_pass_by_value)]
     fn get_current_session(
         &self,
         #[zbus(header)] header: message::Header<'_>,

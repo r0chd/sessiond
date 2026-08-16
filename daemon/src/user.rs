@@ -75,17 +75,6 @@ pub fn remove_runtime_dir(path: &str) -> io::Result<()> {
 
 pub fn create(world: &mut world::World, uid: u32, lingering: bool) -> Option<entity::Entity> {
     let user = uzers::get_user_by_uid(uid)?;
-    let state = compute_state(world, uid, lingering);
-    Some(spawn(
-        world,
-        uid,
-        user.name().to_string_lossy().into_owned(),
-        lingering,
-        state,
-    ))
-}
-
-fn compute_state(world: &world::World, uid: u32, lingering: bool) -> session_core_v1::UserState {
     let states = world
         .resource::<session::SessionRegistry>()
         .entities_by_uid(uid)
@@ -97,26 +86,30 @@ fn compute_state(world: &world::World, uid: u32, lingering: bool) -> session_cor
         })
         .collect::<Vec<_>>();
 
-    if states.contains(&session_core_v1::ActiveState::Active) {
-        return session_core_v1::UserState::Active;
-    }
-
-    if !states.is_empty() {
-        return if states
+    let state = if states.contains(&session_core_v1::ActiveState::Active) {
+        session_core_v1::UserState::Active
+    } else if !states.is_empty() {
+        if states
             .iter()
             .all(|state| *state == session_core_v1::ActiveState::Closing)
         {
             session_core_v1::UserState::Closing
         } else {
             session_core_v1::UserState::Online
-        };
-    }
-
-    if lingering {
+        }
+    } else if lingering {
         session_core_v1::UserState::Lingering
     } else {
         session_core_v1::UserState::Offline
-    }
+    };
+
+    Some(spawn(
+        world,
+        uid,
+        user.name().to_string_lossy().into_owned(),
+        lingering,
+        state,
+    ))
 }
 
 pub fn reconcile_user_states(

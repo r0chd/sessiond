@@ -219,14 +219,17 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
                     };
                     let session_id = session::SessionId::from_raw(raw_id);
 
-                    if let Err(error) = sessiond
+                    let cgroup = match sessiond
                         .world
                         .resource_mut::<cgroup::CgroupManager>()
                         .restore_session_cgroup(saved_session.uid, session_id)
                     {
-                        log::warn!(session_id = raw_id, error = error.to_string().as_str(); "ignoring session with an unusable cgroup");
-                        continue;
-                    }
+                        Ok(cgroup) => cgroup,
+                        Err(error) => {
+                            log::warn!(session_id = raw_id, error = error.to_string().as_str(); "ignoring session with an unusable cgroup");
+                            continue;
+                        }
+                    };
 
                     user::create_runtime_dir(
                         saved_session.uid,
@@ -257,6 +260,7 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
                         saved_session.remote_host.clone(),
                         active_state,
                         None,
+                        cgroup,
                     );
                     sessiond
                         .world

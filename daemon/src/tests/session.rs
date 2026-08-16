@@ -1,4 +1,4 @@
-use crate::{session, session_core_v1};
+use crate::{cgroup, session, session_core_v1};
 use bevy_ecs::prelude::*;
 
 fn make_session(world: &mut World, id: u32, state: session_core_v1::ActiveState) -> Entity {
@@ -14,6 +14,11 @@ fn make_session(world: &mut World, id: u32, state: session_core_v1::ActiveState)
         None,
         state,
         None,
+        cgroup::Cgroup {
+            session_id: session::SessionId::from_raw(id),
+            uid: 1000,
+            path: std::path::PathBuf::new(),
+        },
     )
 }
 

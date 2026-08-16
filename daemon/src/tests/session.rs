@@ -14,11 +14,13 @@ fn make_session(world: &mut World, id: u32, state: session_core_v1::ActiveState)
         None,
         state,
         None,
-        cgroup::Cgroup {
-            session_id: session::SessionId::from_raw(id),
-            uid: 1000,
-            path: std::path::PathBuf::new(),
+        cgroup::CgroupBundle {
+            marker: cgroup::Cgroup,
+            session_id: cgroup::CgroupSessionId(session::SessionId::from_raw(id)),
+            uid: cgroup::CgroupUid(1000),
+            path: cgroup::CgroupPath(std::path::PathBuf::new()),
         },
+        None,
     )
 }
 
@@ -49,5 +51,5 @@ fn setting_the_same_active_state_is_not_a_change() {
 fn sessions_are_not_seat_bound() {
     let mut world = World::new();
     let entity = make_session(&mut world, 1, session_core_v1::ActiveState::Online);
-    assert!(world.get::<session::SessionIdComponent>(entity).is_some());
+    assert!(world.get::<session::SessionId>(entity).is_some());
 }

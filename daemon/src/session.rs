@@ -533,10 +533,6 @@ pub fn add_object(
         .insert(object, entity);
 }
 
-pub fn sync_vt_session_states(world: &mut world::World) {
-    vt::refresh_current_vts(world);
-}
-
 pub fn set_active_state(
     world: &mut world::World,
     entity: entity::Entity,
@@ -581,8 +577,6 @@ impl hyprwire::Handler<session_management_v2::SessionManagementV2> for crate::Se
 
 impl hyprwire::Handler<session_core_v1::SessionCoreV1> for crate::Sessiond {
     fn bind(&mut self, object: session_core_manager::SessionCoreManager) {
-        sync_vt_session_states(&mut self.world);
-
         entities(&self.world)
             .into_iter()
             .filter_map(|entity| id(&self.world, entity))
@@ -679,8 +673,6 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                 {
                     log::error!(session_id = session_id.as_raw(), error = e.to_string().as_str(); "failed to create session cgroup");
                 }
-
-                vt::refresh_current_vts(&mut self.world);
 
                 let is_local = is_local != 0;
                 let session_vt = num::NonZeroU32::new(vt);
@@ -816,7 +808,6 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                         log::error!(session_id = session_id.as_raw(), error = e.to_string().as_str(); "failed to create session cgroup");
                     }
 
-                    vt::refresh_current_vts(&mut self.world);
                     user::create_runtime_dir(
                         pending.uid,
                         &self.user_config(&username).runtime_dir(pending.uid),
@@ -912,8 +903,6 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                 session_core_session,
                 session_id,
             } => {
-                sync_vt_session_states(&mut self.world);
-
                 let session_id = SessionId::from_raw(session_id);
                 if let Some(entity) = entity(&self.world, session_id) {
                     add_object(&mut self.world, session_id, entity, session_core_session);
@@ -927,8 +916,6 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                 session_core_session,
                 pid,
             } => {
-                sync_vt_session_states(&mut self.world);
-
                 let Ok(Some(session_id)) = self
                     .world
                     .resource::<cgroup::CgroupManager>()
@@ -951,8 +938,6 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                 session_core_session,
                 uid,
             } => {
-                sync_vt_session_states(&mut self.world);
-
                 if let Some(entity) = self
                     .world
                     .resource::<SessionRegistry>()

@@ -8,21 +8,29 @@ pub fn current_vt() -> anyhow::Result<num::NonZeroU32> {
         .ok_or_else(|| anyhow::anyhow!("active VT is zero"))
 }
 
-pub fn refresh_current_vt(world: &mut World) {
-    let Ok(current) = current_vt() else { return };
-    for entity in session::entities(world) {
-        let state = match (
-            world.get::<session::Vt>(entity),
-            world.get::<session::IsLocal>(entity),
-        ) {
-            (Some(vt), Some(_)) if vt.0 == current => session_core_v1::ActiveState::Active,
-            (Some(_), Some(_)) => session_core_v1::ActiveState::Online,
+pub fn refresh_current_vt(
+    mut sessions: Query<
+        (
+            &session::Vt,
+            Option<&session::IsLocal>,
+            &mut session::ActiveState,
+        ),
+        With<session::Session>,
+    >,
+) {
+    let Ok(current_vt) = current_vt() else {
+        return;
+    };
+
+    for (vt, is_local, mut active_state) in &mut sessions {
+        let desired = match (is_local, vt.0 == current_vt) {
+            (Some(_), true) => session_core_v1::ActiveState::Active,
+            (Some(_), false) => session_core_v1::ActiveState::Online,
             _ => continue,
         };
-        session::set_active_state(world, entity, state);
-    }
-}
 
-pub fn refresh_current_vts(world: &mut World) {
-    refresh_current_vt(world);
+        if active_state.0 != desired {
+            active_state.0 = desired;
+        }
+    }
 }

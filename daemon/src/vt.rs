@@ -1,4 +1,4 @@
-use crate::{ecs, session, session_core_v1, terminal};
+use crate::{session, session_core_v1, terminal};
 use bevy_ecs::prelude::*;
 use std::num;
 
@@ -12,8 +12,8 @@ pub fn refresh_current_vt(world: &mut World) {
     let Ok(current) = current_vt() else { return };
     for entity in session::entities(world) {
         let state = match (
-            world.get::<ecs::Vt>(entity),
-            world.get::<ecs::IsLocal>(entity),
+            world.get::<session::Vt>(entity),
+            world.get::<session::IsLocal>(entity),
         ) {
             (Some(vt), Some(_)) if vt.0 == current => session_core_v1::ActiveState::Active,
             (Some(_), Some(_)) => session_core_v1::ActiveState::Online,

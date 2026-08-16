@@ -45,7 +45,9 @@
   <description summary="owning handle for a session created via create_session">
    Bound to the connection that created the session. Optional fields may be
    sent while the session is staged. Setting remote_host marks the session as
-   remote. Destroying this object tears down the session and its resources.
+   remote. Once done has been sent, modifying staged fields or sending done
+   again is a protocol error. Destroying this object tears down the session
+   and its resources.
   </description>
   <c2s name="vt">
    <description summary="stage the virtual terminal number">

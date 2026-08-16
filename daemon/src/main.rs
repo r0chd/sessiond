@@ -139,6 +139,7 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
 
     let mut world = World::new();
     world.init_resource::<session::PendingSessionEnvs>();
+    world.init_resource::<session::PendingSessions>();
     world.insert_resource(session::NextSessionId(session::SessionId::from_raw(1)));
     world.init_resource::<session::SessionInfoManagers>();
     world.init_resource::<power::PowerManagers>();

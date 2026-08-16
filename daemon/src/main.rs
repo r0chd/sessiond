@@ -159,6 +159,7 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
     )));
 
     let mut schedule = Schedule::new(reconcile::Notify);
+    schedule.add_systems(vt::refresh_current_vt.before(user::reconcile_user_states));
     schedule.add_systems(
         user::reconcile_user_states
             .before(state::write_state)
@@ -210,7 +211,6 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
             Ok(saved_state) => {
                 sessiond.world.resource_mut::<session::NextSessionId>().0 =
                     session::SessionId::from_raw(saved_state.next_session_id);
-                vt::refresh_current_vts(&mut sessiond.world);
 
                 for (raw_id, saved_session) in saved_state.sessions {
                     let Ok(raw_id) = raw_id.parse::<u32>() else {

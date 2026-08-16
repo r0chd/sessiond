@@ -1,27 +1,9 @@
-#![allow(clippy::needless_pass_by_value, clippy::type_complexity)]
-use crate::{ecs, power, state};
+use crate::ecs;
 use bevy_ecs::prelude::*;
 use std::mem;
 
-pub fn notify_schedule() -> Schedule {
-    let mut schedule = Schedule::new(ecs::Notify);
-    schedule.add_systems(
-        (
-            state::write_state,
-            notify_session_active_states,
-            notify_user_states,
-            power::notify_power_control,
-            #[cfg(feature = "consolekit")]
-            sync_consolekit_sessions,
-        )
-            .before(send_done),
-    );
-    schedule.add_systems(send_done);
-    schedule
-}
-
 #[cfg(feature = "consolekit")]
-fn sync_consolekit_sessions(
+pub fn sync_consolekit_sessions(
     consolekit: Res<ecs::ConsoleKit>,
     sessions: Query<
         (
@@ -48,10 +30,11 @@ fn sync_consolekit_sessions(
     }
 }
 
-fn notify_session_active_states(
+pub fn notify_session_active_states(
     objects: Res<ecs::ProtocolObjects>,
     mut batch: ResMut<ecs::NotifyBatch>,
     sessions: Query<(Entity, &ecs::ActiveState), (With<ecs::Session>, Changed<ecs::ActiveState>)>,
+    users: Query<(Entity, &ecs::UserState), (With<ecs::User>, Changed<ecs::UserState>)>,
 ) {
     for (entity, state) in &sessions {
         if let Some(objects) = objects.session_objects(entity) {
@@ -61,13 +44,7 @@ fn notify_session_active_states(
             batch.session(entity);
         }
     }
-}
 
-fn notify_user_states(
-    objects: Res<ecs::ProtocolObjects>,
-    mut batch: ResMut<ecs::NotifyBatch>,
-    users: Query<(Entity, &ecs::UserState), (With<ecs::User>, Changed<ecs::UserState>)>,
-) {
     for (entity, state) in &users {
         if let Some(objects) = objects.user_objects(entity) {
             for object in objects {
@@ -78,7 +55,7 @@ fn notify_user_states(
     }
 }
 
-fn send_done(objects: Res<ecs::ProtocolObjects>, mut batch: ResMut<ecs::NotifyBatch>) {
+pub fn send_done(objects: Res<ecs::ProtocolObjects>, mut batch: ResMut<ecs::NotifyBatch>) {
     for entity in mem::take(&mut batch.sessions) {
         if let Some(objects) = objects.session_objects(entity) {
             for object in objects {

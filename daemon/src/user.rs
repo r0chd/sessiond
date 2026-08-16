@@ -1,4 +1,4 @@
-use crate::{ecs, session, session_core_user, session_core_v1, user};
+use crate::{ecs, session, session_core_user, session_core_v1};
 use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 use std::{fs, io};
@@ -100,37 +100,36 @@ fn compute_state(world: &world::World, uid: u32, lingering: bool) -> session_cor
     }
 }
 
-pub fn sync_all(world: &mut world::World) {
-    let Some(mut users) = world.try_query_filtered::<Entity, With<ecs::User>>() else {
-        return;
-    };
-    let users = users.iter(world).collect::<Vec<_>>();
+pub fn reconcile_user_states(
+    users: Query<(&ecs::Uid, Option<&ecs::Lingering>, &mut ecs::UserState), With<ecs::User>>,
+    sessions: Query<(&ecs::Uid, &ecs::ActiveState), With<ecs::Session>>,
+) {
+    for (uid, lingering, mut user_state) in users {
+        let states: Vec<_> = sessions
+            .iter()
+            .filter(|(session_uid, _)| session_uid.0 == uid.0)
+            .map(|(_, state)| state.0)
+            .collect();
 
-    for entity in users {
-        sync(world, entity);
-    }
-}
+        let desired = if states.contains(&session_core_v1::ActiveState::Active) {
+            session_core_v1::UserState::Active
+        } else if !states.is_empty()
+            && states
+                .iter()
+                .all(|state| *state == session_core_v1::ActiveState::Closing)
+        {
+            session_core_v1::UserState::Closing
+        } else if !states.is_empty() {
+            session_core_v1::UserState::Online
+        } else if lingering.is_some() {
+            session_core_v1::UserState::Lingering
+        } else {
+            session_core_v1::UserState::Offline
+        };
 
-fn sync(world: &mut world::World, entity: entity::Entity) {
-    let Some(uid) = world.get::<ecs::Uid>(entity).map(|uid| uid.0) else {
-        return;
-    };
-    let lingering = world.get::<ecs::Lingering>(entity).is_some();
-    let state = compute_state(world, uid, lingering);
-
-    let changed = world
-        .get::<ecs::UserState>(entity)
-        .is_none_or(|current| current.0 != state);
-    if !changed {
-        return;
-    }
-
-    set_state(world, entity, state);
-}
-
-fn set_state(world: &mut world::World, entity: entity::Entity, state: session_core_v1::UserState) {
-    if let Some(mut component) = world.get_mut::<ecs::UserState>(entity) {
-        component.0 = state;
+        if user_state.0 != desired {
+            user_state.0 = desired;
+        }
     }
 }
 
@@ -203,7 +202,6 @@ impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond 
                     self.terminate_session(entity);
                 }
 
-                user::sync_all(&mut self.world);
                 object.send_ok();
             }
             session_core_user::Event::Kill => {
@@ -227,7 +225,6 @@ impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond 
                     self.kill_session(entity);
                 }
 
-                user::sync_all(&mut self.world);
                 object.send_ok();
             }
         }

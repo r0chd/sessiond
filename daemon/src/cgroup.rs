@@ -1,42 +1,38 @@
+use crate::session_management_v2::session_management_cgroup;
 use crate::{session, user};
 use anyhow::Context;
+use bevy_ecs::prelude::*;
 use calloop::{generic, timer};
 use rustix::process;
 use std::io::{Read, Seek};
 use std::os::fd::AsRawFd;
 use std::{fs, io, path, time};
 
+#[derive(Resource)]
 pub struct CgroupManager {
-    root_path: Option<&'static path::Path>,
+    root_path: &'static path::Path,
     cgroups: Vec<Cgroup>,
-    loop_handle: calloop::LoopHandle<'static, crate::Sessiond>,
 }
 
 impl CgroupManager {
-    pub fn new(loop_handle: calloop::LoopHandle<'static, crate::Sessiond>) -> anyhow::Result<Self> {
+    pub fn new() -> anyhow::Result<Self> {
         let root_path = path::Path::new("/sys/fs/cgroup/sessiond");
         fs::create_dir_all(root_path)
             .with_context(|| format!("failed to create cgroup root at {}", root_path.display()))?;
         log::info!(root = root_path.to_str(); "cgroup manager init");
 
         Ok(Self {
-            root_path: Some(root_path),
+            root_path,
             cgroups: Vec::new(),
-            loop_handle,
         })
     }
 
-    fn user_cgroup_path(&self, uid: u32) -> anyhow::Result<path::PathBuf> {
-        Ok(self
-            .root_path
-            .context("cgroup manager is disabled")?
-            .join(format!("user-{uid}")))
+    fn user_cgroup_path(&self, uid: u32) -> path::PathBuf {
+        self.root_path.join(format!("user-{uid}"))
     }
 
     pub(crate) fn remove_user_cgroup(&self, uid: u32) -> anyhow::Result<()> {
-        let Ok(user_cgroup_path) = self.user_cgroup_path(uid) else {
-            return Ok(());
-        };
+        let user_cgroup_path = self.user_cgroup_path(uid);
 
         match fs::remove_dir(user_cgroup_path) {
             Ok(()) => {
@@ -49,11 +45,7 @@ impl CgroupManager {
     }
 
     pub(crate) fn ensure_user_cgroup(&self, uid: u32) -> anyhow::Result<path::PathBuf> {
-        if self.root_path.is_none() {
-            return Ok(path::PathBuf::new());
-        }
-
-        let user_cgroup_path = self.user_cgroup_path(uid)?;
+        let user_cgroup_path = self.user_cgroup_path(uid);
         if !user_cgroup_path.exists() {
             fs::create_dir(&user_cgroup_path)?;
         }
@@ -67,10 +59,6 @@ impl CgroupManager {
         session_id: session::SessionId,
         leader_pid: i32,
     ) -> anyhow::Result<()> {
-        if self.root_path.is_none() {
-            return Ok(());
-        }
-
         let user_cgroup_path = self.ensure_user_cgroup(uid)?;
         let session_cgroup_path = user_cgroup_path.join(format!("session-{}", session_id.as_raw()));
         fs::create_dir(&session_cgroup_path)?;
@@ -95,7 +83,7 @@ impl CgroupManager {
         uid: u32,
         session_id: session::SessionId,
     ) -> anyhow::Result<()> {
-        let user_cgroup_path = self.user_cgroup_path(uid)?;
+        let user_cgroup_path = self.user_cgroup_path(uid);
         let session_cgroup_path = user_cgroup_path.join(format!("session-{}", session_id.as_raw()));
         if !session_cgroup_path.exists() {
             anyhow::bail!("session cgroup does not exist");
@@ -115,7 +103,11 @@ impl CgroupManager {
         Ok(())
     }
 
-    fn poll_destroy(&self, session_id: session::SessionId) -> anyhow::Result<()> {
+    fn poll_destroy(
+        &self,
+        loop_handle: &calloop::LoopHandle<'static, crate::Sessiond>,
+        session_id: session::SessionId,
+    ) -> anyhow::Result<()> {
         let cgroup = self
             .cgroups
             .iter()
@@ -132,14 +124,15 @@ impl CgroupManager {
             },
             calloop::Mode::Level,
         );
-        self.loop_handle.insert_source(source, move |_, _, state| {
+        loop_handle.insert_source(source, move |_, _, state| {
             let result = (|| -> anyhow::Result<calloop::PostAction> {
                 file.seek(io::SeekFrom::Start(0))?;
                 let mut contents = String::new();
                 file.read_to_string(&mut contents)?;
 
                 if contents.contains("populated 0") {
-                    let Some((uid, cgroup_path)) = state.cgroup_manager.take_cgroup(session_id)
+                    let Some((uid, cgroup_path)) =
+                        state.world.resource_mut::<Self>().take_cgroup(session_id)
                     else {
                         return Ok(calloop::PostAction::Remove);
                     };
@@ -151,9 +144,9 @@ impl CgroupManager {
                         "cgroup destroyed"
                     );
 
-                    if !state.cgroup_manager.has_uid_sessions(uid)
+                    if !state.world.resource::<Self>().has_uid_sessions(uid)
                         && !user::is_lingering(&state.world, uid)
-                        && let Err(e) = state.cgroup_manager.remove_user_cgroup(uid)
+                        && let Err(e) = state.world.resource::<Self>().remove_user_cgroup(uid)
                     {
                         log::error!(
                             uid = uid,
@@ -164,7 +157,7 @@ impl CgroupManager {
 
                     state.cleanup_user_runtime_dir(uid);
 
-                    if state.shutting_down && state.cgroup_manager.is_empty() {
+                    if state.shutting_down && state.world.resource::<Self>().is_empty() {
                         state.loop_signal.stop();
                     }
 
@@ -188,26 +181,26 @@ impl CgroupManager {
         Ok(())
     }
 
-    pub(crate) fn kill_session(&self, session_id: session::SessionId) -> anyhow::Result<()> {
-        if self.root_path.is_none() {
-            return Ok(());
-        }
-
+    pub(crate) fn kill_session(
+        &self,
+        loop_handle: &calloop::LoopHandle<'static, crate::Sessiond>,
+        session_id: session::SessionId,
+    ) -> anyhow::Result<()> {
         let cgroup = self
             .cgroups
             .iter()
             .find(|cgroup| cgroup.session_id == session_id)
             .context("session not found")?;
         fs::write(cgroup.path.join("cgroup.kill"), b"1")?;
-        self.poll_destroy(session_id)?;
+        self.poll_destroy(loop_handle, session_id)?;
         Ok(())
     }
 
-    pub(crate) fn terminate_session(&self, session_id: session::SessionId) -> anyhow::Result<()> {
-        if self.root_path.is_none() {
-            return Ok(());
-        }
-
+    pub(crate) fn terminate_session(
+        &self,
+        loop_handle: &calloop::LoopHandle<'static, crate::Sessiond>,
+        session_id: session::SessionId,
+    ) -> anyhow::Result<()> {
         let cgroup = self
             .cgroups
             .iter()
@@ -221,10 +214,10 @@ impl CgroupManager {
             process::kill_process(pid, process::Signal::TERM)?;
         }
 
-        self.poll_destroy(session_id)?;
+        self.poll_destroy(loop_handle, session_id)?;
 
         let path = cgroup.path.clone();
-        self.loop_handle
+        loop_handle
             .insert_source(
                 timer::Timer::from_duration(time::Duration::from_secs(5)),
                 move |_, (), _| {
@@ -282,4 +275,13 @@ struct Cgroup {
     session_id: session::SessionId,
     uid: u32,
     path: path::PathBuf,
+}
+
+impl hyprwire::Dispatch<session_management_cgroup::SessionManagementCgroup> for crate::Sessiond {
+    fn event(
+        &mut self,
+        _object: &session_management_cgroup::SessionManagementCgroup,
+        _event: <session_management_cgroup::SessionManagementCgroup as hyprwire::Object>::Event<'_>,
+    ) {
+    }
 }

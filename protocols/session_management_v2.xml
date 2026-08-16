@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<protocol name="session_management_v2" version="1">
+<protocol name="session_management_v2" version="2">
  <copyright>
   Copyright (c) 2026 Oskar Rochowiak
 
@@ -30,10 +30,8 @@
   <c2s name="create_session">
    <description summary="start registering a new session, returning an owning session object">
     Returns a session_management_session object bound to the calling
-    connection. The session is not created yet: the client may send vt,
-    remote_host, and env on the returned object to stage optional fields,
-    then must send done to commit. The daemon then pushes session_id,
-    followed by done, or error if creation failed.
+    connection. The client may stage optional fields before creating the
+    session directly or through a delegated cgroup object.
    </description>
    <arg name="uid" type="uint" summary="user id"/>
    <returns iface="session_management_session"/>
@@ -45,36 +43,31 @@
 
  <object name="session_management_session" version="1">
   <description summary="owning handle for a session created via create_session">
-   Bound to the connection that created the session. Before done is
-   sent, the session is only staged: vt and remote_host may be sent to
-   set optional fields. is_local is not a field; the session is treated
-   as remote if remote_host was set, local otherwise. Environment
-   variables may also be staged before done. Once created, destroying
-   this object, explicitly or by disconnecting, tears the session down if
-   it has not already been destroyed.
+   Bound to the connection that created the session. Optional fields may be
+   sent while the session is staged. Setting remote_host marks the session as
+   remote. Destroying this object tears down the session and its resources.
   </description>
   <c2s name="vt">
    <description summary="stage the virtual terminal number">
-    Optional. Must be sent before done. Defaults to 0 (not bound to a VT).
+    Optional. Must be sent while staged. Defaults to 0 (not bound to a VT).
    </description>
    <arg name="vt" type="uint" summary="virtual terminal number"/>
   </c2s>
   <c2s name="remote_host">
    <description summary="stage the remote host and mark the session as remote">
-    Optional. Must be sent before done. Its presence marks the session as
-    remote; if never sent, the session is local.
+    Optional. Must be sent while staged.
    </description>
    <arg name="remote_host" type="varchar" summary="remote host name"/>
   </c2s>
   <c2s name="class">
    <description summary="stage the session class">
-    Optional. Must be sent before done. Defaults to user.
+    Optional. Must be sent while staged. Defaults to user.
    </description>
    <arg name="class" type="enum" interface="session_class" summary="session class"/>
   </c2s>
   <c2s name="env">
    <description summary="stage an environment variable">
-    Optional. Must be sent before done. May be sent multiple times.
+    Optional. Must be sent while staged. May be sent multiple times.
    </description>
    <arg name="name" type="varchar" summary="environment variable name"/>
    <arg name="value" type="varchar" summary="environment variable value"/>
@@ -82,8 +75,7 @@
   <c2s name="done">
    <description summary="commit staged fields and create the session">
     Creates the session using uid and any staged vt/remote_host/env. The
-    daemon responds with session_id, followed by done, or with
-    error if creation failed.
+    daemon responds with session_id, followed by done, or with error.
    </description>
   </c2s>
   <s2c name="session_id">
@@ -103,6 +95,55 @@
   </s2c>
   <c2s name="destroy" destructor="true">
    <description summary="destroy this object and tear down the session"/>
+  </c2s>
+  <c2s name="delegate_cgroup" since="2">
+   <description summary="create a delegated cgroup control object">
+    Must be sent while staged. Returns an object used to prepare and commit a
+    cgroup delegated to the session uid.
+   </description>
+   <returns iface="session_management_cgroup"/>
+  </c2s>
+ </object>
+
+ <object name="session_management_cgroup" version="2">
+  <description summary="delegated session cgroup">
+   Prepares and commits a cgroup for its owning session.
+  </description>
+  <c2s name="prepare" since="2">
+   <description summary="prepare the delegated cgroup">
+    Creates the cgroup without publishing the session. The daemon sends
+    session fields on the owning session, then cgroup and prepared on this
+    object.
+   </description>
+  </c2s>
+  <c2s name="commit" since="2">
+   <description summary="commit the delegated cgroup">
+    Verifies the leader, records it on the owning session, and publishes the
+    session. The daemon responds with done or error.
+   </description>
+   <arg name="leader" type="uint" summary="process id of the session leader"/>
+  </c2s>
+  <s2c name="cgroup" since="2">
+   <description summary="delegated session cgroup handle">
+    Provides an O_PATH file descriptor for the cgroup directory.
+   </description>
+   <arg name="handle" type="fd" summary="delegated cgroup directory"/>
+  </s2c>
+  <s2c name="prepared" since="2">
+   <description summary="delegated cgroup prepared">
+    The cgroup is ready for the session leader.
+   </description>
+  </s2c>
+  <s2c name="done" since="2">
+   <description summary="delegated cgroup committed"/>
+  </s2c>
+  <s2c name="error" since="2">
+   <description summary="delegated cgroup operation failed"/>
+   <arg name="code" type="enum" interface="error_code" summary="error kind"/>
+   <arg name="message" type="varchar" summary="human-readable error detail"/>
+  </s2c>
+  <c2s name="destroy" destructor="true" since="2">
+   <description summary="destroy this object"/>
   </c2s>
  </object>
 

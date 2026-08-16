@@ -158,3 +158,7 @@ impl Config {
             .with_context(|| format!("failed to parse config file {}", path.display()))
     }
 }
+use bevy_ecs::prelude::Resource;
+
+#[derive(Resource)]
+pub struct DaemonConfig(pub Config);

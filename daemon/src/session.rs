@@ -2,13 +2,128 @@ use crate::session_core_v1::{session_core_manager, session_core_session};
 use crate::session_management_v1::session_manager as session_manager_v1;
 use crate::session_management_v2::{session_management_session, session_manager};
 use crate::{
-    cgroup, config, ecs, session_core_v1, session_management_v1, session_management_v2, user, vt,
+    access, cgroup, config, protocol, session_core_v1, session_management_v1,
+    session_management_v2, user, vt,
 };
 use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 use hyprwire::server;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::{num, time};
+
+#[derive(Resource)]
+pub struct NextSessionId(pub SessionId);
+
+impl NextSessionId {
+    pub const fn take(&mut self) -> SessionId {
+        let id = self.0;
+        self.0 = self.0.next();
+        id
+    }
+}
+
+#[derive(Resource, Default)]
+pub struct SessionInfoManagers(pub Vec<session_core_manager::SessionCoreManager>);
+
+#[derive(Resource, Default)]
+pub struct PendingSessionEnvs(
+    pub HashMap<session_manager_v1::SessionManager, BTreeMap<String, String>>,
+);
+
+#[derive(Bundle)]
+pub struct SessionBundle {
+    pub marker: Session,
+    pub id: SessionIdComponent,
+    pub class: SessionClass,
+    pub uid: Uid,
+    pub username: Username,
+    pub timestamp: Timestamp,
+    pub leader_id: LeaderId,
+    pub env: SessionEnv,
+    pub active_state: ActiveState,
+}
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Session;
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IsLocal;
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Uid(pub u32);
+
+#[derive(Component, Debug, Clone, PartialEq, Eq)]
+pub struct Username(pub String);
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionIdComponent(pub SessionId);
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Vt(pub num::NonZeroU32);
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Timestamp(pub time::SystemTime);
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LeaderId(pub i32);
+
+#[derive(Component, Debug, Clone, PartialEq, Eq)]
+pub struct RemoteHost(pub String);
+
+#[derive(Component)]
+pub struct SessionEnv(pub BTreeMap<String, String>);
+
+#[derive(Component, Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum SessionClass {
+    #[default]
+    User,
+    Greeter,
+    LockScreen,
+    Background,
+    BackgroundLight,
+    Manager,
+    ManagerEarly,
+}
+
+macro_rules! class_from {
+    ($protocol:ty) => {
+        impl From<$protocol> for SessionClass {
+            fn from(class: $protocol) -> Self {
+                match class {
+                    <$protocol>::User => Self::User,
+                    <$protocol>::Greeter => Self::Greeter,
+                    <$protocol>::LockScreen => Self::LockScreen,
+                    <$protocol>::Background => Self::Background,
+                    <$protocol>::BackgroundLight => Self::BackgroundLight,
+                    <$protocol>::Manager => Self::Manager,
+                    <$protocol>::ManagerEarly => Self::ManagerEarly,
+                }
+            }
+        }
+    };
+}
+class_from!(session_management_v1::SessionClass);
+class_from!(session_management_v2::SessionClass);
+
+impl From<SessionClass> for session_core_v1::SessionClass {
+    fn from(class: SessionClass) -> Self {
+        match class {
+            SessionClass::User => Self::User,
+            SessionClass::Greeter => Self::Greeter,
+            SessionClass::LockScreen => Self::LockScreen,
+            SessionClass::Background => Self::Background,
+            SessionClass::BackgroundLight => Self::BackgroundLight,
+            SessionClass::Manager => Self::Manager,
+            SessionClass::ManagerEarly => Self::ManagerEarly,
+        }
+    }
+}
+
+#[derive(Component)]
+pub struct ActiveState(pub session_core_v1::ActiveState);
+
+#[derive(Component)]
+pub struct SessionObject(pub session_management_session::SessionManagementSession);
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct SessionId(u32);
@@ -31,7 +146,7 @@ impl SessionId {
 pub fn spawn(
     world: &mut world::World,
     session_id: SessionId,
-    class: ecs::SessionClass,
+    class: SessionClass,
     uid: u32,
     username: String,
     vt: Option<u32>,
@@ -40,60 +155,61 @@ pub fn spawn(
     active_state: session_core_v1::ActiveState,
     session_object: Option<session_management_session::SessionManagementSession>,
 ) -> entity::Entity {
-    let mut cmd = world.spawn(ecs::SessionBundle {
-        marker: ecs::Session,
-        id: ecs::SessionId(session_id),
+    let mut cmd = world.spawn(SessionBundle {
+        marker: Session,
+        id: SessionIdComponent(session_id),
         class,
-        uid: ecs::Uid(uid),
-        username: ecs::Username(username),
-        timestamp: ecs::Timestamp(time::SystemTime::now()),
-        leader_id: ecs::LeaderId(leader_id),
-        env: ecs::SessionEnv(BTreeMap::new()),
-        active_state: ecs::ActiveState(active_state),
+        uid: Uid(uid),
+        username: Username(username),
+        timestamp: Timestamp(time::SystemTime::now()),
+        leader_id: LeaderId(leader_id),
+        env: SessionEnv(BTreeMap::new()),
+        active_state: ActiveState(active_state),
     });
     if let Some(vt) = vt.and_then(num::NonZeroU32::new) {
-        cmd.insert(ecs::Vt(vt));
+        cmd.insert(Vt(vt));
     }
     if let Some(remote_host) = remote_host {
-        cmd.insert(ecs::RemoteHost(remote_host));
+        cmd.insert(RemoteHost(remote_host));
     } else {
-        cmd.insert(ecs::IsLocal);
+        cmd.insert(IsLocal);
     }
     if let Some(session_object) = session_object {
-        cmd.insert(ecs::SessionObject(session_object));
+        cmd.insert(SessionObject(session_object));
     }
     cmd.id()
 }
 
 pub fn entities(world: &world::World) -> Vec<entity::Entity> {
-    let Some(mut sessions) = world.try_query_filtered::<Entity, With<ecs::Session>>() else {
+    let Some(mut sessions) = world.try_query_filtered::<Entity, With<Session>>() else {
         return Vec::new();
     };
     sessions.iter(world).collect()
 }
 
 pub fn id(world: &world::World, entity: entity::Entity) -> Option<SessionId> {
-    world.get::<ecs::SessionId>(entity).map(|session| session.0)
+    world
+        .get::<SessionIdComponent>(entity)
+        .map(|session| session.0)
 }
 
 pub fn entity(world: &world::World, session_id: SessionId) -> Option<entity::Entity> {
     let mut sessions =
-        world.try_query_filtered::<(Entity, &ecs::SessionId), With<ecs::Session>>()?;
+        world.try_query_filtered::<(Entity, &SessionIdComponent), With<Session>>()?;
     sessions
         .iter(world)
         .find_map(|(entity, id)| (id.0 == session_id).then_some(entity))
 }
 
 pub fn entity_by_uid(world: &world::World, uid: u32) -> Option<entity::Entity> {
-    let mut sessions = world.try_query_filtered::<(Entity, &ecs::Uid), With<ecs::Session>>()?;
+    let mut sessions = world.try_query_filtered::<(Entity, &Uid), With<Session>>()?;
     sessions
         .iter(world)
         .find_map(|(entity, session_uid)| (session_uid.0 == uid).then_some(entity))
 }
 
 pub fn entities_by_uid(world: &world::World, uid: u32) -> Vec<entity::Entity> {
-    let Some(mut sessions) = world.try_query_filtered::<(Entity, &ecs::Uid), With<ecs::Session>>()
-    else {
+    let Some(mut sessions) = world.try_query_filtered::<(Entity, &Uid), With<Session>>() else {
         return Vec::new();
     };
     sessions
@@ -107,7 +223,7 @@ pub fn entity_by_object(
     object: &session_core_session::SessionCoreSession,
 ) -> Option<entity::Entity> {
     world
-        .resource::<ecs::ProtocolObjects>()
+        .resource::<protocol::ProtocolObjects>()
         .session_entity_by_object(object)
 }
 
@@ -115,15 +231,14 @@ pub fn entity_by_management_object(
     world: &world::World,
     object: &session_management_session::SessionManagementSession,
 ) -> Option<entity::Entity> {
-    let mut sessions =
-        world.try_query_filtered::<(Entity, &ecs::SessionObject), With<ecs::Session>>()?;
+    let mut sessions = world.try_query_filtered::<(Entity, &SessionObject), With<Session>>()?;
     sessions
         .iter(world)
         .find_map(|(entity, session_object)| (session_object.0 == *object).then_some(entity))
 }
 
 pub fn can_modify(world: &world::World, entity: entity::Entity, creds: &hyprwire::Creds) -> bool {
-    let session_uid = world.get::<ecs::Uid>(entity).map_or(0, |uid| uid.0);
+    let session_uid = world.get::<Uid>(entity).map_or(0, |uid| uid.0);
     creds.uid.is_root() || creds.uid.as_raw() == session_uid
 }
 
@@ -137,7 +252,7 @@ pub fn session_envs_by_uid(
         if Some(entity) == exclude {
             continue;
         }
-        if let Some(session_env) = world.get::<ecs::SessionEnv>(entity) {
+        if let Some(session_env) = world.get::<SessionEnv>(entity) {
             env.extend(session_env.0.clone());
         }
     }
@@ -159,7 +274,7 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
 
         if matches!(event, session_core_session::Event::Destroy) {
             self.world
-                .resource_mut::<ecs::ProtocolObjects>()
+                .resource_mut::<protocol::ProtocolObjects>()
                 .remove_session_object(entity, object);
             return;
         }
@@ -184,7 +299,7 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
                 log::info!(session_id = session_id.as_raw(); "lock requested");
                 if let Some(objects) = self
                     .world
-                    .resource::<ecs::ProtocolObjects>()
+                    .resource::<protocol::ProtocolObjects>()
                     .session_objects(entity)
                 {
                     for object in objects {
@@ -197,7 +312,7 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
                 log::info!(session_id = session_id.as_raw(); "unlock requested");
                 if let Some(objects) = self
                     .world
-                    .resource::<ecs::ProtocolObjects>()
+                    .resource::<protocol::ProtocolObjects>()
                     .session_objects(entity)
                 {
                     for object in objects {
@@ -274,16 +389,16 @@ impl crate::Sessiond {
             return;
         };
 
-        let uid = self.world.get::<ecs::Uid>(entity).map_or(0, |uid| uid.0);
+        let uid = self.world.get::<Uid>(entity).map_or(0, |uid| uid.0);
         let username = self
             .world
-            .get::<ecs::Username>(entity)
+            .get::<Username>(entity)
             .map_or("", |username| username.0.as_str());
         log::info!(session_id = session_id.as_raw(), uid, username; "session destroyed");
 
         if let Some(objects) = self
             .world
-            .resource::<ecs::ProtocolObjects>()
+            .resource::<protocol::ProtocolObjects>()
             .session_objects(entity)
         {
             for object in objects {
@@ -326,19 +441,19 @@ pub fn add_object(
     log::debug!(session_id = session_id.as_raw(), uid = object.client().creds().uid.as_raw(); "session info requested");
 
     object.send_session_id(session_id.as_raw());
-    if let Some(uid) = world.get::<ecs::Uid>(entity) {
+    if let Some(uid) = world.get::<Uid>(entity) {
         object.send_uid(uid.0);
     }
-    if let Some(username) = world.get::<ecs::Username>(entity) {
+    if let Some(username) = world.get::<Username>(entity) {
         object.send_username(&username.0);
     }
-    if let Some(class) = world.get::<ecs::SessionClass>(entity) {
+    if let Some(class) = world.get::<SessionClass>(entity) {
         object.send_class((*class).into());
     }
-    if let Some(vt) = world.get::<ecs::Vt>(entity).map(|vt| vt.0.get()) {
+    if let Some(vt) = world.get::<Vt>(entity).map(|vt| vt.0.get()) {
         object.send_vt(vt);
     }
-    if let Some(active_state) = world.get::<ecs::ActiveState>(entity) {
+    if let Some(active_state) = world.get::<ActiveState>(entity) {
         object.send_active(active_state.0);
     }
     object.send_can_modify(u32::from(can_modify(
@@ -346,10 +461,10 @@ pub fn add_object(
         entity,
         object.client().creds(),
     )));
-    if let Some(leader_id) = world.get::<ecs::LeaderId>(entity) {
+    if let Some(leader_id) = world.get::<LeaderId>(entity) {
         object.send_leader(leader_id.0.cast_unsigned());
     }
-    if let Some(timestamp) = world.get::<ecs::Timestamp>(entity) {
+    if let Some(timestamp) = world.get::<Timestamp>(entity) {
         let timestamp_secs = timestamp
             .0
             .duration_since(time::UNIX_EPOCH)
@@ -358,18 +473,18 @@ pub fn add_object(
         let timestamp = u32::try_from(timestamp_secs).unwrap_or(u32::MAX);
         object.send_timestamp(timestamp);
     }
-    if world.get::<ecs::IsLocal>(entity).is_some() {
+    if world.get::<IsLocal>(entity).is_some() {
         object.send_is_local(1);
     } else {
         object.send_is_local(0);
     }
-    if let Some(remote_host) = world.get::<ecs::RemoteHost>(entity) {
+    if let Some(remote_host) = world.get::<RemoteHost>(entity) {
         object.send_remote_host(&remote_host.0);
     }
     object.send_done();
 
     world
-        .resource_mut::<ecs::ProtocolObjects>()
+        .resource_mut::<protocol::ProtocolObjects>()
         .add_session_object(entity, object);
 }
 
@@ -383,15 +498,15 @@ pub fn set_active_state(
     state: session_core_v1::ActiveState,
 ) {
     let session_id = world
-        .get::<ecs::SessionId>(entity)
+        .get::<SessionIdComponent>(entity)
         .map(|session_id| session_id.0.as_raw())
         .unwrap_or_default();
     let vt = world
-        .get::<ecs::Vt>(entity)
+        .get::<Vt>(entity)
         .map(|vt| vt.0.get())
         .unwrap_or_default();
 
-    if let Some(mut active_state) = world.get_mut::<ecs::ActiveState>(entity) {
+    if let Some(mut active_state) = world.get_mut::<ActiveState>(entity) {
         if active_state.0 == state {
             return;
         }
@@ -404,7 +519,7 @@ pub fn set_active_state(
 impl hyprwire::Handler<session_management_v1::SessionManagementV1> for crate::Sessiond {
     fn protocol_filter(&mut self, client: server::ServerClient) -> bool {
         self.world
-            .resource::<ecs::AccessRules>()
+            .resource::<access::AccessRules>()
             .management
             .allows(client.creds())
     }
@@ -413,7 +528,7 @@ impl hyprwire::Handler<session_management_v1::SessionManagementV1> for crate::Se
 impl hyprwire::Handler<session_management_v2::SessionManagementV2> for crate::Sessiond {
     fn protocol_filter(&mut self, client: server::ServerClient) -> bool {
         self.world
-            .resource::<ecs::AccessRules>()
+            .resource::<access::AccessRules>()
             .management
             .allows(client.creds())
     }
@@ -431,7 +546,7 @@ impl hyprwire::Handler<session_core_v1::SessionCoreV1> for crate::Sessiond {
             });
         object.send_done();
         self.world
-            .resource_mut::<ecs::SessionInfoManagers>()
+            .resource_mut::<SessionInfoManagers>()
             .0
             .push(object);
     }
@@ -440,7 +555,7 @@ impl hyprwire::Handler<session_core_v1::SessionCoreV1> for crate::Sessiond {
 impl crate::Sessiond {
     pub fn user_config(&self, username: &str) -> config::UserConfig {
         self.world
-            .resource::<ecs::DaemonConfig>()
+            .resource::<config::DaemonConfig>()
             .0
             .users
             .get(username)
@@ -463,7 +578,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for crate::Sessiond {
                 session_management_session,
                 uid,
             } => {
-                let session_id = self.world.resource_mut::<ecs::NextSessionId>().take();
+                let session_id = self.world.resource_mut::<NextSessionId>().take();
                 let username = uzers::get_user_by_uid(uid)
                     .map(|user| user.name().to_string_lossy().into_owned())
                     .unwrap_or_default();
@@ -486,7 +601,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for crate::Sessiond {
                 spawn(
                     &mut self.world,
                     session_id,
-                    ecs::SessionClass::User,
+                    SessionClass::User,
                     uid,
                     username,
                     None,
@@ -516,7 +631,7 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                 remote_host,
                 class,
             } => {
-                let session_id = self.world.resource_mut::<ecs::NextSessionId>().take();
+                let session_id = self.world.resource_mut::<NextSessionId>().take();
                 let username = uzers::get_user_by_uid(uid)
                     .map(|user| user.name().to_string_lossy().into_owned())
                     .unwrap_or_default();
@@ -546,7 +661,7 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
 
                 let pending_env = self
                     .world
-                    .resource_mut::<ecs::PendingSessionEnvs>()
+                    .resource_mut::<PendingSessionEnvs>()
                     .0
                     .remove(object);
 
@@ -574,8 +689,7 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                 );
 
                 if let Some(pending_env) = pending_env
-                    && let Some(mut session_env) =
-                        self.world.get_mut::<ecs::SessionEnv>(session_entity)
+                    && let Some(mut session_env) = self.world.get_mut::<SessionEnv>(session_entity)
                 {
                     session_env.0 = pending_env;
                 }
@@ -586,13 +700,13 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                 }
                 object.send_done();
 
-                for manager in &self.world.resource::<ecs::SessionInfoManagers>().0 {
+                for manager in &self.world.resource::<SessionInfoManagers>().0 {
                     manager.send_session_added(session_id.as_raw());
                 }
             }
             session_manager_v1::Event::Env { name, value } => {
                 self.world
-                    .resource_mut::<ecs::PendingSessionEnvs>()
+                    .resource_mut::<PendingSessionEnvs>()
                     .0
                     .entry(object.clone())
                     .or_default()
@@ -605,7 +719,7 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
             }
             session_manager_v1::Event::Destroy => {
                 self.world
-                    .resource_mut::<ecs::PendingSessionEnvs>()
+                    .resource_mut::<PendingSessionEnvs>()
                     .0
                     .remove(object);
             }
@@ -631,23 +745,23 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
         match event {
             session_management_session::Event::Vt { vt } => {
                 if let Some(vt) = num::NonZeroU32::new(vt) {
-                    self.world.entity_mut(entity).insert(ecs::Vt(vt));
+                    self.world.entity_mut(entity).insert(Vt(vt));
                 }
             }
             session_management_session::Event::RemoteHost { remote_host } => {
                 self.world
                     .entity_mut(entity)
-                    .insert(ecs::RemoteHost(remote_host));
-                self.world.entity_mut(entity).remove::<ecs::IsLocal>();
+                    .insert(RemoteHost(remote_host));
+                self.world.entity_mut(entity).remove::<IsLocal>();
             }
             session_management_session::Event::Done => {
-                let uid = self.world.get::<ecs::Uid>(entity).map(|uid| uid.0);
+                let uid = self.world.get::<Uid>(entity).map(|uid| uid.0);
                 let username = self
                     .world
-                    .get::<ecs::Username>(entity)
+                    .get::<Username>(entity)
                     .map(|username| username.0.clone());
-                let session_vt = self.world.get::<ecs::Vt>(entity).map(|vt| vt.0);
-                let is_local = self.world.get::<ecs::IsLocal>(entity).is_some();
+                let session_vt = self.world.get::<Vt>(entity).map(|vt| vt.0);
+                let is_local = self.world.get::<IsLocal>(entity).is_some();
                 vt::refresh_current_vts(&mut self.world);
 
                 let active_state =
@@ -663,7 +777,7 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                 if let (Some(uid), Some(username)) = (uid, username) {
                     let term = self
                         .world
-                        .get::<ecs::SessionEnv>(entity)
+                        .get::<SessionEnv>(entity)
                         .and_then(|env| env.0.get("TERM"))
                         .map(String::as_str);
                     let mut env =
@@ -677,23 +791,23 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                 }
                 object.send_done();
 
-                for manager in &self.world.resource::<ecs::SessionInfoManagers>().0 {
+                for manager in &self.world.resource::<SessionInfoManagers>().0 {
                     manager.send_session_added(session_id.as_raw());
                 }
             }
             session_management_session::Event::Env { name, value } => {
-                if let Some(mut env) = self.world.get_mut::<ecs::SessionEnv>(entity) {
+                if let Some(mut env) = self.world.get_mut::<SessionEnv>(entity) {
                     env.0.insert(name, value);
                 } else {
                     self.world
                         .entity_mut(entity)
-                        .insert(ecs::SessionEnv(BTreeMap::from([(name, value)])));
+                        .insert(SessionEnv(BTreeMap::from([(name, value)])));
                 }
             }
             session_management_session::Event::Class { class } => {
                 self.world
                     .entity_mut(entity)
-                    .insert(ecs::SessionClass::from(class));
+                    .insert(SessionClass::from(class));
             }
             session_management_session::Event::DelegateCgroup {
                 session_management_cgroup,
@@ -771,7 +885,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                 session_core_user,
                 uid,
             } => {
-                let entity = user::entity_by_uid(&self.world, uid)
+                let entity = entity_by_uid(&self.world, uid)
                     .or_else(|| user::create(&mut self.world, uid, false));
                 let Some(entity) = entity else {
                     log::warn!(uid; "get_user requested for unknown user");
@@ -779,7 +893,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                     return;
                 };
 
-                let management_access = self.world.resource::<ecs::AccessRules>().management;
+                let management_access = self.world.resource::<access::AccessRules>().management;
                 user::add_object(
                     &mut self.world,
                     entity,
@@ -789,7 +903,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
             }
             session_core_manager::Event::Destroy => {
                 self.world
-                    .resource_mut::<ecs::SessionInfoManagers>()
+                    .resource_mut::<SessionInfoManagers>()
                     .0
                     .retain(|m| m != object);
             }

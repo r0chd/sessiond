@@ -19,12 +19,13 @@ mod session_power_v1 {
     pub use spec::*;
 }
 
+mod access;
 mod cgroup;
 mod config;
 #[cfg(feature = "consolekit")]
 mod consolekit;
-mod ecs;
 mod power;
+mod protocol;
 mod reconcile;
 mod session;
 mod state;
@@ -35,6 +36,7 @@ mod vt;
 #[cfg(test)]
 mod tests;
 
+use access::{Access, AccessRules};
 use bevy_ecs::prelude::*;
 #[cfg(feature = "consolekit")]
 use calloop::channel;
@@ -64,44 +66,6 @@ enum LogTarget {
     Syslog,
 }
 
-#[derive(Clone, Copy)]
-struct Access {
-    user: process::Uid,
-    group: process::Gid,
-}
-
-impl Access {
-    const fn new(user: process::Uid, group: process::Gid) -> Self {
-        Self { user, group }
-    }
-
-    fn allows(self, creds: &hyprwire::Creds) -> bool {
-        if self.user == creds.uid || self.group == creds.gid || creds.uid.is_root() {
-            return true;
-        }
-
-        Self::process_groups(creds.pid.as_raw_pid().cast_unsigned())
-            .is_ok_and(|groups| groups.contains(&self.group))
-    }
-
-    fn process_groups(pid: u32) -> anyhow::Result<Vec<process::Gid>> {
-        let status = fs::read_to_string(format!("/proc/{pid}/status"))?;
-        let Some(groups) = status.lines().find_map(|line| line.strip_prefix("Groups:")) else {
-            return Ok(Vec::new());
-        };
-
-        groups
-            .split_whitespace()
-            .map(|group| {
-                group
-                    .parse::<process::RawGid>()
-                    .map(process::Gid::from_raw)
-                    .map_err(Into::into)
-            })
-            .collect()
-    }
-}
-
 struct Sessiond {
     shutting_down: bool,
     loop_signal: calloop::LoopSignal,
@@ -113,12 +77,12 @@ impl Sessiond {
     fn remove_session(&mut self, session_id: session::SessionId) -> Option<Entity> {
         let entity = session::entity(&self.world, session_id)?;
         self.world
-            .resource_mut::<ecs::ProtocolObjects>()
+            .resource_mut::<protocol::ProtocolObjects>()
             .remove_session_objects(entity);
         self.world.despawn(entity);
         #[cfg(feature = "consolekit")]
         self.world
-            .resource::<ecs::ConsoleKit>()
+            .resource::<consolekit::ConsoleKit>()
             .0
             .remove_session(session_id);
         Some(entity)
@@ -152,7 +116,7 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
         signals::Signal::SIGINT,
     ])?;
 
-    let access_rules = ecs::AccessRules {
+    let access_rules = AccessRules {
         management: Access::new(
             resolve_user(&config.management.user)?,
             resolve_group(&config.management.group)?,
@@ -171,24 +135,24 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
         .collect::<Vec<_>>();
 
     let mut world = World::new();
-    world.init_resource::<ecs::PendingSessionEnvs>();
-    world.insert_resource(ecs::NextSessionId(session::SessionId::from_raw(1)));
-    world.init_resource::<ecs::SessionInfoManagers>();
-    world.init_resource::<ecs::PowerManagers>();
-    world.init_resource::<ecs::ProtocolObjects>();
-    world.init_resource::<ecs::NotifyBatch>();
+    world.init_resource::<session::PendingSessionEnvs>();
+    world.insert_resource(session::NextSessionId(session::SessionId::from_raw(1)));
+    world.init_resource::<session::SessionInfoManagers>();
+    world.init_resource::<power::PowerManagers>();
+    world.init_resource::<protocol::ProtocolObjects>();
+    world.init_resource::<reconcile::NotifyBatch>();
     world.insert_resource(access_rules);
     world.insert_resource(cgroup::CgroupManager::new()?);
-    world.insert_resource(ecs::DaemonConfig(config));
+    world.insert_resource(config::DaemonConfig(config));
     let state_path = runtime_dir.join("state.toml");
     world.insert_resource(state::StateWriter(state_path.clone()));
     world.insert_non_send(event_loop.handle());
     #[cfg(feature = "consolekit")]
-    world.insert_resource(ecs::ConsoleKit(consolekit::Server::start(
+    world.insert_resource(consolekit::ConsoleKit(consolekit::Server::start(
         consolekit_power_sender,
     )));
 
-    let mut schedule = Schedule::new(ecs::Notify);
+    let mut schedule = Schedule::new(reconcile::Notify);
     schedule.add_systems(
         user::reconcile_user_states
             .before(state::write_state)
@@ -238,7 +202,7 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
     if state_path.exists() {
         match state::State::load(&state_path) {
             Ok(saved_state) => {
-                sessiond.world.resource_mut::<ecs::NextSessionId>().0 =
+                sessiond.world.resource_mut::<session::NextSessionId>().0 =
                     session::SessionId::from_raw(saved_state.next_session_id);
                 vt::refresh_current_vts(&mut sessiond.world);
 
@@ -291,11 +255,11 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
                     sessiond
                         .world
                         .entity_mut(entity)
-                        .insert(ecs::Timestamp(saved_session.timestamp()));
+                        .insert(session::Timestamp(saved_session.timestamp()));
                     sessiond
                         .world
                         .entity_mut(entity)
-                        .insert(ecs::SessionEnv(saved_session.env.clone()));
+                        .insert(session::SessionEnv(saved_session.env.clone()));
                 }
             }
             Err(error) => {
@@ -397,11 +361,10 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
 
                 {
                     let mut sessions = state.world.query_filtered::<(
-                            &ecs::Vt,
-                            &ecs::IsLocal,
-                            &mut ecs::ActiveState,
-                        ), With<ecs::Session>>(
-                        );
+                        &session::Vt,
+                        &session::IsLocal,
+                        &mut session::ActiveState,
+                    ), With<session::Session>>();
                     for (vt, _, mut active_state) in sessions.iter_mut(&mut state.world) {
                         let desired = if vt.0 == current {
                             session_core_v1::ActiveState::Active

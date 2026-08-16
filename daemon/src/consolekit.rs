@@ -1,4 +1,5 @@
 use crate::{power, session, session_core_v1};
+use bevy_ecs::prelude::Resource;
 use calloop::channel;
 use power::{PowerAction, PowerError};
 use rustix::process;
@@ -10,6 +11,9 @@ use std::{fs, io, sync, thread, time};
 use zbus::blocking::connection;
 use zbus::blocking::fdo::DBusProxy;
 use zbus::{blocking, fdo, interface, message, names, zvariant};
+
+#[derive(Resource)]
+pub struct ConsoleKit(pub Server);
 
 const BUS_NAME: &str = "org.freedesktop.ConsoleKit";
 const MANAGER_PATH: &str = "/org/freedesktop/ConsoleKit/Manager";

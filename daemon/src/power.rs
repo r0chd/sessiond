@@ -1,7 +1,10 @@
 use crate::session_power_v1::session_power_manager;
-use crate::{ecs, session, session_power_v1};
+use crate::{access, config, session, session_power_v1};
 use bevy_ecs::prelude::*;
 use std::process;
+
+#[derive(Resource, Default)]
+pub struct PowerManagers(pub Vec<session_power_manager::SessionPowerManager>);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PowerAction {
@@ -43,29 +46,26 @@ impl hyprwire::Handler<session_power_v1::SessionPowerV1> for crate::Sessiond {
             &self.world,
             object.client().creds(),
         )));
-        self.world
-            .resource_mut::<ecs::PowerManagers>()
-            .0
-            .push(object);
+        self.world.resource_mut::<PowerManagers>().0.push(object);
     }
 }
 
 pub fn notify_power_control(
-    power_managers: Res<ecs::PowerManagers>,
-    access_rules: Res<ecs::AccessRules>,
+    power_managers: Res<PowerManagers>,
+    access_rules: Res<access::AccessRules>,
     changed_sessions: Query<
         (),
         (
-            With<ecs::Session>,
+            With<session::Session>,
             Or<(
-                Added<ecs::Session>,
-                Changed<ecs::Uid>,
-                Changed<ecs::SessionClass>,
+                Added<session::Session>,
+                Changed<session::Uid>,
+                Changed<session::SessionClass>,
             )>,
         ),
     >,
-    sessions: Query<(&ecs::Uid, &ecs::SessionClass), With<ecs::Session>>,
-    mut removed_sessions: RemovedComponents<ecs::Session>,
+    sessions: Query<(&session::Uid, &session::SessionClass), With<session::Session>>,
+    mut removed_sessions: RemovedComponents<session::Session>,
 ) {
     if changed_sessions.is_empty() && removed_sessions.read().next().is_none() {
         return;
@@ -75,7 +75,7 @@ pub fn notify_power_control(
         let can_control = access_rules.management.allows(object.client().creds())
             || sessions
                 .iter()
-                .filter(|(_, class)| **class == ecs::SessionClass::User)
+                .filter(|(_, class)| **class == session::SessionClass::User)
                 .all(|(uid, _)| uid.0 == object.client().creds().uid.as_raw());
 
         object.send_can_control(u32::from(can_control));
@@ -119,7 +119,7 @@ impl hyprwire::Dispatch<session_power_manager::SessionPowerManager> for crate::S
             }
             session_power_manager::Event::Destroy => {
                 self.world
-                    .resource_mut::<ecs::PowerManagers>()
+                    .resource_mut::<PowerManagers>()
                     .0
                     .retain(|manager| manager != object);
             }
@@ -144,19 +144,19 @@ fn send_power_result(
 
 pub fn can_control_power(world: &bevy_ecs::world::World, creds: &hyprwire::Creds) -> bool {
     world
-        .resource::<ecs::AccessRules>()
+        .resource::<access::AccessRules>()
         .management
         .allows(creds)
         || session::entities(world)
             .into_iter()
             .filter_map(|entity| {
                 Some((
-                    world.get::<ecs::Uid>(entity)?,
-                    world.get::<ecs::SessionClass>(entity)?,
+                    world.get::<session::Uid>(entity)?,
+                    world.get::<session::SessionClass>(entity)?,
                 ))
             })
             .all(|(uid, session_class)| {
-                uid.0 == creds.uid.as_raw() || *session_class != ecs::SessionClass::User
+                uid.0 == creds.uid.as_raw() || *session_class != session::SessionClass::User
             })
 }
 
@@ -197,12 +197,12 @@ impl crate::Sessiond {
             .into_iter()
             .filter_map(|entity| {
                 Some((
-                    self.world.get::<ecs::Uid>(entity)?,
-                    self.world.get::<ecs::SessionClass>(entity)?,
+                    self.world.get::<session::Uid>(entity)?,
+                    self.world.get::<session::SessionClass>(entity)?,
                 ))
             })
             .filter(|(uid, session_class)| {
-                uid.0 != creds.uid.as_raw() && **session_class == ecs::SessionClass::User
+                uid.0 != creds.uid.as_raw() && **session_class == session::SessionClass::User
             })
             .count();
 
@@ -230,7 +230,7 @@ impl crate::Sessiond {
 
         rustix::fs::sync();
 
-        let config = &self.world.resource::<ecs::DaemonConfig>().0.power;
+        let config = &self.world.resource::<config::DaemonConfig>().0.power;
         let command = match action {
             PowerAction::Reboot => &config.reboot,
             PowerAction::Poweroff => &config.poweroff,

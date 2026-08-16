@@ -1,5 +1,5 @@
 #![allow(clippy::needless_pass_by_value, clippy::type_complexity)]
-use crate::ecs;
+use crate::session;
 use anyhow::Context;
 use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -35,15 +35,15 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn class(&self) -> ecs::SessionClass {
+    pub fn class(&self) -> session::SessionClass {
         match self.class.as_str() {
-            "greeter" => ecs::SessionClass::Greeter,
-            "lock-screen" => ecs::SessionClass::LockScreen,
-            "background" => ecs::SessionClass::Background,
-            "background-light" => ecs::SessionClass::BackgroundLight,
-            "manager" => ecs::SessionClass::Manager,
-            "manager-early" => ecs::SessionClass::ManagerEarly,
-            _ => ecs::SessionClass::User,
+            "greeter" => session::SessionClass::Greeter,
+            "lock-screen" => session::SessionClass::LockScreen,
+            "background" => session::SessionClass::Background,
+            "background-light" => session::SessionClass::BackgroundLight,
+            "manager" => session::SessionClass::Manager,
+            "manager-early" => session::SessionClass::ManagerEarly,
+            _ => session::SessionClass::User,
         }
     }
 
@@ -60,37 +60,37 @@ pub fn write_state(
     writer: Res<StateWriter>,
     sessions: Query<
         (
-            &ecs::SessionId,
-            &ecs::Uid,
-            &ecs::Username,
-            &ecs::SessionClass,
-            Option<&ecs::Vt>,
-            &ecs::LeaderId,
-            Option<&ecs::RemoteHost>,
-            &ecs::Timestamp,
-            &ecs::SessionEnv,
+            &session::SessionIdComponent,
+            &session::Uid,
+            &session::Username,
+            &session::SessionClass,
+            Option<&session::Vt>,
+            &session::LeaderId,
+            Option<&session::RemoteHost>,
+            &session::Timestamp,
+            &session::SessionEnv,
         ),
-        With<ecs::Session>,
+        With<session::Session>,
     >,
     changed: Query<
         Entity,
         (
-            With<ecs::Session>,
+            With<session::Session>,
             Or<(
-                Added<ecs::Session>,
-                Changed<ecs::Uid>,
-                Changed<ecs::Username>,
-                Changed<ecs::SessionClass>,
-                Changed<ecs::Vt>,
-                Changed<ecs::LeaderId>,
-                Changed<ecs::RemoteHost>,
-                Changed<ecs::Timestamp>,
-                Changed<ecs::SessionEnv>,
+                Added<session::Session>,
+                Changed<session::Uid>,
+                Changed<session::Username>,
+                Changed<session::SessionClass>,
+                Changed<session::Vt>,
+                Changed<session::LeaderId>,
+                Changed<session::RemoteHost>,
+                Changed<session::Timestamp>,
+                Changed<session::SessionEnv>,
             )>,
         ),
     >,
-    removed: RemovedComponents<ecs::Session>,
-    next_session_id: Res<ecs::NextSessionId>,
+    removed: RemovedComponents<session::Session>,
+    next_session_id: Res<session::NextSessionId>,
 ) {
     if changed.is_empty() && removed.is_empty() && !next_session_id.is_changed() {
         return;
@@ -106,13 +106,13 @@ pub fn write_state(
                     .unwrap_or_default()
                     .as_micros();
                 let class = match class {
-                    ecs::SessionClass::User => "user",
-                    ecs::SessionClass::Greeter => "greeter",
-                    ecs::SessionClass::LockScreen => "lock-screen",
-                    ecs::SessionClass::Background => "background",
-                    ecs::SessionClass::BackgroundLight => "background-light",
-                    ecs::SessionClass::Manager => "manager",
-                    ecs::SessionClass::ManagerEarly => "manager-early",
+                    session::SessionClass::User => "user",
+                    session::SessionClass::Greeter => "greeter",
+                    session::SessionClass::LockScreen => "lock-screen",
+                    session::SessionClass::Background => "background",
+                    session::SessionClass::BackgroundLight => "background-light",
+                    session::SessionClass::Manager => "manager",
+                    session::SessionClass::ManagerEarly => "manager-early",
                 };
 
                 (

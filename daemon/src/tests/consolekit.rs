@@ -1,9 +1,10 @@
-use crate::consolekit::{
+use crate::{consolekit, session, session_core_v1};
+use consolekit::{
     SessionInfo, append_database, is_active, key_file_bool, key_file_escape, key_file_list,
     timestamp_string,
 };
-use crate::session::SessionId;
-use crate::session_core_v1::ActiveState;
+use session::SessionId;
+use session_core_v1::ActiveState;
 use std::time;
 
 fn make_session(id: u32, uid: u32, active: ActiveState) -> SessionInfo {

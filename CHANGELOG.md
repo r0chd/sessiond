@@ -21,3 +21,9 @@ Initial public release of `sessiond`.
 - sd_notify lifecycle notifications (STOPPING, READY)
 - Added the `session_power_v1` protocol for system power control
 - Added session state recovery across daemon restarts
+
+## UNRELEASED
+
+### Added
+
+- cgroup delegation

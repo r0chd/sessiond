@@ -1,8 +1,6 @@
 use crate::session_core_v1::{session_core_manager, session_core_session};
 use crate::session_management_v1::session_manager as session_manager_v1;
-use crate::session_management_v2::{
-    session_management_cgroup, session_management_session, session_manager,
-};
+use crate::session_management_v2::{session_management_session, session_manager};
 use crate::{
     access, cgroup, config, protocol, session_core_v1, session_management_v1,
     session_management_v2, user, vt,
@@ -21,7 +19,9 @@ pub struct PendingSession {
     pub remote_host: Option<String>,
     pub env: BTreeMap<String, String>,
     pub leader_id: i32,
-    pub delegated_cgroup: Option<session_management_cgroup::SessionManagementCgroup>,
+    pub delegated_cgroup: Option<cgroup::Delegated>,
+    pub delegated_controllers: Vec<String>,
+    pub delegated_committed: bool,
 }
 
 #[derive(Resource, Default)]
@@ -87,7 +87,7 @@ pub struct PendingSessionEnvs(
 #[derive(Bundle)]
 pub struct SessionBundle {
     pub marker: Session,
-    pub id: SessionIdComponent,
+    pub id: SessionId,
     pub class: SessionClass,
     pub uid: Uid,
     pub username: Username,
@@ -95,7 +95,6 @@ pub struct SessionBundle {
     pub leader_id: LeaderId,
     pub env: SessionEnv,
     pub active_state: ActiveState,
-    pub cgroup: cgroup::Cgroup,
 }
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,9 +108,6 @@ pub struct Uid(pub u32);
 
 #[derive(Component, Debug, Clone, PartialEq, Eq)]
 pub struct Username(pub String);
-
-#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SessionIdComponent(pub SessionId);
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Vt(pub num::NonZeroU32);
@@ -180,7 +176,7 @@ pub struct ActiveState(pub session_core_v1::ActiveState);
 #[derive(Component)]
 pub struct SessionObject(pub session_management_session::SessionManagementSession);
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SessionId(u32);
 
 impl SessionId {
@@ -209,11 +205,12 @@ pub fn spawn(
     remote_host: Option<String>,
     active_state: session_core_v1::ActiveState,
     session_object: Option<session_management_session::SessionManagementSession>,
-    cgroup: cgroup::Cgroup,
+    cgroup: cgroup::CgroupBundle,
+    delegated: Option<cgroup::Delegated>,
 ) -> entity::Entity {
     let mut cmd = world.spawn(SessionBundle {
         marker: Session,
-        id: SessionIdComponent(session_id),
+        id: session_id,
         class,
         uid: Uid(uid),
         username: Username(username),
@@ -221,8 +218,11 @@ pub fn spawn(
         leader_id: LeaderId(leader_id),
         env: SessionEnv(BTreeMap::new()),
         active_state: ActiveState(active_state),
-        cgroup,
     });
+    cmd.insert(cgroup);
+    if let Some(delegated) = delegated {
+        cmd.insert(delegated);
+    }
     if let Some(vt) = vt.and_then(num::NonZeroU32::new) {
         cmd.insert(Vt(vt));
     }
@@ -253,12 +253,6 @@ pub fn entities(world: &world::World) -> Vec<entity::Entity> {
         return Vec::new();
     };
     sessions.iter(world).collect()
-}
-
-pub fn id(world: &world::World, entity: entity::Entity) -> Option<SessionId> {
-    world
-        .get::<SessionIdComponent>(entity)
-        .map(|session| session.0)
 }
 
 pub fn entity(world: &world::World, session_id: SessionId) -> Option<entity::Entity> {
@@ -304,7 +298,7 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
         else {
             return;
         };
-        let Some(session_id) = id(&self.world, entity) else {
+        let Some(session_id) = self.world.get::<SessionId>(entity) else {
             return;
         };
 
@@ -368,7 +362,7 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
 
 impl crate::Sessiond {
     pub fn kill_session(&mut self, entity: entity::Entity) {
-        let Some(session_id) = id(&self.world, entity) else {
+        let Some(session_id) = self.world.get::<SessionId>(entity).copied() else {
             return;
         };
 
@@ -385,17 +379,25 @@ impl crate::Sessiond {
         else {
             return;
         };
-        let Some(cgroup) = self.world.get::<cgroup::Cgroup>(entity) else {
+        let Some(path) = self.world.get::<cgroup::CgroupPath>(entity) else {
             log::error!(session_id = session_id.as_raw(); "session has no cgroup");
             return;
         };
-        if let Err(err) = cgroup.kill(loop_handle) {
+        let Some(cgroup_session_id) = self.world.get::<cgroup::CgroupSessionId>(entity) else {
+            log::error!(session_id = session_id.as_raw(); "session has no cgroup id");
+            return;
+        };
+        let Some(cgroup_uid) = self.world.get::<cgroup::CgroupUid>(entity) else {
+            log::error!(session_id = session_id.as_raw(); "session has no cgroup uid");
+            return;
+        };
+        if let Err(err) = cgroup::kill(path, *cgroup_session_id, *cgroup_uid, loop_handle) {
             log::error!(session_id = session_id.as_raw(), err = err.to_string().as_str(); "kill failed");
         }
     }
 
     pub fn terminate_session(&mut self, entity: entity::Entity) {
-        let Some(session_id) = id(&self.world, entity) else {
+        let Some(session_id) = self.world.get::<SessionId>(entity).copied() else {
             return;
         };
 
@@ -412,11 +414,19 @@ impl crate::Sessiond {
         else {
             return;
         };
-        let Some(cgroup) = self.world.get::<cgroup::Cgroup>(entity) else {
+        let Some(path) = self.world.get::<cgroup::CgroupPath>(entity) else {
             log::error!(session_id = session_id.as_raw(); "session has no cgroup");
             return;
         };
-        if let Err(err) = cgroup.terminate(loop_handle) {
+        let Some(cgroup_session_id) = self.world.get::<cgroup::CgroupSessionId>(entity) else {
+            log::error!(session_id = session_id.as_raw(); "session has no cgroup id");
+            return;
+        };
+        let Some(cgroup_uid) = self.world.get::<cgroup::CgroupUid>(entity) else {
+            log::error!(session_id = session_id.as_raw(); "session has no cgroup uid");
+            return;
+        };
+        if let Err(err) = cgroup::terminate(path, *cgroup_session_id, *cgroup_uid, loop_handle) {
             log::error!(session_id = session_id.as_raw(), err = err.to_string().as_str(); "terminate failed");
         }
     }
@@ -536,8 +546,8 @@ pub fn set_active_state(
     state: session_core_v1::ActiveState,
 ) {
     let session_id = world
-        .get::<SessionIdComponent>(entity)
-        .map(|session_id| session_id.0.as_raw())
+        .get::<SessionId>(entity)
+        .map(|session_id| session_id.as_raw())
         .unwrap_or_default();
     let vt = world
         .get::<Vt>(entity)
@@ -576,7 +586,7 @@ impl hyprwire::Handler<session_core_v1::SessionCoreV1> for crate::Sessiond {
     fn bind(&mut self, object: session_core_manager::SessionCoreManager) {
         entities(&self.world)
             .into_iter()
-            .filter_map(|entity| id(&self.world, entity))
+            .filter_map(|entity| self.world.get::<SessionId>(entity))
             .for_each(|session_id| {
                 object.send_session_added(session_id.as_raw());
             });
@@ -634,6 +644,8 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for crate::Sessiond {
                             env: BTreeMap::new(),
                             leader_id,
                             delegated_cgroup: None,
+                            delegated_controllers: Vec::new(),
+                            delegated_committed: false,
                         },
                     );
             }
@@ -657,16 +669,22 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                 remote_host,
                 class,
             } => {
+                let Some(user) = uzers::get_user_by_uid(uid) else {
+                    object.send_error(
+                        session_management_v1::ErrorCode::NotFound,
+                        format!("user {uid} does not exist"),
+                    );
+                    return;
+                };
                 let session_id = self.world.resource_mut::<NextSessionId>().take();
-                let username = uzers::get_user_by_uid(uid)
-                    .map(|user| user.name().to_string_lossy().into_owned())
-                    .unwrap_or_default();
+                let username = user.name().to_string_lossy().into_owned();
+
                 log::info!(session_id = session_id.as_raw(), uid, username = username.as_str(), vt, is_local, remote_host = remote_host.as_str(); "session created");
 
                 let cgroup = match self
                     .world
                     .resource::<cgroup::CgroupManager>()
-                    .create_session_cgroup(uid, session_id, client.creds().pid.as_raw_pid())
+                    .create_session_cgroup(&user, session_id, client.creds().pid.as_raw_pid(), &[])
                 {
                     Ok(cgroup) => cgroup,
                     Err(e) => {
@@ -719,6 +737,7 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                     active_state,
                     None,
                     cgroup,
+                    None,
                 );
 
                 if let Some(pending_env) = pending_env
@@ -790,9 +809,26 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                 session_management_session::Event::DelegateCgroup {
                     session_management_cgroup,
                 } => {
-                    session.delegated_cgroup = Some(session_management_cgroup);
+                    session.delegated_cgroup = Some(cgroup::Delegated {
+                        object: session_management_cgroup,
+                    });
                 }
                 session_management_session::Event::Done => {
+                    let cgroup_uncommitted = self
+                        .world
+                        .resource::<PendingSessions>()
+                        .by_management_object
+                        .get(object)
+                        .is_some_and(|pending| {
+                            pending.delegated_cgroup.is_some() && !pending.delegated_committed
+                        });
+                    if cgroup_uncommitted {
+                        object.send_error(
+                            session_management_v2::ErrorCode::Io,
+                            "delegated cgroup must be committed before the session",
+                        );
+                        return;
+                    }
                     let Some(pending) = self
                         .world
                         .resource_mut::<PendingSessions>()
@@ -801,25 +837,79 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                     else {
                         return;
                     };
-                    let username = uzers::get_user_by_uid(pending.uid)
-                        .map(|user| user.name().to_string_lossy().into_owned())
-                        .unwrap_or_default();
+                    let delegated_object = pending.delegated_cgroup.clone();
+                    let Some(user) = uzers::get_user_by_uid(pending.uid) else {
+                        if let Some(delegated) = delegated_object {
+                            delegated.object.send_error(
+                                session_management_v2::ErrorCode::NotFound,
+                                format!("user {} does not exist", pending.uid),
+                            );
+                        }
+                        object.send_error(
+                            session_management_v2::ErrorCode::NotFound,
+                            format!("user {} does not exist", pending.uid),
+                        );
+                        return;
+                    };
+                    let username = user.name().to_string_lossy().into_owned();
+
                     let session_id = self.world.resource_mut::<NextSessionId>().take();
 
                     let cgroup = match self
                         .world
                         .resource::<cgroup::CgroupManager>()
-                        .create_session_cgroup(pending.uid, session_id, pending.leader_id)
-                    {
+                        .create_session_cgroup(
+                            &user,
+                            session_id,
+                            pending.leader_id,
+                            &pending.delegated_controllers,
+                        ) {
                         Ok(cgroup) => cgroup,
                         Err(e) => {
                             log::error!(session_id = session_id.as_raw(), error = e.to_string().as_str(); "failed to create session cgroup");
+                            if let Some(delegated) = delegated_object {
+                                delegated.object.send_error(
+                                    session_management_v2::ErrorCode::Io,
+                                    format!("failed to create session cgroup: {e}"),
+                                );
+                            }
                             object.send_error(
                                 session_management_v2::ErrorCode::Io,
                                 format!("failed to create session cgroup: {e}"),
                             );
                             return;
                         }
+                    };
+
+                    let delegated = match pending.delegated_cgroup {
+                        Some(delegated) => {
+                            let error_object = delegated.clone();
+                            match cgroup::CgroupManager::delegate_cgroup(&user, &cgroup, delegated)
+                            {
+                                Ok(delegated) => Some(delegated),
+                                Err(error) => {
+                                    if let Err(cleanup_error) =
+                                        cgroup::CgroupManager::remove_session_cgroup(&cgroup.path.0)
+                                    {
+                                        log::error!(
+                                            session_id = session_id.as_raw(),
+                                            error = cleanup_error.to_string().as_str();
+                                            "failed to clean up session cgroup after delegation failure"
+                                        );
+                                    }
+                                    error_object.object.send_error(
+                                        session_management_v2::ErrorCode::Io,
+                                        format!("failed to delegate session cgroup: {error}"),
+                                    );
+                                    object.send_error(
+                                        session_management_v2::ErrorCode::Io,
+                                        format!("failed to delegate session cgroup: {error}"),
+                                    );
+                                    return;
+                                }
+                            }
+                        }
+                        None => None,
                     };
 
                     user::create_runtime_dir(
@@ -858,6 +948,7 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                         active_state,
                         Some(object.clone()),
                         cgroup,
+                        delegated,
                     );
                     if let Some(mut session_env) = self.world.get_mut::<SessionEnv>(entity) {
                         session_env.0 = pending.env;
@@ -963,7 +1054,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                             .get::<SessionClass>(*entity)
                             .is_some_and(|class| *class == SessionClass::User)
                     })
-                    && let Some(session_id) = id(&self.world, entity)
+                    && let Some(session_id) = self.world.get::<SessionId>(entity).copied()
                 {
                     add_object(&mut self.world, session_id, entity, session_core_session);
                     return;

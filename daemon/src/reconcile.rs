@@ -33,7 +33,7 @@ pub fn sync_consolekit_sessions(
     consolekit: Res<consolekit::ConsoleKit>,
     sessions: Query<
         (
-            &session::SessionIdComponent,
+            &session::SessionId,
             &session::Uid,
             &session::Timestamp,
             Option<&session::IsLocal>,
@@ -47,7 +47,7 @@ pub fn sync_consolekit_sessions(
 ) {
     for (session_id, uid, timestamp, is_local, active_state) in &sessions {
         consolekit.0.upsert_session(consolekit::SessionInfo {
-            id: session_id.0,
+            id: *session_id,
             uid: uid.0,
             timestamp: timestamp.0,
             is_local: is_local.is_some(),

@@ -60,7 +60,7 @@ pub fn write_state(
     writer: Res<StateWriter>,
     sessions: Query<
         (
-            &session::SessionIdComponent,
+            &session::SessionId,
             &session::Uid,
             &session::Username,
             &session::SessionClass,
@@ -116,7 +116,7 @@ pub fn write_state(
                 };
 
                 (
-                    id.0.as_raw().to_string(),
+                    id.as_raw().to_string(),
                     Session {
                         uid: uid.0,
                         username: username.0.clone(),

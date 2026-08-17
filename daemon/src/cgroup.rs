@@ -99,7 +99,7 @@ impl CgroupManager {
             Some(rustix::process::Uid::from_raw(user.uid())),
             Some(rustix::process::Gid::from_raw(user.primary_group_id())),
         )?;
-        fs::set_permissions(&cgroup.path.0, fs::Permissions::from_mode(0o700))?;
+        fs::set_permissions(&cgroup.path.0, fs::Permissions::from_mode(0o755))?;
         for name in ["cgroup.procs", "cgroup.threads", "cgroup.subtree_control"] {
             let file = cgroup.path.0.join(name);
             rustix::fs::chown(
@@ -107,7 +107,7 @@ impl CgroupManager {
                 Some(rustix::process::Uid::from_raw(user.uid())),
                 Some(rustix::process::Gid::from_raw(user.primary_group_id())),
             )?;
-            fs::set_permissions(&file, fs::Permissions::from_mode(0o600))?;
+            fs::set_permissions(&file, fs::Permissions::from_mode(0o644))?;
         }
         delegated.object.send_path(cgroup.path.0.to_string_lossy());
         Ok(delegated)

@@ -13,7 +13,7 @@ pub fn refresh_current_vt(
         (
             &session::Vt,
             Option<&session::IsLocal>,
-            &mut session::ActiveState,
+            &mut session_core_v1::ActiveState,
         ),
         With<session::Session>,
     >,
@@ -29,8 +29,8 @@ pub fn refresh_current_vt(
             _ => continue,
         };
 
-        if active_state.0 != desired {
-            active_state.0 = desired;
+        if *active_state != desired {
+            *active_state = desired;
         }
     }
 }

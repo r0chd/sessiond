@@ -1,6 +1,6 @@
 #[cfg(feature = "consolekit")]
 use crate::consolekit;
-use crate::{protocol, session, user};
+use crate::{session, session_core_v1, user};
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::ScheduleLabel;
 use std::mem;
@@ -37,11 +37,14 @@ pub fn sync_consolekit_sessions(
             &session::Uid,
             &session::Timestamp,
             Option<&session::IsLocal>,
-            &session::ActiveState,
+            &session_core_v1::ActiveState,
         ),
         (
             With<session::Session>,
-            Or<(Added<session::Session>, Changed<session::ActiveState>)>,
+            Or<(
+                Added<session::Session>,
+                Changed<session_core_v1::ActiveState>,
+            )>,
         ),
     >,
 ) {
@@ -51,50 +54,56 @@ pub fn sync_consolekit_sessions(
             uid: uid.0,
             timestamp: timestamp.0,
             is_local: is_local.is_some(),
-            active: active_state.0,
+            active: *active_state,
         });
     }
 }
 
 pub fn notify_session_active_states(
-    objects: Res<protocol::ProtocolObjects>,
     mut batch: ResMut<NotifyBatch>,
     sessions: Query<
-        (Entity, &session::ActiveState),
-        (With<session::Session>, Changed<session::ActiveState>),
+        (
+            Entity,
+            &session_core_v1::ActiveState,
+            &session::Objects,
+        ),
+        (With<session::Session>, Changed<session_core_v1::ActiveState>),
     >,
-    users: Query<(Entity, &user::UserState), (With<user::User>, Changed<user::UserState>)>,
+    users: Query<
+        (Entity, &session_core_v1::UserState, &user::Objects),
+        (With<user::User>, Changed<session_core_v1::UserState>),
+    >,
 ) {
-    for (entity, state) in &sessions {
-        if let Some(objects) = objects.session_objects(entity) {
-            for object in objects {
-                object.send_active(state.0);
-            }
-            batch.session(entity);
+    for (entity, state, objects) in &sessions {
+        for object in &objects.0 {
+            object.send_active(*state);
         }
+        batch.session(entity);
     }
 
-    for (entity, state) in &users {
-        if let Some(objects) = objects.user_objects(entity) {
-            for object in objects {
-                object.send_state(state.0);
-            }
-            batch.user(entity);
+    for (entity, state, objects) in &users {
+        for object in &objects.0 {
+            object.send_state(*state);
         }
+        batch.user(entity);
     }
 }
 
-pub fn send_done(objects: Res<protocol::ProtocolObjects>, mut batch: ResMut<NotifyBatch>) {
+pub fn send_done(
+    mut batch: ResMut<NotifyBatch>,
+    sessions: Query<&session::Objects>,
+    users: Query<&user::Objects>,
+) {
     for entity in mem::take(&mut batch.sessions) {
-        if let Some(objects) = objects.session_objects(entity) {
-            for object in objects {
+        if let Ok(objects) = sessions.get(entity) {
+            for object in &objects.0 {
                 object.send_done();
             }
         }
     }
     for entity in mem::take(&mut batch.users) {
-        if let Some(objects) = objects.user_objects(entity) {
-            for object in objects {
+        if let Ok(objects) = users.get(entity) {
+            for object in &objects.0 {
                 object.send_done();
             }
         }

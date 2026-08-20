@@ -25,7 +25,6 @@ mod config;
 #[cfg(feature = "consolekit")]
 mod consolekit;
 mod power;
-mod protocol;
 mod reconcile;
 mod session;
 mod state;
@@ -36,7 +35,6 @@ mod vt;
 #[cfg(test)]
 mod tests;
 
-use access::{Access, AccessRules};
 use bevy_ecs::prelude::*;
 #[cfg(feature = "consolekit")]
 use calloop::channel;
@@ -77,9 +75,6 @@ impl Sessiond {
     fn remove_session(&mut self, session_id: session::SessionId) -> Option<Entity> {
         let entity = session::entity(&self.world, session_id)?;
         self.world
-            .resource_mut::<protocol::ProtocolObjects>()
-            .remove_session_objects(entity);
-        self.world
             .resource_mut::<session::SessionRegistry>()
             .remove_entity(entity);
         self.world.despawn(entity);
@@ -119,8 +114,8 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
         signals::Signal::SIGINT,
     ])?;
 
-    let access_rules = AccessRules {
-        management: Access::new(
+    let access_rules = access::AccessRules {
+        management: access::Access::new(
             resolve_user(&config.management.user)?,
             resolve_group(&config.management.group)?,
         ),
@@ -143,7 +138,6 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
     world.insert_resource(session::NextSessionId(session::SessionId::from_raw(1)));
     world.init_resource::<session::SessionInfoManagers>();
     world.init_resource::<power::PowerManagers>();
-    world.init_resource::<protocol::ProtocolObjects>();
     world.init_resource::<reconcile::NotifyBatch>();
     world.init_resource::<session::SessionRegistry>();
     world.init_resource::<user::UserRegistry>();
@@ -374,7 +368,7 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
                     let mut sessions = state.world.query_filtered::<(
                         &session::Vt,
                         &session::IsLocal,
-                        &mut session::ActiveState,
+                        &mut session_core_v1::ActiveState,
                     ), With<session::Session>>();
                     for (vt, _, mut active_state) in sessions.iter_mut(&mut state.world) {
                         let desired = if vt.0 == current {
@@ -382,8 +376,8 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
                         } else {
                             session_core_v1::ActiveState::Online
                         };
-                        if active_state.0 != desired {
-                            active_state.0 = desired;
+                        if *active_state != desired {
+                            *active_state = desired;
                         }
                     }
                 }

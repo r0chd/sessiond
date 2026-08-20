@@ -12,13 +12,25 @@ use std::{fs, io, path, time};
 
 #[derive(Resource)]
 pub struct CgroupManager {
-    root_path: &'static path::Path,
+    root_path: path::PathBuf,
 }
 
 impl CgroupManager {
     pub fn new() -> anyhow::Result<Self> {
-        let root_path = path::Path::new("/sys/fs/cgroup/sessiond");
-        fs::create_dir_all(root_path)
+        let contents =
+            fs::read_to_string("/proc/self/cgroup").context("failed to read /proc/self/cgroup")?;
+
+        let cgroup_path = contents
+            .lines()
+            .find_map(|line| line.strip_prefix("0::"))
+            .context("process is not in a cgroup v2 hierarchy")?;
+
+        let relative_path = cgroup_path
+            .strip_prefix('/')
+            .context("cgroup v2 path is not absolute")?;
+
+        let root_path = path::Path::new("/sys/fs/cgroup").join(relative_path);
+        fs::create_dir_all(&root_path)
             .with_context(|| format!("failed to create cgroup root at {}", root_path.display()))?;
         log::info!(root = root_path.to_str(); "cgroup manager init");
 
@@ -57,7 +69,7 @@ impl CgroupManager {
         if !user_cgroup_path.exists() {
             fs::create_dir(&user_cgroup_path)?;
         }
-        fs::set_permissions(&user_cgroup_path, fs::Permissions::from_mode(0o711))?;
+        fs::set_permissions(&user_cgroup_path, fs::Permissions::from_mode(0o755))?;
 
         Ok(user_cgroup_path)
     }
@@ -70,10 +82,11 @@ impl CgroupManager {
         controllers: &[String],
     ) -> anyhow::Result<CgroupBundle> {
         let user_cgroup_path = self.ensure_user_cgroup(user.uid())?;
-        Self::enable_controllers(self.root_path, controllers)?;
+        Self::enable_controllers(&self.root_path, controllers)?;
         Self::enable_controllers(&user_cgroup_path, controllers)?;
         let session_cgroup_path = user_cgroup_path.join(format!("session-{}", session_id.as_raw()));
         fs::create_dir(&session_cgroup_path)?;
+        fs::set_permissions(&session_cgroup_path, fs::Permissions::from_mode(0o755))?;
         fs::write(
             session_cgroup_path.join("cgroup.procs"),
             leader_pid.to_string(),

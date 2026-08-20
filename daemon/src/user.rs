@@ -81,11 +81,7 @@ pub fn create(world: &mut world::World, uid: u32, lingering: bool) -> Option<ent
         .resource::<session::SessionRegistry>()
         .entities_by_uid(uid)
         .into_iter()
-        .filter_map(|entity| {
-            world
-                .get::<session_core_v1::ActiveState>(entity)
-                .copied()
-        })
+        .filter_map(|entity| world.get::<session_core_v1::ActiveState>(entity).copied())
         .collect::<Vec<_>>();
 
     let state = if states.contains(&session_core_v1::ActiveState::Active) {
@@ -115,15 +111,15 @@ pub fn create(world: &mut world::World, uid: u32, lingering: bool) -> Option<ent
 }
 
 pub fn reconcile_user_states(
-    users: Query<(
-        &session::Uid,
-        Option<&Lingering>,
-        &mut session_core_v1::UserState,
-    ), With<User>>,
-    sessions: Query<
-        (&session::Uid, &session_core_v1::ActiveState),
-        With<session::Session>,
+    users: Query<
+        (
+            &session::Uid,
+            Option<&Lingering>,
+            &mut session_core_v1::UserState,
+        ),
+        With<User>,
     >,
+    sessions: Query<(&session::Uid, &session_core_v1::ActiveState), With<session::Session>>,
 ) {
     for (uid, lingering, mut user_state) in users {
         let states: Vec<_> = sessions

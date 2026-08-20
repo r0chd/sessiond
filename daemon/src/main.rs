@@ -255,7 +255,6 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
                         active_state,
                         None,
                         cgroup,
-                        None,
                     );
                     sessiond
                         .world

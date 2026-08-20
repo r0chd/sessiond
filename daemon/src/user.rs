@@ -1,4 +1,4 @@
-use crate::{access, protocol, session, session_core_user, session_core_v1};
+use crate::{access, session, session_core_user, session_core_v1};
 use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 use std::collections::HashMap;
@@ -15,7 +15,8 @@ pub struct UserBundle {
     pub marker: User,
     pub uid: session::Uid,
     pub username: session::Username,
-    pub state: UserState,
+    pub state: session_core_v1::UserState,
+    pub objects: Objects,
 }
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,8 +25,8 @@ pub struct User;
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Lingering;
 
-#[derive(Component)]
-pub struct UserState(pub session_core_v1::UserState);
+#[derive(Component, Default)]
+pub struct Objects(pub Vec<session_core_user::SessionCoreUser>);
 
 pub fn spawn(
     world: &mut world::World,
@@ -38,7 +39,8 @@ pub fn spawn(
         marker: User,
         uid: session::Uid(uid),
         username: session::Username(username),
-        state: UserState(state),
+        state,
+        objects: Objects::default(),
     });
 
     if lingering {
@@ -81,8 +83,8 @@ pub fn create(world: &mut world::World, uid: u32, lingering: bool) -> Option<ent
         .into_iter()
         .filter_map(|entity| {
             world
-                .get::<session::ActiveState>(entity)
-                .map(|state| state.0)
+                .get::<session_core_v1::ActiveState>(entity)
+                .copied()
         })
         .collect::<Vec<_>>();
 
@@ -113,14 +115,21 @@ pub fn create(world: &mut world::World, uid: u32, lingering: bool) -> Option<ent
 }
 
 pub fn reconcile_user_states(
-    users: Query<(&session::Uid, Option<&Lingering>, &mut UserState), With<User>>,
-    sessions: Query<(&session::Uid, &session::ActiveState), With<session::Session>>,
+    users: Query<(
+        &session::Uid,
+        Option<&Lingering>,
+        &mut session_core_v1::UserState,
+    ), With<User>>,
+    sessions: Query<
+        (&session::Uid, &session_core_v1::ActiveState),
+        With<session::Session>,
+    >,
 ) {
     for (uid, lingering, mut user_state) in users {
         let states: Vec<_> = sessions
             .iter()
             .filter(|(session_uid, _)| session_uid.0 == uid.0)
-            .map(|(_, state)| state.0)
+            .map(|(_, state)| *state)
             .collect();
 
         let desired = if states.contains(&session_core_v1::ActiveState::Active) {
@@ -139,8 +148,8 @@ pub fn reconcile_user_states(
             session_core_v1::UserState::Offline
         };
 
-        if user_state.0 != desired {
-            user_state.0 = desired;
+        if *user_state != desired {
+            *user_state = desired;
         }
     }
 }
@@ -149,7 +158,7 @@ pub fn add_object(
     world: &mut world::World,
     entity: entity::Entity,
     object: session_core_user::SessionCoreUser,
-    management_access: crate::Access,
+    management_access: access::Access,
 ) {
     if let Some(uid) = world.get::<session::Uid>(entity) {
         object.send_uid(uid.0);
@@ -162,8 +171,8 @@ pub fn add_object(
     } else {
         object.send_lingering(0);
     }
-    if let Some(state) = world.get::<UserState>(entity) {
-        object.send_state(state.0);
+    if let Some(state) = world.get::<session_core_v1::UserState>(entity) {
+        object.send_state(*state);
     }
     let client = object.client();
     let uid = world.get::<session::Uid>(entity).map_or(0, |uid| uid.0);
@@ -171,9 +180,9 @@ pub fn add_object(
     object.send_can_modify(u32::from(can_modify));
     object.send_done();
 
-    world
-        .resource_mut::<protocol::ProtocolObjects>()
-        .add_user_object(entity, object.clone());
+    if let Some(mut objects) = world.get_mut::<Objects>(entity) {
+        objects.0.push(object.clone());
+    }
     world
         .resource_mut::<UserRegistry>()
         .by_object
@@ -203,9 +212,9 @@ impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond 
                     .resource_mut::<UserRegistry>()
                     .by_object
                     .remove(object);
-                self.world
-                    .resource_mut::<protocol::ProtocolObjects>()
-                    .remove_user_object(entity, object);
+                if let Some(mut objects) = self.world.get_mut::<Objects>(entity) {
+                    objects.0.retain(|candidate| candidate != object);
+                }
             }
             session_core_user::Event::Terminate => {
                 let uid = self

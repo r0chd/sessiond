@@ -2,8 +2,7 @@ use crate::session_core_v1::{session_core_manager, session_core_session};
 use crate::session_management_v1::session_manager as session_manager_v1;
 use crate::session_management_v2::{session_management_session, session_manager};
 use crate::{
-    access, cgroup, config, protocol, session_core_v1, session_management_v1,
-    session_management_v2, user, vt,
+    access, cgroup, config, session_core_v1, session_management_v1, session_management_v2, user, vt,
 };
 use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
@@ -94,7 +93,8 @@ pub struct SessionBundle {
     pub timestamp: Timestamp,
     pub leader_id: LeaderId,
     pub env: SessionEnv,
-    pub active_state: ActiveState,
+    pub active_state: session_core_v1::ActiveState,
+    pub objects: Objects,
 }
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
@@ -171,10 +171,10 @@ impl From<SessionClass> for session_core_v1::SessionClass {
 }
 
 #[derive(Component)]
-pub struct ActiveState(pub session_core_v1::ActiveState);
-
-#[derive(Component)]
 pub struct SessionObject(pub session_management_session::SessionManagementSession);
+
+#[derive(Component, Default)]
+pub struct Objects(pub Vec<session_core_session::SessionCoreSession>);
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SessionId(u32);
@@ -217,7 +217,8 @@ pub fn spawn(
         timestamp: Timestamp(time::SystemTime::now()),
         leader_id: LeaderId(leader_id),
         env: SessionEnv(BTreeMap::new()),
-        active_state: ActiveState(active_state),
+        active_state,
+        objects: Objects::default(),
     });
     cmd.insert(cgroup);
     if let Some(delegated) = delegated {
@@ -307,9 +308,9 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
                 .resource_mut::<SessionRegistry>()
                 .by_object
                 .remove(object);
-            self.world
-                .resource_mut::<protocol::ProtocolObjects>()
-                .remove_session_object(entity, object);
+            if let Some(mut objects) = self.world.get_mut::<Objects>(entity) {
+                objects.0.retain(|candidate| candidate != object);
+            }
             return;
         }
 
@@ -331,12 +332,8 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
             }
             session_core_session::Event::Lock => {
                 log::info!(session_id = session_id.as_raw(); "lock requested");
-                if let Some(objects) = self
-                    .world
-                    .resource::<protocol::ProtocolObjects>()
-                    .session_objects(entity)
-                {
-                    for object in objects {
+                if let Some(objects) = self.world.get::<Objects>(entity) {
+                    for object in &objects.0 {
                         object.send_locked();
                         object.send_ok();
                     }
@@ -344,12 +341,8 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
             }
             session_core_session::Event::Unlock => {
                 log::info!(session_id = session_id.as_raw(); "unlock requested");
-                if let Some(objects) = self
-                    .world
-                    .resource::<protocol::ProtocolObjects>()
-                    .session_objects(entity)
-                {
-                    for object in objects {
+                if let Some(objects) = self.world.get::<Objects>(entity) {
+                    for object in &objects.0 {
                         object.send_unlocked();
                         object.send_ok();
                     }
@@ -444,12 +437,8 @@ impl crate::Sessiond {
             .map_or("", |username| username.0.as_str());
         log::info!(session_id = session_id.as_raw(), uid, username; "session destroyed");
 
-        if let Some(objects) = self
-            .world
-            .resource::<protocol::ProtocolObjects>()
-            .session_objects(entity)
-        {
-            for object in objects {
+        if let Some(objects) = self.world.get::<Objects>(entity) {
+            for object in &objects.0 {
                 object.send_destroyed();
             }
         }
@@ -501,8 +490,8 @@ pub fn add_object(
     if let Some(vt) = world.get::<Vt>(entity).map(|vt| vt.0.get()) {
         object.send_vt(vt);
     }
-    if let Some(active_state) = world.get::<ActiveState>(entity) {
-        object.send_active(active_state.0);
+    if let Some(active_state) = world.get::<session_core_v1::ActiveState>(entity) {
+        object.send_active(*active_state);
     }
     object.send_can_modify(u32::from(can_modify(
         world,
@@ -531,9 +520,9 @@ pub fn add_object(
     }
     object.send_done();
 
-    world
-        .resource_mut::<protocol::ProtocolObjects>()
-        .add_session_object(entity, object.clone());
+    if let Some(mut objects) = world.get_mut::<Objects>(entity) {
+        objects.0.push(object.clone());
+    }
     world
         .resource_mut::<SessionRegistry>()
         .by_object
@@ -554,13 +543,13 @@ pub fn set_active_state(
         .map(|vt| vt.0.get())
         .unwrap_or_default();
 
-    if let Some(mut active_state) = world.get_mut::<ActiveState>(entity) {
-        if active_state.0 == state {
+    if let Some(mut active_state) = world.get_mut::<session_core_v1::ActiveState>(entity) {
+        if *active_state == state {
             return;
         }
 
         log::info!(session_id, vt; "session state changed");
-        active_state.0 = state;
+        *active_state = state;
     }
 }
 

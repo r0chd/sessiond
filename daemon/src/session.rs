@@ -18,9 +18,7 @@ pub struct PendingSession {
     pub remote_host: Option<String>,
     pub env: BTreeMap<String, String>,
     pub leader_id: i32,
-    pub delegated_cgroup: Option<cgroup::Delegated>,
-    pub delegated_controllers: Vec<String>,
-    pub delegated_committed: bool,
+    pub delegate_cgroup: bool,
 }
 
 #[derive(Resource, Default)]
@@ -206,7 +204,6 @@ pub fn spawn(
     active_state: session_core_v1::ActiveState,
     session_object: Option<session_management_session::SessionManagementSession>,
     cgroup: cgroup::CgroupBundle,
-    delegated: Option<cgroup::Delegated>,
 ) -> entity::Entity {
     let mut cmd = world.spawn(SessionBundle {
         marker: Session,
@@ -221,9 +218,6 @@ pub fn spawn(
         objects: Objects::default(),
     });
     cmd.insert(cgroup);
-    if let Some(delegated) = delegated {
-        cmd.insert(delegated);
-    }
     if let Some(vt) = vt.and_then(num::NonZeroU32::new) {
         cmd.insert(Vt(vt));
     }
@@ -632,9 +626,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for crate::Sessiond {
                             remote_host: None,
                             env: BTreeMap::new(),
                             leader_id,
-                            delegated_cgroup: None,
-                            delegated_controllers: Vec::new(),
-                            delegated_committed: false,
+                            delegate_cgroup: false,
                         },
                     );
             }
@@ -673,7 +665,7 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                 let cgroup = match self
                     .world
                     .resource::<cgroup::CgroupManager>()
-                    .create_session_cgroup(&user, session_id, client.creds().pid.as_raw_pid(), &[])
+                    .create_session_cgroup(&user, session_id, client.creds().pid.as_raw_pid())
                 {
                     Ok(cgroup) => cgroup,
                     Err(e) => {
@@ -726,7 +718,6 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                     active_state,
                     None,
                     cgroup,
-                    None,
                 );
 
                 if let Some(pending_env) = pending_env
@@ -795,29 +786,10 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                 session_management_session::Event::Env { name, value } => {
                     session.env.insert(name, value);
                 }
-                session_management_session::Event::DelegateCgroup {
-                    session_management_cgroup,
-                } => {
-                    session.delegated_cgroup = Some(cgroup::Delegated {
-                        object: session_management_cgroup,
-                    });
+                session_management_session::Event::DelegateCgroup => {
+                    session.delegate_cgroup = true;
                 }
                 session_management_session::Event::Done => {
-                    let cgroup_uncommitted = self
-                        .world
-                        .resource::<PendingSessions>()
-                        .by_management_object
-                        .get(object)
-                        .is_some_and(|pending| {
-                            pending.delegated_cgroup.is_some() && !pending.delegated_committed
-                        });
-                    if cgroup_uncommitted {
-                        object.send_error(
-                            session_management_v2::ErrorCode::Io,
-                            "delegated cgroup must be committed before the session",
-                        );
-                        return;
-                    }
                     let Some(pending) = self
                         .world
                         .resource_mut::<PendingSessions>()
@@ -826,14 +798,7 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                     else {
                         return;
                     };
-                    let delegated_object = pending.delegated_cgroup.clone();
                     let Some(user) = uzers::get_user_by_uid(pending.uid) else {
-                        if let Some(delegated) = delegated_object {
-                            delegated.object.send_error(
-                                session_management_v2::ErrorCode::NotFound,
-                                format!("user {} does not exist", pending.uid),
-                            );
-                        }
                         object.send_error(
                             session_management_v2::ErrorCode::NotFound,
                             format!("user {} does not exist", pending.uid),
@@ -847,21 +812,11 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                     let cgroup = match self
                         .world
                         .resource::<cgroup::CgroupManager>()
-                        .create_session_cgroup(
-                            &user,
-                            session_id,
-                            pending.leader_id,
-                            &pending.delegated_controllers,
-                        ) {
+                        .create_session_cgroup(&user, session_id, pending.leader_id)
+                    {
                         Ok(cgroup) => cgroup,
                         Err(e) => {
                             log::error!(session_id = session_id.as_raw(), error = e.to_string().as_str(); "failed to create session cgroup");
-                            if let Some(delegated) = delegated_object {
-                                delegated.object.send_error(
-                                    session_management_v2::ErrorCode::Io,
-                                    format!("failed to create session cgroup: {e}"),
-                                );
-                            }
                             object.send_error(
                                 session_management_v2::ErrorCode::Io,
                                 format!("failed to create session cgroup: {e}"),
@@ -870,36 +825,24 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                         }
                     };
 
-                    let delegated = match pending.delegated_cgroup {
-                        Some(delegated) => {
-                            let error_object = delegated.clone();
-                            match cgroup::CgroupManager::delegate_cgroup(&user, &cgroup, delegated)
-                            {
-                                Ok(delegated) => Some(delegated),
-                                Err(error) => {
-                                    if let Err(cleanup_error) =
-                                        cgroup::CgroupManager::remove_session_cgroup(&cgroup.path.0)
-                                    {
-                                        log::error!(
-                                            session_id = session_id.as_raw(),
-                                            error = cleanup_error.to_string().as_str();
-                                            "failed to clean up session cgroup after delegation failure"
-                                        );
-                                    }
-                                    error_object.object.send_error(
-                                        session_management_v2::ErrorCode::Io,
-                                        format!("failed to delegate session cgroup: {error}"),
-                                    );
-                                    object.send_error(
-                                        session_management_v2::ErrorCode::Io,
-                                        format!("failed to delegate session cgroup: {error}"),
-                                    );
-                                    return;
-                                }
-                            }
+                    if pending.delegate_cgroup
+                        && let Err(error) = cgroup::CgroupManager::delegate_cgroup(&user, &cgroup)
+                    {
+                        if let Err(cleanup_error) =
+                            cgroup::CgroupManager::remove_session_cgroup(&cgroup.path.0)
+                        {
+                            log::error!(
+                                session_id = session_id.as_raw(),
+                                error = cleanup_error.to_string().as_str();
+                                "failed to clean up session cgroup after delegation failure"
+                            );
                         }
-                        None => None,
-                    };
+                        object.send_error(
+                            session_management_v2::ErrorCode::Io,
+                            format!("failed to delegate session cgroup: {error}"),
+                        );
+                        return;
+                    }
 
                     user::create_runtime_dir(
                         pending.uid,
@@ -937,7 +880,6 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                         active_state,
                         Some(object.clone()),
                         cgroup,
-                        delegated,
                     );
                     if let Some(mut session_env) = self.world.get_mut::<SessionEnv>(entity) {
                         session_env.0 = pending.env;

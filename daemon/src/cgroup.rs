@@ -1,4 +1,3 @@
-use crate::session_management_v2::session_management_cgroup;
 use crate::{session, user};
 use anyhow::Context;
 use bevy_ecs::prelude::*;
@@ -32,6 +31,19 @@ impl CgroupManager {
         let root_path = path::Path::new("/sys/fs/cgroup").join(relative_path);
         fs::create_dir_all(&root_path)
             .with_context(|| format!("failed to create cgroup root at {}", root_path.display()))?;
+
+        let manager_path = root_path.join("manager");
+        match fs::create_dir(&manager_path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.into()),
+        }
+        fs::write(
+            manager_path.join("cgroup.procs"),
+            std::process::id().to_string(),
+        )
+        .with_context(|| format!("failed to move sessiond into {}", manager_path.display()))?;
+
         log::info!(root = root_path.to_str(); "cgroup manager init");
 
         Ok(Self { root_path })
@@ -79,11 +91,20 @@ impl CgroupManager {
         user: &uzers::User,
         session_id: session::SessionId,
         leader_pid: i32,
-        controllers: &[String],
     ) -> anyhow::Result<CgroupBundle> {
         let user_cgroup_path = self.ensure_user_cgroup(user.uid())?;
-        Self::enable_controllers(&self.root_path, controllers)?;
-        Self::enable_controllers(&user_cgroup_path, controllers)?;
+        Self::enable_all_controllers(&self.root_path).with_context(|| {
+            format!(
+                "failed to enable controllers in {}",
+                self.root_path.display()
+            )
+        })?;
+        Self::enable_all_controllers(&user_cgroup_path).with_context(|| {
+            format!(
+                "failed to enable controllers in {}",
+                user_cgroup_path.display()
+            )
+        })?;
         let session_cgroup_path = user_cgroup_path.join(format!("session-{}", session_id.as_raw()));
         fs::create_dir(&session_cgroup_path)?;
         fs::set_permissions(&session_cgroup_path, fs::Permissions::from_mode(0o755))?;
@@ -102,11 +123,7 @@ impl CgroupManager {
         })
     }
 
-    pub(crate) fn delegate_cgroup(
-        user: &uzers::User,
-        cgroup: &CgroupBundle,
-        delegated: Delegated,
-    ) -> anyhow::Result<Delegated> {
+    pub(crate) fn delegate_cgroup(user: &uzers::User, cgroup: &CgroupBundle) -> anyhow::Result<()> {
         rustix::fs::chown(
             &cgroup.path.0,
             Some(rustix::process::Uid::from_raw(user.uid())),
@@ -122,31 +139,18 @@ impl CgroupManager {
             )?;
             fs::set_permissions(&file, fs::Permissions::from_mode(0o644))?;
         }
-        delegated.object.send_path(cgroup.path.0.to_string_lossy());
-        Ok(delegated)
+        Ok(())
     }
 
-    fn enable_controllers(parent: &path::Path, requested: &[String]) -> anyhow::Result<()> {
-        if requested.is_empty() {
-            return Ok(());
-        }
-
+    fn enable_all_controllers(parent: &path::Path) -> anyhow::Result<()> {
         let available = fs::read_to_string(parent.join("cgroup.controllers"))?;
         let available = available.split_whitespace().collect::<HashSet<_>>();
-        for controller in requested {
-            if !available.contains(controller.as_str()) {
-                anyhow::bail!(
-                    "controller {controller} is unavailable in {}",
-                    parent.display()
-                );
-            }
-        }
 
         let enabled = fs::read_to_string(parent.join("cgroup.subtree_control"))?;
         let enabled = enabled.split_whitespace().collect::<HashSet<_>>();
-        let operations = requested
+        let operations = available
             .iter()
-            .filter(|controller| !enabled.contains(controller.as_str()))
+            .filter(|controller| !enabled.contains(*controller))
             .map(|controller| format!("+{controller}"))
             .collect::<Vec<_>>();
 
@@ -229,11 +233,6 @@ pub struct CgroupUid(pub u32);
 
 #[derive(Component)]
 pub struct CgroupPath(pub path::PathBuf);
-
-#[derive(Component, Clone)]
-pub struct Delegated {
-    pub object: session_management_cgroup::SessionManagementCgroup,
-}
 
 pub fn kill(
     path: &CgroupPath,
@@ -356,103 +355,4 @@ fn poll_destroy(
         })
     })?;
     Ok(())
-}
-
-impl hyprwire::Dispatch<session_management_cgroup::SessionManagementCgroup> for crate::Sessiond {
-    fn event(
-        &mut self,
-        object: &session_management_cgroup::SessionManagementCgroup,
-        event: <session_management_cgroup::SessionManagementCgroup as hyprwire::Object>::Event<'_>,
-    ) {
-        match event {
-            session_management_cgroup::Event::Controller { name } => {
-                let error = {
-                    let mut pending_sessions =
-                        self.world.resource_mut::<session::PendingSessions>();
-                    let pending =
-                        pending_sessions
-                            .by_management_object
-                            .values_mut()
-                            .find(|pending| {
-                                pending
-                                    .delegated_cgroup
-                                    .as_ref()
-                                    .is_some_and(|delegated| delegated.object == *object)
-                            });
-                    let Some(pending) = pending else {
-                        return object.send_error(
-                            crate::session_management_v2::ErrorCode::NotFound,
-                            "delegated cgroup is no longer pending",
-                        );
-                    };
-                    if pending.delegated_committed {
-                        Some("delegated cgroup configuration is already committed")
-                    } else {
-                        pending.delegated_controllers.push(name);
-                        None
-                    }
-                };
-                if let Some(error) = error {
-                    object.send_error(crate::session_management_v2::ErrorCode::Io, error);
-                }
-            }
-            session_management_cgroup::Event::Commit => {
-                let mut pending_sessions = self.world.resource_mut::<session::PendingSessions>();
-                let pending = pending_sessions
-                    .by_management_object
-                    .values_mut()
-                    .find(|pending| {
-                        pending
-                            .delegated_cgroup
-                            .as_ref()
-                            .is_some_and(|delegated| delegated.object == *object)
-                    });
-                let Some(pending) = pending else {
-                    object.send_error(
-                        crate::session_management_v2::ErrorCode::NotFound,
-                        "delegated cgroup is no longer pending",
-                    );
-                    return;
-                };
-                if pending.delegated_committed {
-                    object.send_error(
-                        crate::session_management_v2::ErrorCode::Io,
-                        "delegated cgroup is already committed",
-                    );
-                } else {
-                    pending.delegated_committed = true;
-                }
-            }
-            session_management_cgroup::Event::Destroy => {
-                if self
-                    .world
-                    .resource_mut::<session::PendingSessions>()
-                    .by_management_object
-                    .values_mut()
-                    .find(|pending| {
-                        pending
-                            .delegated_cgroup
-                            .as_ref()
-                            .is_some_and(|delegated| delegated.object == *object)
-                    })
-                    .map(|pending| {
-                        pending.delegated_cgroup = None;
-                        pending.delegated_controllers.clear();
-                    })
-                    .is_some()
-                {
-                    return;
-                }
-
-                let mut query = self.world.query::<(Entity, &Cgroup, &Delegated)>();
-                let entity = query.iter(&self.world).find_map(|(entity, _, delegated)| {
-                    (delegated.object == *object).then_some(entity)
-                });
-
-                if let Some(entity) = entity {
-                    self.kill_session(entity);
-                }
-            }
-        }
-    }
 }

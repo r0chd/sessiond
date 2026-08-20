@@ -20,7 +20,6 @@ fn make_session(world: &mut World, id: u32, state: session_core_v1::ActiveState)
             uid: cgroup::CgroupUid(1000),
             path: cgroup::CgroupPath(std::path::PathBuf::new()),
         },
-        None,
     )
 }
 
@@ -30,9 +29,7 @@ fn active_state_updates() {
     let entity = make_session(&mut world, 1, session_core_v1::ActiveState::Online);
     session::set_active_state(&mut world, entity, session_core_v1::ActiveState::Active);
     assert_eq!(
-        *world
-            .get::<session_core_v1::ActiveState>(entity)
-            .unwrap(),
+        *world.get::<session_core_v1::ActiveState>(entity).unwrap(),
         session_core_v1::ActiveState::Active
     );
 }
@@ -45,8 +42,7 @@ fn setting_the_same_active_state_is_not_a_change() {
     world.clear_trackers();
     session::set_active_state(&mut world, entity, session_core_v1::ActiveState::Online);
 
-    let mut query = world
-        .query_filtered::<Entity, Changed<session_core_v1::ActiveState>>();
+    let mut query = world.query_filtered::<Entity, Changed<session_core_v1::ActiveState>>();
     assert!(query.iter(&world).next().is_none());
 }
 

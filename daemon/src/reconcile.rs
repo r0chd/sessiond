@@ -62,12 +62,11 @@ pub fn sync_consolekit_sessions(
 pub fn notify_session_active_states(
     mut batch: ResMut<NotifyBatch>,
     sessions: Query<
+        (Entity, &session_core_v1::ActiveState, &session::Objects),
         (
-            Entity,
-            &session_core_v1::ActiveState,
-            &session::Objects,
+            With<session::Session>,
+            Changed<session_core_v1::ActiveState>,
         ),
-        (With<session::Session>, Changed<session_core_v1::ActiveState>),
     >,
     users: Query<
         (Entity, &session_core_v1::UserState, &user::Objects),

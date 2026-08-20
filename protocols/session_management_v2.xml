@@ -31,7 +31,7 @@
    <description summary="start registering a new session, returning an owning session object">
     Returns a session_management_session object bound to the calling
     connection. The client may stage optional fields before creating the
-    session directly or through a delegated cgroup object.
+    session directly or with a delegated cgroup.
    </description>
    <arg name="uid" type="uint" summary="user id"/>
    <returns iface="session_management_session"/>
@@ -99,56 +99,11 @@
    <description summary="destroy this object and tear down the session"/>
   </c2s>
   <c2s name="delegate_cgroup" since="2">
-   <description summary="create a delegated cgroup for the session">
-    Must be sent while staged. Creates the cgroup that will contain the
-    session and returns an independent cgroup control object. The object
-    exposes the path for a session supervisor such as dinit to pass to its
-    --cgroup-path option and manage directly. The object owns the cgroup and
-    its destruction destroys the cgroup.
+   <description summary="delegate the session cgroup">
+    Must be sent while staged. The daemon will create and delegate the
+    session cgroup when the session is committed. The requesting process is
+    placed in it and may discover its path through /proc/self/cgroup.
    </description>
-   <returns iface="session_management_cgroup"/>
-  </c2s>
- </object>
-
- <object name="session_management_cgroup" version="2">
-  <description summary="delegated session cgroup">
-   Control object for the cgroup created for a staged session. The object is
-   usable independently by a session supervisor such as dinit, which can
-   manage the cgroup using the delegated path. Destroying this object
-   destroys the delegated cgroup.
-  </description>
-  <s2c name="path" since="2">
-   <description summary="delegated cgroup path">
-    Reports the exact path of the cgroup created for this object. The client
-    may use this path to edit the cgroup directly.
-   </description>
-   <arg name="path" type="varchar" summary="delegated cgroup path"/>
-  </s2c>
-  <s2c name="error" since="2">
-   <description summary="cgroup delegation failed"/>
-   <arg name="code" type="enum" interface="error_code" summary="error kind"/>
-   <arg name="message" type="varchar" summary="human-readable error detail"/>
-  </s2c>
-  <c2s name="controller" since="2">
-   <description summary="request a cgroup controller">
-    Must be sent before the session is committed. May be sent repeatedly.
-    The requested controller name is made available to the delegated manager
-    when supported by the kernel and permitted by daemon policy. The daemon
-    does not enable the controller in the delegated cgroup; the delegated
-    manager may enable it for its own child cgroups.
-   </description>
-   <arg name="name" type="varchar" summary="cgroup controller name"/>
-  </c2s>
-  <c2s name="commit" since="2">
-   <description summary="commit cgroup delegation configuration">
-    Must be sent after all controller requests and before the owning session
-    is committed. After this request, no further controller requests are
-    allowed. The daemon creates and delegates the cgroup when the owning
-    session is committed, then responds with path or error.
-   </description>
-  </c2s>
-  <c2s name="destroy" destructor="true" since="2">
-   <description summary="destroy this object and its cgroup"/>
   </c2s>
  </object>
 

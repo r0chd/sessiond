@@ -1,6 +1,6 @@
 use anyhow::Context;
 use std::collections::BTreeMap;
-use std::{fs, io, path};
+use std::{fs, io, path, sync};
 use uzers::os::unix::UserExt;
 
 fn default_user() -> String {
@@ -37,7 +37,7 @@ pub struct UserConfig {
     #[serde(default = "default_runtime_dir")]
     pub runtime_dir: String,
     #[serde(default)]
-    pub env: BTreeMap<String, String>,
+    pub env: BTreeMap<sync::Arc<str>, sync::Arc<str>>,
 }
 
 impl Default for UserConfig {
@@ -51,44 +51,49 @@ impl Default for UserConfig {
 }
 
 impl UserConfig {
-    pub fn runtime_dir(&self, uid: u32) -> String {
+    pub fn runtime_dir(&self, uid: u32) -> sync::Arc<str> {
         self.runtime_dir
             .replace(concat!("{", "uid", "}"), &uid.to_string())
+            .into()
     }
 
     pub fn environment(
         &self,
         uid: u32,
         session_id: u32,
-        term: Option<&str>,
-    ) -> BTreeMap<String, String> {
+        term: Option<sync::Arc<str>>,
+    ) -> BTreeMap<sync::Arc<str>, sync::Arc<str>> {
         let runtime_dir = self.runtime_dir(uid);
-        let mut env = BTreeMap::from([
-            ("XDG_RUNTIME_DIR".to_string(), runtime_dir.clone()),
-            ("XDG_SESSION_ID".to_string(), session_id.to_string()),
-            ("TERM".to_string(), term.unwrap_or("linux").to_string()),
+        let mut env: BTreeMap<sync::Arc<str>, sync::Arc<str>> = BTreeMap::from([
+            (sync::Arc::from("XDG_RUNTIME_DIR"), runtime_dir.clone()),
+            (
+                sync::Arc::from("XDG_SESSION_ID"),
+                session_id.to_string().into(),
+            ),
+            (sync::Arc::from("TERM"), term.unwrap_or_else(|| "linux".into())),
         ]);
 
         if let Some(user) = uzers::get_user_by_uid(uid) {
-            let username = user.name().to_string_lossy().to_string();
-            env.insert("USER".to_string(), username.clone());
-            env.insert("LOGNAME".to_string(), username);
+            let username: sync::Arc<str> = user.name().to_string_lossy().to_string().into();
+            env.insert("USER".into(), username.clone());
+            env.insert("LOGNAME".into(), username);
             env.insert(
-                "HOME".to_string(),
-                user.home_dir().to_string_lossy().to_string(),
+                "HOME".into(),
+                user.home_dir().to_string_lossy().to_string().into(),
             );
             env.insert(
-                "SHELL".to_string(),
-                user.shell().to_string_lossy().to_string(),
+                "SHELL".into(),
+                user.shell().to_string_lossy().to_string().into(),
             );
         }
 
         for (name, value) in &self.env {
             env.insert(
-                name.clone(),
+                sync::Arc::clone(name),
                 value
                     .replace(concat!("{", "uid", "}"), &uid.to_string())
-                    .replace(concat!("{", "runtime-dir", "}"), &runtime_dir),
+                    .replace(concat!("{", "runtime-dir", "}"), &runtime_dir)
+                    .into(),
             );
         }
 

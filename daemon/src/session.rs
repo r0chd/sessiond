@@ -8,15 +8,15 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 use hyprwire::server;
 use std::collections::{BTreeMap, HashMap};
-use std::{num, time};
+use std::{num, sync, time};
 
 pub struct PendingSession {
     pub manager: session_manager::SessionManager,
     pub uid: u32,
     pub class: Option<SessionClass>,
     pub vt: Option<num::NonZeroU32>,
-    pub remote_host: Option<String>,
-    pub env: BTreeMap<String, String>,
+    pub remote_host: Option<sync::Arc<str>>,
+    pub env: BTreeMap<sync::Arc<str>, sync::Arc<str>>,
     pub leader_id: i32,
     pub delegate_cgroup: bool,
 }
@@ -78,7 +78,7 @@ pub struct SessionInfoManagers(pub Vec<session_core_manager::SessionCoreManager>
 
 #[derive(Resource, Default)]
 pub struct PendingSessionEnvs(
-    pub HashMap<session_manager_v1::SessionManager, BTreeMap<String, String>>,
+    pub HashMap<session_manager_v1::SessionManager, BTreeMap<sync::Arc<str>, sync::Arc<str>>>,
 );
 
 #[derive(Bundle)]
@@ -117,10 +117,10 @@ pub struct Timestamp(pub time::SystemTime);
 pub struct LeaderId(pub i32);
 
 #[derive(Component, Debug, Clone, PartialEq, Eq)]
-pub struct RemoteHost(pub String);
+pub struct RemoteHost(pub sync::Arc<str>);
 
 #[derive(Component)]
-pub struct SessionEnv(pub BTreeMap<String, String>);
+pub struct SessionEnv(pub BTreeMap<sync::Arc<str>, sync::Arc<str>>);
 
 #[derive(Component, Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum SessionClass {
@@ -193,6 +193,57 @@ impl SessionId {
 
 #[allow(clippy::too_many_arguments)]
 pub fn spawn(
+    commands: &mut Commands,
+    session_id: SessionId,
+    class: SessionClass,
+    uid: u32,
+    username: String,
+    vt: Option<u32>,
+    leader_id: i32,
+    remote_host: Option<sync::Arc<str>>,
+    active_state: session_core_v1::ActiveState,
+    session_object: Option<session_management_session::SessionManagementSession>,
+    env: BTreeMap<sync::Arc<str>, sync::Arc<str>>,
+    cgroup: cgroup::CgroupBundle,
+    session_registry: &mut ResMut<SessionRegistry>,
+) -> entity::Entity {
+    let mut cmd = commands.spawn(SessionBundle {
+        marker: Session,
+        id: session_id,
+        class,
+        uid: Uid(uid),
+        username: Username(username),
+        timestamp: Timestamp(time::SystemTime::now()),
+        leader_id: LeaderId(leader_id),
+        env: SessionEnv(env),
+        active_state,
+        objects: Objects::default(),
+    });
+    cmd.insert(cgroup);
+    if let Some(vt) = vt.and_then(num::NonZeroU32::new) {
+        cmd.insert(Vt(vt));
+    }
+    if let Some(remote_host) = remote_host {
+        cmd.insert(RemoteHost(sync::Arc::clone(&remote_host)));
+    } else {
+        cmd.insert(IsLocal);
+    }
+
+    if let Some(session_object) = session_object {
+        cmd.insert(SessionObject(session_object.clone()));
+        session_registry
+            .by_management_object
+            .insert(session_object, cmd.id());
+    }
+
+    let entity = cmd.id();
+    session_registry.by_id.insert(session_id, entity);
+    session_registry.by_uid.entry(uid).or_default().push(entity);
+    entity
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_legacy(
     world: &mut world::World,
     session_id: SessionId,
     class: SessionClass,
@@ -200,7 +251,7 @@ pub fn spawn(
     username: String,
     vt: Option<u32>,
     leader_id: i32,
-    remote_host: Option<String>,
+    remote_host: Option<sync::Arc<str>>,
     active_state: session_core_v1::ActiveState,
     session_object: Option<session_management_session::SessionManagementSession>,
     cgroup: cgroup::CgroupBundle,
@@ -222,7 +273,7 @@ pub fn spawn(
         cmd.insert(Vt(vt));
     }
     if let Some(remote_host) = remote_host {
-        cmd.insert(RemoteHost(remote_host));
+        cmd.insert(RemoteHost(sync::Arc::clone(&remote_host)));
     } else {
         cmd.insert(IsLocal);
     }
@@ -267,7 +318,7 @@ pub fn session_envs_by_uid(
     world: &world::World,
     uid: u32,
     exclude: Option<entity::Entity>,
-) -> BTreeMap<String, String> {
+) -> BTreeMap<sync::Arc<str>, sync::Arc<str>> {
     let mut env = BTreeMap::new();
     for entity in world.resource::<SessionRegistry>().entities_by_uid(uid) {
         if Some(entity) == exclude {
@@ -603,34 +654,262 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for crate::Sessiond {
 
         match event {
             session_manager::Event::Destroy => {
-                self.world
-                    .resource_mut::<PendingSessions>()
-                    .by_management_object
-                    .retain(|_, pending| pending.manager != *object);
+                self.world.write_message(SessionManagementMessage {
+                    action: SessionManagementAction::ManagerDestroy {
+                        management_object: object.clone(),
+                    },
+                    object: None,
+                });
             }
             session_manager::Event::CreateSession {
                 session_management_session,
                 uid,
             } => {
                 let leader_id = client.creds().pid.as_raw_pid();
-                self.world
-                    .resource_mut::<PendingSessions>()
-                    .by_management_object
-                    .insert(
-                        session_management_session,
-                        PendingSession {
-                            manager: object.clone(),
-                            uid,
-                            class: None,
-                            vt: None,
-                            remote_host: None,
-                            env: BTreeMap::new(),
-                            leader_id,
-                            delegate_cgroup: false,
-                        },
-                    );
+                self.world.write_message(SessionManagementMessage {
+                    action: SessionManagementAction::Create {
+                        management_object: object.clone(),
+                        uid,
+                        leader_id,
+                    },
+                    object: Some(session_management_session),
+                });
             }
         }
+    }
+}
+
+#[derive(Message)]
+pub struct SessionManagementMessage {
+    action: SessionManagementAction,
+    object: Option<session_management_session::SessionManagementSession>,
+}
+
+pub enum SessionManagementAction {
+    Create {
+        management_object: session_manager::SessionManager,
+        uid: u32,
+        leader_id: i32,
+    },
+    ManagerDestroy {
+        management_object: session_manager::SessionManager,
+    },
+    Env {
+        key: sync::Arc<str>,
+        value: sync::Arc<str>,
+    },
+    Vt {
+        vt: u32,
+    },
+    DelegateCgroup,
+    RemoteHost {
+        remote_host: sync::Arc<str>,
+    },
+    Class {
+        class: SessionClass,
+    },
+    Done,
+    Destroy,
+}
+
+pub fn handle_session_management_action(
+    mut commands: Commands,
+    mut actions: MessageReader<SessionManagementMessage>,
+    mut pending_sessions: ResMut<PendingSessions>,
+    mut next_id: ResMut<NextSessionId>,
+    cgroup_manager: Res<cgroup::CgroupManager>,
+    info_managers: Res<SessionInfoManagers>,
+    mut session_registry: ResMut<SessionRegistry>,
+    sessions: Query<(&SessionEnv, &Uid), With<Session>>,
+    config: Res<config::DaemonConfig>,
+) {
+    for action in actions.read() {
+        if let SessionManagementAction::ManagerDestroy { management_object } = &action.action {
+            pending_sessions
+                .by_management_object
+                .retain(|_, pending| pending.manager != *management_object);
+            continue;
+        }
+
+        let Some(object) = action.object.as_ref() else {
+            continue;
+        };
+
+        match &action.action {
+            SessionManagementAction::ManagerDestroy { .. } => unreachable!(),
+            SessionManagementAction::Create {
+                management_object,
+                uid,
+                leader_id,
+            } => {
+                pending_sessions.by_management_object.insert(
+                    object.clone(),
+                    PendingSession {
+                        manager: management_object.clone(),
+                        uid: *uid,
+                        class: None,
+                        vt: None,
+                        remote_host: None,
+                        env: BTreeMap::new(),
+                        leader_id: *leader_id,
+                        delegate_cgroup: false,
+                    },
+                );
+                continue;
+            }
+            SessionManagementAction::Env { key, value } => {
+                if let Some(pending_session) = pending_sessions.by_management_object.get_mut(object)
+                {
+                    pending_session
+                        .env
+                        .insert(sync::Arc::clone(key), sync::Arc::clone(value));
+                    continue;
+                }
+            }
+            SessionManagementAction::Vt { vt } => {
+                if let Some(pending_session) = pending_sessions.by_management_object.get_mut(object)
+                {
+                    pending_session.vt = num::NonZeroU32::new(*vt);
+                    continue;
+                }
+            }
+            SessionManagementAction::RemoteHost { remote_host } => {
+                if let Some(pending_session) = pending_sessions.by_management_object.get_mut(object)
+                {
+                    pending_session.remote_host = Some(sync::Arc::clone(remote_host));
+                    continue;
+                }
+            }
+            SessionManagementAction::Class { class } => {
+                if let Some(pending_session) = pending_sessions.by_management_object.get_mut(object)
+                {
+                    pending_session.class = Some(*class);
+                    continue;
+                }
+            }
+            SessionManagementAction::DelegateCgroup => {
+                if let Some(pending_session) = pending_sessions.by_management_object.get_mut(object)
+                {
+                    pending_session.delegate_cgroup = true;
+                    continue;
+                }
+            }
+            SessionManagementAction::Done => {
+                if let Some(pending_session) = pending_sessions.by_management_object.remove(object)
+                {
+                    let Some(user) = uzers::get_user_by_uid(pending_session.uid) else {
+                        object.send_error(
+                            session_management_v2::ErrorCode::NotFound,
+                            format!("user {} does not exist", pending_session.uid),
+                        );
+                        return;
+                    };
+                    let username = user.name().to_string_lossy().into_owned();
+
+                    let session_id = next_id.take();
+
+                    let cgroup = match cgroup_manager.create_session_cgroup(
+                        &user,
+                        session_id,
+                        pending_session.leader_id,
+                    ) {
+                        Ok(cgroup) => cgroup,
+                        Err(e) => {
+                            log::error!(session_id = session_id.as_raw(), error = e.to_string().as_str(); "failed to create session cgroup");
+                            object.send_error(
+                                session_management_v2::ErrorCode::Io,
+                                format!("failed to create session cgroup: {e}"),
+                            );
+                            return;
+                        }
+                    };
+
+                    if pending_session.delegate_cgroup
+                        && let Err(error) = cgroup::CgroupManager::delegate_cgroup(&user, &cgroup)
+                    {
+                        if let Err(cleanup_error) =
+                            cgroup::CgroupManager::remove_session_cgroup(&cgroup.path.0)
+                        {
+                            log::error!(
+                                session_id = session_id.as_raw(),
+                                error = cleanup_error.to_string().as_str();
+                                "failed to clean up session cgroup after delegation failure"
+                            );
+                        }
+                        object.send_error(
+                            session_management_v2::ErrorCode::Io,
+                            format!("failed to delegate session cgroup: {error}"),
+                        );
+                        return;
+                    }
+
+                    let user_config = config.0.users.get(&username).cloned().unwrap_or_default();
+                    user::create_runtime_dir(
+                        pending_session.uid,
+                        &user_config.runtime_dir(pending_session.uid),
+                    );
+
+                    let is_local = pending_session.remote_host.is_none();
+                    let active_state = if pending_session
+                        .vt
+                        .is_some_and(|vt| vt::current_vt().ok() == Some(vt))
+                        && is_local
+                    {
+                        session_core_v1::ActiveState::Active
+                    } else {
+                        session_core_v1::ActiveState::Online
+                    };
+                    let term = pending_session.env.get("TERM").cloned();
+                    let mut env =
+                        user_config.environment(pending_session.uid, session_id.as_raw(), term);
+                    for (session_env, _) in sessions
+                        .iter()
+                        .filter(|(_, uid)| uid.0 == pending_session.uid)
+                    {
+                        env.extend(session_env.0.clone());
+                    }
+                    env.extend(pending_session.env.clone());
+                    let protocol_env = env.clone();
+
+                    spawn(
+                        &mut commands,
+                        session_id,
+                        pending_session.class.unwrap_or_default(),
+                        pending_session.uid,
+                        username,
+                        pending_session.vt.map(num::NonZeroU32::get),
+                        pending_session.leader_id,
+                        pending_session.remote_host,
+                        active_state,
+                        Some(object.clone()),
+                        env,
+                        cgroup,
+                        &mut session_registry,
+                    );
+
+                    for (name, value) in protocol_env {
+                        object.send_env(name.as_ref(), value.as_ref());
+                    }
+
+                    object.send_session_id(session_id.as_raw());
+                    object.send_done();
+
+                    for manager in &info_managers.0 {
+                        manager.send_session_added(session_id.as_raw());
+                    }
+                    continue;
+                }
+            }
+            SessionManagementAction::Destroy => {
+                pending_sessions.by_management_object.remove(object);
+                continue;
+            }
+        }
+
+        object.send_error(
+            session_management_v2::ErrorCode::Io,
+            "session is no longer pending",
+        );
     }
 }
 
@@ -702,11 +981,11 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                     pending_env
                         .as_ref()
                         .and_then(|env| env.get("TERM"))
-                        .map(String::as_str),
+                        .cloned(),
                 );
                 env.extend(session_envs_by_uid(&self.world, uid, None));
 
-                let session_entity = spawn(
+                let session_entity = spawn_legacy(
                     &mut self.world,
                     session_id,
                     class.into(),
@@ -714,7 +993,11 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                     username,
                     session_vt.map(num::NonZeroU32::get),
                     client.creds().pid.as_raw_pid(),
-                    if is_local { None } else { Some(remote_host) },
+                    if is_local {
+                        None
+                    } else {
+                        Some(remote_host.into())
+                    },
                     active_state,
                     None,
                     cgroup,
@@ -728,7 +1011,7 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
 
                 object.send_session_id(session_id.as_raw());
                 for (name, value) in env {
-                    object.send_env(name.as_str(), value.as_str());
+                    object.send_env(name, value);
                 }
                 object.send_done();
 
@@ -742,7 +1025,7 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                     .0
                     .entry(object.clone())
                     .or_default()
-                    .insert(name, value);
+                    .insert(name.into(), value.into());
             }
             session_manager_v1::Event::DestroySession { session_id } => {
                 if let Some(entity) = entity(&self.world, SessionId::from_raw(session_id)) {
@@ -767,144 +1050,6 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
             '_,
         >,
     ) {
-        if let Some(session) = self
-            .world
-            .resource_mut::<PendingSessions>()
-            .by_management_object
-            .get_mut(object)
-        {
-            match event {
-                session_management_session::Event::Vt { vt } => {
-                    session.vt = num::NonZeroU32::new(vt);
-                }
-                session_management_session::Event::RemoteHost { remote_host } => {
-                    session.remote_host = Some(remote_host);
-                }
-                session_management_session::Event::Class { class } => {
-                    session.class = Some(SessionClass::from(class));
-                }
-                session_management_session::Event::Env { name, value } => {
-                    session.env.insert(name, value);
-                }
-                session_management_session::Event::DelegateCgroup => {
-                    session.delegate_cgroup = true;
-                }
-                session_management_session::Event::Done => {
-                    let Some(pending) = self
-                        .world
-                        .resource_mut::<PendingSessions>()
-                        .by_management_object
-                        .remove(object)
-                    else {
-                        return;
-                    };
-                    let Some(user) = uzers::get_user_by_uid(pending.uid) else {
-                        object.send_error(
-                            session_management_v2::ErrorCode::NotFound,
-                            format!("user {} does not exist", pending.uid),
-                        );
-                        return;
-                    };
-                    let username = user.name().to_string_lossy().into_owned();
-
-                    let session_id = self.world.resource_mut::<NextSessionId>().take();
-
-                    let cgroup = match self
-                        .world
-                        .resource::<cgroup::CgroupManager>()
-                        .create_session_cgroup(&user, session_id, pending.leader_id)
-                    {
-                        Ok(cgroup) => cgroup,
-                        Err(e) => {
-                            log::error!(session_id = session_id.as_raw(), error = e.to_string().as_str(); "failed to create session cgroup");
-                            object.send_error(
-                                session_management_v2::ErrorCode::Io,
-                                format!("failed to create session cgroup: {e}"),
-                            );
-                            return;
-                        }
-                    };
-
-                    if pending.delegate_cgroup
-                        && let Err(error) = cgroup::CgroupManager::delegate_cgroup(&user, &cgroup)
-                    {
-                        if let Err(cleanup_error) =
-                            cgroup::CgroupManager::remove_session_cgroup(&cgroup.path.0)
-                        {
-                            log::error!(
-                                session_id = session_id.as_raw(),
-                                error = cleanup_error.to_string().as_str();
-                                "failed to clean up session cgroup after delegation failure"
-                            );
-                        }
-                        object.send_error(
-                            session_management_v2::ErrorCode::Io,
-                            format!("failed to delegate session cgroup: {error}"),
-                        );
-                        return;
-                    }
-
-                    user::create_runtime_dir(
-                        pending.uid,
-                        &self.user_config(&username).runtime_dir(pending.uid),
-                    );
-
-                    let is_local = pending.remote_host.is_none();
-                    let active_state = if pending
-                        .vt
-                        .is_some_and(|vt| vt::current_vt().ok() == Some(vt))
-                        && is_local
-                    {
-                        session_core_v1::ActiveState::Active
-                    } else {
-                        session_core_v1::ActiveState::Online
-                    };
-                    let term = pending.env.get("TERM").map(String::as_str);
-                    let mut env = self.user_config(&username).environment(
-                        pending.uid,
-                        session_id.as_raw(),
-                        term,
-                    );
-                    env.extend(session_envs_by_uid(&self.world, pending.uid, None));
-                    env.extend(pending.env.clone());
-
-                    let entity = spawn(
-                        &mut self.world,
-                        session_id,
-                        pending.class.unwrap_or_default(),
-                        pending.uid,
-                        username,
-                        pending.vt.map(num::NonZeroU32::get),
-                        pending.leader_id,
-                        pending.remote_host,
-                        active_state,
-                        Some(object.clone()),
-                        cgroup,
-                    );
-                    if let Some(mut session_env) = self.world.get_mut::<SessionEnv>(entity) {
-                        session_env.0 = pending.env;
-                    }
-
-                    object.send_session_id(session_id.as_raw());
-                    for (name, value) in env {
-                        object.send_env(name.as_str(), value.as_str());
-                    }
-                    object.send_done();
-
-                    for manager in &self.world.resource::<SessionInfoManagers>().0 {
-                        manager.send_session_added(session_id.as_raw());
-                    }
-                }
-                session_management_session::Event::Destroy => {
-                    self.world
-                        .resource_mut::<PendingSessions>()
-                        .by_management_object
-                        .remove(object);
-                }
-            }
-            return;
-        }
-
         let Some(entity) = self
             .world
             .resource::<SessionRegistry>()
@@ -912,6 +1057,34 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
             .get(object)
             .copied()
         else {
+            let action = match event {
+                session_management_session::Event::Vt { vt } => SessionManagementAction::Vt { vt },
+                session_management_session::Event::RemoteHost { remote_host } => {
+                    SessionManagementAction::RemoteHost {
+                        remote_host: remote_host.into(),
+                    }
+                }
+                session_management_session::Event::Class { class } => {
+                    SessionManagementAction::Class {
+                        class: SessionClass::from(class),
+                    }
+                }
+                session_management_session::Event::Env { name, value } => {
+                    SessionManagementAction::Env {
+                        key: name.into(),
+                        value: value.into(),
+                    }
+                }
+                session_management_session::Event::DelegateCgroup => {
+                    SessionManagementAction::DelegateCgroup
+                }
+                session_management_session::Event::Done => SessionManagementAction::Done,
+                session_management_session::Event::Destroy => SessionManagementAction::Destroy,
+            };
+            self.world.write_message(SessionManagementMessage {
+                action,
+                object: Some(object.clone()),
+            });
             return;
         };
 

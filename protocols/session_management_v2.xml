@@ -45,9 +45,9 @@
   <description summary="owning handle for a session created via create_session">
    Bound to the connection that created the session. Optional fields may be
    sent while the session is staged. Setting remote_host marks the session as
-   remote. Once done has been sent, modifying staged fields or sending done
-   again is a protocol error. Destroying this object tears down the session
-   and its resources.
+   remote. Once the session has been committed, modifying staged fields or
+   committing it again is a protocol error. Destroying this object tears down
+   the session and its resources.
   </description>
   <c2s name="vt">
    <description summary="stage the virtual terminal number">
@@ -76,8 +76,8 @@
   </c2s>
   <c2s name="done">
    <description summary="commit staged fields and create the session">
-    Creates the session using uid and any staged vt/remote_host/env. The
-    daemon responds with session_id, followed by done, or with error.
+    Creates the session using uid and any staged vt/remote_host/env. This
+    must be sent after all other fields for the session have been staged.
    </description>
   </c2s>
   <s2c name="session_id">

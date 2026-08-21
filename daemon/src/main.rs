@@ -35,6 +35,7 @@ mod vt;
 #[cfg(test)]
 mod tests;
 
+use bevy_ecs::message::MessageRegistry;
 use bevy_ecs::prelude::*;
 #[cfg(feature = "consolekit")]
 use calloop::channel;
@@ -133,6 +134,7 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
         .collect::<Vec<_>>();
 
     let mut world = World::new();
+    MessageRegistry::register_message::<session::SessionManagementMessage>(&mut world);
     world.init_resource::<session::PendingSessionEnvs>();
     world.init_resource::<session::PendingSessions>();
     world.insert_resource(session::NextSessionId(session::SessionId::from_raw(1)));
@@ -153,6 +155,9 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
     )));
 
     let mut schedule = Schedule::new(reconcile::Notify);
+    schedule.add_systems(
+        session::handle_session_management_action.before(user::reconcile_user_states),
+    );
     schedule.add_systems(vt::refresh_current_vt.before(user::reconcile_user_states));
     schedule.add_systems(
         user::reconcile_user_states
@@ -172,6 +177,7 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
             .before(reconcile::send_done),
     );
     schedule.add_systems(reconcile::send_done);
+    schedule.add_systems(bevy_ecs::message::message_update_system.after(reconcile::send_done));
 
     let mut sessiond = Sessiond {
         shutting_down: false,
@@ -243,7 +249,7 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
                         session_core_v1::ActiveState::Online
                     };
 
-                    let entity = session::spawn(
+                    let entity = session::spawn_legacy(
                         &mut sessiond.world,
                         session_id,
                         saved_session.class(),
@@ -251,7 +257,7 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
                         saved_session.username.clone(),
                         saved_session.vt,
                         saved_session.leader,
-                        saved_session.remote_host.clone(),
+                        saved_session.remote_host.clone().map(Into::into),
                         active_state,
                         None,
                         cgroup,
@@ -263,7 +269,13 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
                     sessiond
                         .world
                         .entity_mut(entity)
-                        .insert(session::SessionEnv(saved_session.env.clone()));
+                        .insert(session::SessionEnv(
+                            saved_session
+                                .env
+                                .into_iter()
+                                .map(|(name, value)| (name.into(), value.into()))
+                                .collect(),
+                        ));
                 }
             }
             Err(error) => {

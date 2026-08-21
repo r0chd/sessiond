@@ -26,13 +26,14 @@
   <description summary="privileged unsafe session manager">
    Privileged interface for registering and deregistering unsafe sessions.
    Only accessible to root clients. Clients must not issue another
-   create_session request on the same object before receiving done.
+   create_session request on the same object before the previous request
+   completes.
   </description>
   <c2s name="create_session">
    <description summary="[unsafe: can leak the session] register a session without an owning object">
-    Registers a session and replies on this object with session_id, env
-    variables, and done. Any env variables sent before create_session
-    are attached to the created session. The caller must pair it with
+    Registers a session and replies on this object with session_id and env
+    variables. Any env variables sent before create_session are attached to
+    the created session. The caller must pair it with
     destroy_session or the session's resources (cgroup, runtime
     directory) leak.
    </description>

@@ -123,9 +123,13 @@ pub fn write_state(
                         class: class.to_owned(),
                         vt: vt.map(|vt| vt.0.get()),
                         leader: leader.0,
-                        remote_host: remote_host.map(|host| host.0.clone()),
+                        remote_host: remote_host.map(|host| host.0.to_string()),
                         timestamp,
-                        env: env.0.clone(),
+                        env: env
+                            .0
+                            .iter()
+                            .map(|(name, value)| (name.to_string(), value.to_string()))
+                            .collect(),
                     },
                 )
             },

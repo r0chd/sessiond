@@ -347,7 +347,6 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
                                 "failed to acknowledge VT release"
                             );
                         }
-                        return;
                     }
                     signals::Signal::SIGUSR2 => {
                         if let Err(error) = terminal.ack_acquire() {
@@ -357,28 +356,7 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
                             );
                         }
                     }
-                    _ => return,
-                }
-                let Ok(current) = vt::current_vt() else {
-                    return;
-                };
-
-                {
-                    let mut sessions = state.world.query_filtered::<(
-                        &session::Vt,
-                        &session::IsLocal,
-                        &mut session_core_v1::ActiveState,
-                    ), With<session::Session>>();
-                    for (vt, _, mut active_state) in sessions.iter_mut(&mut state.world) {
-                        let desired = if vt.0 == current {
-                            session_core_v1::ActiveState::Active
-                        } else {
-                            session_core_v1::ActiveState::Online
-                        };
-                        if *active_state != desired {
-                            *active_state = desired;
-                        }
-                    }
+                    _ => {}
                 }
             }
             signals::Signal::SIGTERM | signals::Signal::SIGINT => {

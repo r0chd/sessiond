@@ -18,6 +18,9 @@ in
         description = "session management daemon";
         conditions = [ "service/syslogd/ready" ];
         command = "${cfg.package}/bin/sessiond --config ${daemonConfig} --log-target syslog";
+        cgroup = {
+          delegate = true;
+        };
         environment.LOG_LEVEL = cfg.logLevel;
         notify = "systemd";
       };

@@ -1,4 +1,4 @@
-use crate::{access, session, session_core_user, session_core_v1};
+use crate::{access, cgroup, config, session, session_core_user, session_core_v1};
 use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 use std::collections::HashMap;
@@ -29,6 +29,31 @@ pub struct Lingering;
 pub struct Objects(pub Vec<session_core_user::SessionCoreUser>);
 
 pub fn spawn(
+    commands: &mut Commands,
+    uid: u32,
+    username: String,
+    lingering: bool,
+    state: session_core_v1::UserState,
+    user_registry: &mut ResMut<UserRegistry>,
+) -> entity::Entity {
+    let mut cmd = commands.spawn(UserBundle {
+        marker: User,
+        uid: session::Uid(uid),
+        username: session::Username(username),
+        state,
+        objects: Objects::default(),
+    });
+
+    if lingering {
+        cmd.insert(Lingering);
+    }
+
+    let entity = cmd.id();
+    user_registry.by_uid.insert(uid, entity);
+    entity
+}
+
+pub fn spawn_legacy(
     world: &mut world::World,
     uid: u32,
     username: String,
@@ -101,7 +126,7 @@ pub fn create(world: &mut world::World, uid: u32, lingering: bool) -> Option<ent
         session_core_v1::UserState::Offline
     };
 
-    Some(spawn(
+    Some(spawn_legacy(
         world,
         uid,
         user.name().to_string_lossy().into_owned(),
@@ -282,4 +307,46 @@ pub fn is_lingering(world: &world::World, uid: u32) -> bool {
         .copied()
         .and_then(|entity| world.get::<Lingering>(entity))
         .is_some()
+}
+
+pub fn initialize_lingering_users(
+    mut commands: Commands,
+    config: Res<config::DaemonConfig>,
+    cgroup_manager: Res<cgroup::CgroupManager>,
+    mut user_registry: ResMut<UserRegistry>,
+) {
+    let lingering_users = config
+        .0
+        .users
+        .iter()
+        .filter(|(_, config)| config.linger)
+        .filter_map(|(name, config)| {
+            let user = uzers::get_user_by_name(name)?;
+            let uid = user.uid();
+            Some((uid, config.runtime_dir(uid)))
+        })
+        .collect::<Vec<_>>();
+    for (uid, runtime_dir) in lingering_users {
+        if let Some(user) = uzers::get_user_by_uid(uid) {
+            spawn(
+                &mut commands,
+                uid,
+                user.name().to_string_lossy().into_owned(),
+                true,
+                session_core_v1::UserState::Lingering,
+                &mut user_registry,
+            );
+
+            create_runtime_dir(uid, &runtime_dir);
+            if let Err(e) = cgroup_manager.ensure_user_cgroup(uid) {
+                log::error!(
+                    uid,
+                    error = e.to_string().as_str();
+                    "failed to create user cgroup"
+                );
+            }
+        } else {
+            log::warn!(uid; "configured lingering user no longer exists");
+        }
+    }
 }

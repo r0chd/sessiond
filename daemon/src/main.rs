@@ -35,7 +35,7 @@ mod vt;
 #[cfg(test)]
 mod tests;
 
-use bevy_ecs::message::MessageRegistry;
+use bevy_ecs::message;
 use bevy_ecs::prelude::*;
 #[cfg(feature = "consolekit")]
 use calloop::channel;
@@ -47,7 +47,7 @@ use session_core_v1::session_core_user;
 use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
-use std::{env, fs, num, path};
+use std::{env, fs, path};
 
 #[derive(Parser)]
 struct Args {
@@ -122,19 +122,8 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
         ),
     };
 
-    let lingering_users = config
-        .users
-        .iter()
-        .filter(|(_, config)| config.linger)
-        .filter_map(|(name, config)| {
-            let user = uzers::get_user_by_name(name)?;
-            let uid = user.uid();
-            Some((uid, config.runtime_dir(uid)))
-        })
-        .collect::<Vec<_>>();
-
     let mut world = World::new();
-    MessageRegistry::register_message::<session::SessionManagementMessage>(&mut world);
+    message::MessageRegistry::register_message::<session::SessionManagementMessage>(&mut world);
     world.init_resource::<session::PendingSessionEnvs>();
     world.init_resource::<session::PendingSessions>();
     world.insert_resource(session::NextSessionId(session::SessionId::from_raw(1)));
@@ -147,7 +136,7 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
     world.insert_resource(cgroup::CgroupManager::new()?);
     world.insert_resource(config::DaemonConfig(config));
     let state_path = runtime_dir.join("state.toml");
-    world.insert_resource(state::StateWriter(state_path.clone()));
+    world.insert_resource(state::StateWriter(state_path));
     world.insert_non_send(event_loop.handle());
     #[cfg(feature = "consolekit")]
     world.insert_resource(consolekit::ConsoleKit(consolekit::Server::start(
@@ -155,9 +144,8 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
     )));
 
     let mut schedule = Schedule::new(reconcile::Notify);
-    schedule.add_systems(
-        session::handle_session_management_action.before(user::reconcile_user_states),
-    );
+    schedule
+        .add_systems(session::handle_session_management_action.before(user::reconcile_user_states));
     schedule.add_systems(vt::refresh_current_vt.before(user::reconcile_user_states));
     schedule.add_systems(
         user::reconcile_user_states
@@ -177,7 +165,7 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
             .before(reconcile::send_done),
     );
     schedule.add_systems(reconcile::send_done);
-    schedule.add_systems(bevy_ecs::message::message_update_system.after(reconcile::send_done));
+    schedule.add_systems(message::message_update_system.after(reconcile::send_done));
 
     let mut sessiond = Sessiond {
         shutting_down: false,
@@ -186,103 +174,14 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
         notify_schedule: schedule,
     };
 
-    for (uid, runtime_dir) in lingering_users {
-        user::create(&mut sessiond.world, uid, true);
-        user::create_runtime_dir(uid, &runtime_dir);
-        if let Err(e) = sessiond
-            .world
-            .resource::<cgroup::CgroupManager>()
-            .ensure_user_cgroup(uid)
-        {
-            log::error!(
-                uid,
-                error = e.to_string().as_str();
-                "failed to create user cgroup"
-            );
-        }
-    }
+    let mut startup = Schedule::default();
+    startup.add_systems((user::initialize_lingering_users, state::load_state));
+    startup.run(&mut sessiond.world);
+
     sessiond.world.clear_trackers();
 
     fs::create_dir_all(runtime_dir)?;
     fs::set_permissions(runtime_dir, fs::Permissions::from_mode(0o755))?;
-
-    if state_path.exists() {
-        match state::State::load(&state_path) {
-            Ok(saved_state) => {
-                sessiond.world.resource_mut::<session::NextSessionId>().0 =
-                    session::SessionId::from_raw(saved_state.next_session_id);
-
-                for (raw_id, saved_session) in saved_state.sessions {
-                    let Ok(raw_id) = raw_id.parse::<u32>() else {
-                        log::warn!(session_id = raw_id.as_str(); "ignoring invalid session ID in state");
-                        continue;
-                    };
-                    let session_id = session::SessionId::from_raw(raw_id);
-
-                    let cgroup = match sessiond
-                        .world
-                        .resource_mut::<cgroup::CgroupManager>()
-                        .restore_session_cgroup(saved_session.uid, session_id)
-                    {
-                        Ok(cgroup) => cgroup,
-                        Err(error) => {
-                            log::warn!(session_id = raw_id, error = error.to_string().as_str(); "ignoring session with an unusable cgroup");
-                            continue;
-                        }
-                    };
-
-                    user::create_runtime_dir(
-                        saved_session.uid,
-                        &sessiond
-                            .user_config(&saved_session.username)
-                            .runtime_dir(saved_session.uid),
-                    );
-
-                    let active_state = if saved_session
-                        .vt
-                        .and_then(num::NonZeroU32::new)
-                        .is_some_and(|vt| vt::current_vt().ok() == Some(vt))
-                        && saved_session.remote_host.is_none()
-                    {
-                        session_core_v1::ActiveState::Active
-                    } else {
-                        session_core_v1::ActiveState::Online
-                    };
-
-                    let entity = session::spawn_legacy(
-                        &mut sessiond.world,
-                        session_id,
-                        saved_session.class(),
-                        saved_session.uid,
-                        saved_session.username.clone(),
-                        saved_session.vt,
-                        saved_session.leader,
-                        saved_session.remote_host.clone().map(Into::into),
-                        active_state,
-                        None,
-                        cgroup,
-                    );
-                    sessiond
-                        .world
-                        .entity_mut(entity)
-                        .insert(session::Timestamp(saved_session.timestamp()));
-                    sessiond
-                        .world
-                        .entity_mut(entity)
-                        .insert(session::SessionEnv(
-                            saved_session
-                                .env
-                                .into_iter()
-                                .map(|(name, value)| (name.into(), value.into()))
-                                .collect(),
-                        ));
-                }
-            }
-            Err(error) => {
-                log::error!(error = error.to_string().as_str(); "failed to load session state");
-            }
-        }
-    }
 
     let socket_path = runtime_dir.join("sessiond.sock");
     let mut socket = server::Server::bind(&socket_path)?;

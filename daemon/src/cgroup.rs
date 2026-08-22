@@ -28,21 +28,13 @@ impl CgroupManager {
             .strip_prefix('/')
             .context("cgroup v2 path is not absolute")?;
 
-        let root_path = path::Path::new("/sys/fs/cgroup").join(relative_path);
+        let process_path = path::Path::new("/sys/fs/cgroup").join(relative_path);
+        let root_path = process_path
+            .parent()
+            .context("supervisor cgroup has no parent")?
+            .to_owned();
         fs::create_dir_all(&root_path)
             .with_context(|| format!("failed to create cgroup root at {}", root_path.display()))?;
-
-        let manager_path = root_path.join("manager");
-        match fs::create_dir(&manager_path) {
-            Ok(()) => {}
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(error) => return Err(error.into()),
-        }
-        fs::write(
-            manager_path.join("cgroup.procs"),
-            std::process::id().to_string(),
-        )
-        .with_context(|| format!("failed to move sessiond into {}", manager_path.display()))?;
 
         log::info!(root = root_path.to_str(); "cgroup manager init");
 

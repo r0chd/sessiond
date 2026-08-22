@@ -95,7 +95,7 @@ sessiondTest {
         return machine.succeed(f"sessionctl session list --json | jq -r '.sessions[] | select(.username == \"{username}\" and .vt == {vt}) | .id'").strip()
 
     def cgroup_path(uid, session_id):
-        return f"/sys/fs/cgroup/sessiond/user-{uid}/session-{session_id}"
+        return f"/sys/fs/cgroup/system/sessiond/user-{uid}/session-{session_id}"
 
     def assert_cgroup(uid, session_id):
         machine.succeed(f"test -d {cgroup_path(uid, session_id)}")
@@ -104,7 +104,7 @@ sessiondTest {
         machine.wait_until_succeeds(f"test ! -e {cgroup_path(uid, session_id)}")
 
     def wait_no_user_cgroup(uid):
-        machine.wait_until_succeeds(f"test ! -e /sys/fs/cgroup/sessiond/user-{uid}")
+        machine.wait_until_succeeds(f"test ! -e /sys/fs/cgroup/system/sessiond/user-{uid}")
 
     def login(marker, username, vt, count):
         machine.succeed(f"touch /run/{marker}")

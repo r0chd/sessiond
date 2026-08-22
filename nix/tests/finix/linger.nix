@@ -142,7 +142,7 @@ sessiondTest {
 
     for uid in (user_2_uid, user_3_uid):
         machine.wait_until_succeeds(f"test -d /run/user/{uid}")
-        machine.wait_until_succeeds(f"test -d /sys/fs/cgroup/sessiond/user-{uid}")
+        machine.wait_until_succeeds(f"test -d /sys/fs/cgroup/system/sessiond/user-{uid}")
 
     def wait_session(username, vt):
         machine.wait_until_succeeds(f"sessionctl session list --json > /tmp/sessions.json && jq -e '.sessions[] | select(.username == \"{username}\" and .vt == {vt})' /tmp/sessions.json >/dev/null")
@@ -154,11 +154,11 @@ sessiondTest {
         return machine.succeed(f"sessionctl session list --json | jq -r '.sessions[] | select(.username == \"{username}\" and .vt == {vt}) | .id'").strip()
 
     def session_cgroup(uid, session_id):
-        return f"/sys/fs/cgroup/sessiond/user-{uid}/session-{session_id}"
+        return f"/sys/fs/cgroup/system/sessiond/user-{uid}/session-{session_id}"
 
     def assert_linger_paths(uid):
         machine.succeed(f"test -d /run/user/{uid}")
-        machine.succeed(f"test -d /sys/fs/cgroup/sessiond/user-{uid}")
+        machine.succeed(f"test -d /sys/fs/cgroup/system/sessiond/user-{uid}")
 
     def assert_session_cgroup(uid, session_id):
         machine.succeed(f"test -d {session_cgroup(uid, session_id)}")

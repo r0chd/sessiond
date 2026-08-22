@@ -98,8 +98,8 @@ sessiondTest {
     machine.succeed("jq -e '.sessions[] | select(.active == \"active\" and .vt == 1 and .tty == \"tty1\")' /tmp/sessions.json >/dev/null")
     machine.succeed("jq -e 'all(.sessions[]; .uid == 1000 and .username == \"user_1\" and .leader > 0 and .timestamp > 0)' /tmp/sessions.json >/dev/null")
 
-    machine.succeed("test -d /sys/fs/cgroup/sessiond/user-1000")
-    machine.succeed("test -d /sys/fs/cgroup/sessiond/user-1000/session-1")
+    machine.succeed("test -d /sys/fs/cgroup/system/sessiond/user-1000")
+    machine.succeed("test -d /sys/fs/cgroup/system/sessiond/user-1000/session-1")
 
     machine.shutdown()
   '';

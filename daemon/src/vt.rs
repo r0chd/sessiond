@@ -23,6 +23,10 @@ pub fn refresh_current_vt(
     };
 
     for (vt, is_local, mut active_state) in &mut sessions {
+        if *active_state == session_core_v1::ActiveState::Closing {
+            continue;
+        }
+
         let desired = match (is_local, vt.0 == current_vt) {
             (Some(_), true) => session_core_v1::ActiveState::Active,
             (Some(_), false) => session_core_v1::ActiveState::Online,

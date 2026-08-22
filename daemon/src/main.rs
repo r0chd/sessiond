@@ -32,9 +32,6 @@ mod terminal;
 mod user;
 mod vt;
 
-#[cfg(test)]
-mod tests;
-
 use bevy_ecs::message;
 use bevy_ecs::prelude::*;
 #[cfg(feature = "consolekit")]
@@ -70,22 +67,6 @@ struct Sessiond {
     loop_signal: calloop::LoopSignal,
     world: World,
     notify_schedule: Schedule,
-}
-
-impl Sessiond {
-    fn remove_session(&mut self, session_id: session::SessionId) -> Option<Entity> {
-        let entity = session::entity(&self.world, session_id)?;
-        self.world
-            .resource_mut::<session::SessionRegistry>()
-            .remove_entity(entity);
-        self.world.despawn(entity);
-        #[cfg(feature = "consolekit")]
-        self.world
-            .resource::<consolekit::ConsoleKit>()
-            .0
-            .remove_session(session_id);
-        Some(entity)
-    }
 }
 
 fn notify(message: &[u8]) -> rustix::io::Result<()> {
@@ -145,7 +126,8 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
 
     let mut schedule = Schedule::new(reconcile::Notify);
     schedule
-        .add_systems(session::handle_session_management_action.before(user::reconcile_user_states));
+        .add_systems(session::handle_session_management_action.before(user::ensure_session_users));
+    schedule.add_systems(user::ensure_session_users.before(user::reconcile_user_states));
     schedule.add_systems(vt::refresh_current_vt.before(user::reconcile_user_states));
     schedule.add_systems(
         user::reconcile_user_states
@@ -176,6 +158,12 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
 
     let mut startup = Schedule::default();
     startup.add_systems((user::initialize_lingering_users, state::load_state));
+    startup.add_systems(
+        user::ensure_session_users
+            .after(user::initialize_lingering_users)
+            .after(state::load_state),
+    );
+    startup.add_systems(user::reconcile_user_states.after(user::ensure_session_users));
     startup.run(&mut sessiond.world);
 
     sessiond.world.clear_trackers();

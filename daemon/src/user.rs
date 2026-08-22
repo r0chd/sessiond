@@ -1,4 +1,4 @@
-use crate::{access, cgroup, config, session, session_core_user, session_core_v1};
+use crate::{cgroup, config, session, session_core_user, session_core_v1};
 use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 use std::collections::HashMap;
@@ -151,7 +151,6 @@ pub fn add_object(
     world: &mut world::World,
     entity: entity::Entity,
     object: session_core_user::SessionCoreUser,
-    management_access: access::Access,
 ) {
     if let Some(uid) = world.get::<session::Uid>(entity) {
         object.send_uid(uid.0);
@@ -169,7 +168,7 @@ pub fn add_object(
     }
     let client = object.client();
     let uid = world.get::<session::Uid>(entity).map_or(0, |uid| uid.0);
-    let can_modify = management_access.allows(client.creds()) || uid == client.creds().uid.as_raw();
+    let can_modify = client.creds().uid.is_root() || uid == client.creds().uid.as_raw();
     object.send_can_modify(u32::from(can_modify));
     object.send_done();
 
@@ -214,13 +213,7 @@ impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond 
                     .world
                     .get::<session::Uid>(entity)
                     .map_or(0, |uid| uid.0);
-                if !self
-                    .world
-                    .resource::<access::AccessRules>()
-                    .management
-                    .allows(client.creds())
-                    && uid != client.creds().uid.as_raw()
-                {
+                if !client.creds().uid.is_root() && uid != client.creds().uid.as_raw() {
                     object.send_error(
                         session_core_v1::ErrorCode::PermissionDenied,
                         "permission denied",
@@ -243,13 +236,7 @@ impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond 
                     .world
                     .get::<session::Uid>(entity)
                     .map_or(0, |uid| uid.0);
-                if !self
-                    .world
-                    .resource::<access::AccessRules>()
-                    .management
-                    .allows(client.creds())
-                    && uid != client.creds().uid.as_raw()
-                {
+                if !client.creds().uid.is_root() && uid != client.creds().uid.as_raw() {
                     object.send_error(
                         session_core_v1::ErrorCode::PermissionDenied,
                         "permission denied",

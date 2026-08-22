@@ -19,7 +19,6 @@ mod session_power_v1 {
     pub use spec::*;
 }
 
-mod access;
 mod cgroup;
 mod config;
 #[cfg(feature = "consolekit")]
@@ -39,7 +38,7 @@ use calloop::channel;
 use calloop::{generic, signals};
 use clap::{Parser, ValueEnum};
 use hyprwire::server;
-use rustix::{net, process};
+use rustix::net;
 use session_core_v1::session_core_user;
 use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStrExt;
@@ -96,24 +95,16 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
         signals::Signal::SIGINT,
     ])?;
 
-    let access_rules = access::AccessRules {
-        management: access::Access::new(
-            resolve_user(&config.management.user)?,
-            resolve_group(&config.management.group)?,
-        ),
-    };
-
     let mut world = World::new();
     message::MessageRegistry::register_message::<session::SessionManagementMessage>(&mut world);
+    message::MessageRegistry::register_message::<power::PowerActionRequest>(&mut world);
     world.init_resource::<session::PendingSessionEnvs>();
     world.init_resource::<session::PendingSessions>();
     world.insert_resource(session::NextSessionId(session::SessionId::from_raw(1)));
     world.init_resource::<session::SessionInfoManagers>();
-    world.init_resource::<power::PowerManagers>();
     world.init_resource::<reconcile::NotifyBatch>();
     world.init_resource::<session::SessionRegistry>();
     world.init_resource::<user::UserRegistry>();
-    world.insert_resource(access_rules);
     world.insert_resource(cgroup::CgroupManager::new()?);
     world.insert_resource(config::DaemonConfig(config));
     let state_path = runtime_dir.join("state.toml");
@@ -136,6 +127,10 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
             .before(power::notify_power_control)
             .before(reconcile::send_done),
     );
+    schedule.add_systems(
+        power::initialize_power_manager_permissions.before(power::notify_power_control),
+    );
+    schedule.add_systems(power::handle_power_action.before(reconcile::send_done));
     schedule.add_systems(
         (
             state::write_state,
@@ -211,12 +206,27 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
 
             match request.kind {
                 consolekit::PowerRequestKind::Execute(action) => {
-                    let result = state.handle_power_action(action, &request.creds);
-                    let _ = request.reply.send(consolekit::PowerResponse::Done(result));
+                    state.world.write_message(power::PowerActionRequest {
+                        action,
+                        creds: request.creds,
+                        responder: power::PowerActionResponder::ConsoleKit(request.reply),
+                    });
                 }
                 consolekit::PowerRequestKind::Can(action) => {
                     let _ = action;
-                    let can = power::can_control_power(&state.world, &request.creds);
+                    let can = request.creds.uid.is_root()
+                        || session::entities(&state.world)
+                            .into_iter()
+                            .filter_map(|entity| {
+                                Some((
+                                    state.world.get::<session::Uid>(entity)?,
+                                    state.world.get::<session::SessionClass>(entity)?,
+                                ))
+                            })
+                            .all(|(uid, class)| {
+                                uid.0 == request.creds.uid.as_raw()
+                                    || *class != session::SessionClass::User
+                            });
                     let _ = request.reply.send(consolekit::PowerResponse::Can(can));
                 }
             }
@@ -314,24 +324,4 @@ fn main() -> anyhow::Result<()> {
     log::info!("sessiond daemon starting");
 
     run(&args.runtime_dir, config::Config::load(args.config)?)
-}
-
-fn resolve_user(user: &str) -> anyhow::Result<process::Uid> {
-    if let Ok(uid) = user.parse::<process::RawUid>() {
-        return Ok(process::Uid::from_raw(uid));
-    }
-
-    uzers::get_user_by_name(user)
-        .map(|user: uzers::User| process::Uid::from_raw(user.uid()))
-        .ok_or_else(|| anyhow::anyhow!("unknown user {user:?}"))
-}
-
-fn resolve_group(group: &str) -> anyhow::Result<process::Gid> {
-    if let Ok(gid) = group.parse::<process::RawGid>() {
-        return Ok(process::Gid::from_raw(gid));
-    }
-
-    uzers::get_group_by_name(group)
-        .map(|group: uzers::Group| process::Gid::from_raw(group.gid()))
-        .ok_or_else(|| anyhow::anyhow!("unknown group {group:?}"))
 }

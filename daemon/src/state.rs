@@ -1,12 +1,11 @@
-#![allow(clippy::needless_pass_by_value, clippy::type_complexity)]
-use crate::session;
+use crate::{cgroup, config, session, session_core_v1, user, vt};
 use anyhow::Context;
 use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
-use std::{fs, path, time};
+use std::{fs, num, path, sync, time};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -31,7 +30,7 @@ pub struct Session {
     pub remote_host: Option<String>,
     pub timestamp: u128,
     #[serde(default)]
-    pub env: BTreeMap<String, String>,
+    pub env: BTreeMap<sync::Arc<str>, sync::Arc<str>>,
 }
 
 impl Session {
@@ -128,7 +127,7 @@ pub fn write_state(
                         env: env
                             .0
                             .iter()
-                            .map(|(name, value)| (name.to_string(), value.to_string()))
+                            .map(|(name, value)| (sync::Arc::clone(name), sync::Arc::clone(value)))
                             .collect(),
                     },
                 )
@@ -177,5 +176,82 @@ impl State {
         fs::rename(&temp_path, path)?;
 
         Ok(())
+    }
+}
+
+pub fn load_state(
+    mut commands: Commands,
+    state_writer: Res<StateWriter>,
+    mut next_session_id: ResMut<session::NextSessionId>,
+    cgroup_manager: Res<cgroup::CgroupManager>,
+    config: Res<config::DaemonConfig>,
+    mut session_registry: ResMut<session::SessionRegistry>,
+) {
+    if state_writer.0.exists() {
+        match State::load(&state_writer.0) {
+            Ok(saved_state) => {
+                next_session_id.0 = session::SessionId::from_raw(saved_state.next_session_id);
+
+                for (raw_id, saved_session) in saved_state.sessions {
+                    let Ok(raw_id) = raw_id.parse::<u32>() else {
+                        log::warn!(session_id = raw_id.as_str(); "ignoring invalid session ID in state");
+                        continue;
+                    };
+                    let session_id = session::SessionId::from_raw(raw_id);
+
+                    let cgroup = match cgroup_manager
+                        .restore_session_cgroup(saved_session.uid, session_id)
+                    {
+                        Ok(cgroup) => cgroup,
+                        Err(error) => {
+                            log::warn!(session_id = raw_id, error = error.to_string().as_str(); "ignoring session with an unusable cgroup");
+                            continue;
+                        }
+                    };
+
+                    let runtime_dir = config
+                        .0
+                        .users
+                        .get(&saved_session.username)
+                        .cloned()
+                        .unwrap_or_default()
+                        .runtime_dir(saved_session.uid);
+                    user::create_runtime_dir(saved_session.uid, &runtime_dir);
+
+                    let active_state = if saved_session
+                        .vt
+                        .and_then(num::NonZeroU32::new)
+                        .is_some_and(|vt| vt::current_vt().ok() == Some(vt))
+                        && saved_session.remote_host.is_none()
+                    {
+                        session_core_v1::ActiveState::Active
+                    } else {
+                        session_core_v1::ActiveState::Online
+                    };
+
+                    let entity = session::spawn(
+                        &mut commands,
+                        session_id,
+                        saved_session.class(),
+                        saved_session.uid,
+                        saved_session.username.clone(),
+                        saved_session.vt,
+                        saved_session.leader,
+                        saved_session.remote_host.clone().map(Into::into),
+                        active_state,
+                        None,
+                        saved_session.env.clone(),
+                        cgroup,
+                        &mut session_registry,
+                    );
+                    commands
+                        .entity(entity)
+                        .insert(session::Timestamp(saved_session.timestamp()));
+                }
+            }
+            Err(error) => {
+                log::error!(error = error.to_string().as_str(); "failed to load session state");
+            }
+        }
     }
 }

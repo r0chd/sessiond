@@ -109,8 +109,8 @@ impl CgroupManager {
 
         Ok(CgroupBundle {
             marker: Cgroup,
-            session_id: CgroupSessionId(session_id),
-            uid: CgroupUid(user.uid()),
+            session_id,
+            uid: session::Uid(user.uid()),
             path: CgroupPath(session_cgroup_path),
         })
     }
@@ -171,8 +171,8 @@ impl CgroupManager {
 
         Ok(CgroupBundle {
             marker: Cgroup,
-            session_id: CgroupSessionId(session_id),
-            uid: CgroupUid(uid),
+            session_id,
+            uid: session::Uid(uid),
             path: CgroupPath(session_cgroup_path),
         })
     }
@@ -209,27 +209,21 @@ fn remove_cgroup_tree(path: &path::Path) -> anyhow::Result<()> {
 #[derive(Bundle)]
 pub struct CgroupBundle {
     pub marker: Cgroup,
-    pub session_id: CgroupSessionId,
-    pub uid: CgroupUid,
+    pub session_id: session::SessionId,
+    pub uid: session::Uid,
     pub path: CgroupPath,
 }
 
 #[derive(Component)]
 pub struct Cgroup;
 
-#[derive(Component, Clone, Copy)]
-pub struct CgroupSessionId(pub session::SessionId);
-
-#[derive(Component, Clone, Copy)]
-pub struct CgroupUid(pub u32);
-
 #[derive(Component)]
 pub struct CgroupPath(pub path::PathBuf);
 
 pub fn kill(
     path: &CgroupPath,
-    session_id: CgroupSessionId,
-    uid: CgroupUid,
+    session_id: session::SessionId,
+    uid: session::Uid,
     loop_handle: &calloop::LoopHandle<'static, crate::Sessiond>,
 ) -> anyhow::Result<()> {
     fs::write(path.0.join("cgroup.kill"), b"1")?;
@@ -239,8 +233,8 @@ pub fn kill(
 
 pub fn terminate(
     path: &CgroupPath,
-    session_id: CgroupSessionId,
-    uid: CgroupUid,
+    session_id: session::SessionId,
+    uid: session::Uid,
     loop_handle: &calloop::LoopHandle<'static, crate::Sessiond>,
 ) -> anyhow::Result<()> {
     let procs = fs::read_to_string(path.0.join("cgroup.procs"))?;
@@ -253,7 +247,6 @@ pub fn terminate(
 
     poll_destroy(path, session_id, uid, loop_handle)?;
 
-    let session_id = session_id.0;
     let path = path.0.clone();
     loop_handle
         .insert_source(
@@ -277,8 +270,8 @@ pub fn terminate(
 
 fn poll_destroy(
     path: &CgroupPath,
-    session_id: CgroupSessionId,
-    uid: CgroupUid,
+    session_id: session::SessionId,
+    uid: session::Uid,
     loop_handle: &calloop::LoopHandle<'static, crate::Sessiond>,
 ) -> anyhow::Result<()> {
     let cgroup_path = path.0.clone();
@@ -302,7 +295,7 @@ fn poll_destroy(
             if contents.contains("populated 0") {
                 remove_cgroup_tree(&cgroup_path)?;
                 log::info!(
-                    session_id = session_id.0.as_raw(),
+                    session_id = session_id.as_raw(),
                     path = cgroup_path.to_str();
                     "cgroup destroyed"
                 );
@@ -314,7 +307,7 @@ fn poll_destroy(
                     .len()
                     == 1;
 
-                state.finish_session_destroy(session_id.0);
+                state.finish_session_destroy(session_id);
 
                 if last_session
                     && !user::is_lingering(&state.world, uid.0)

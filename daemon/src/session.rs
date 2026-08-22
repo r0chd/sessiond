@@ -100,13 +100,6 @@ pub struct SessionRegistry {
 }
 
 impl SessionRegistry {
-    pub fn entity_by_object(
-        &self,
-        object: &session_core_session::SessionCoreSession,
-    ) -> Option<Entity> {
-        self.by_object.get(object).copied()
-    }
-
     pub fn entities_by_uid(&self, uid: u32) -> Vec<Entity> {
         self.by_uid.get(&uid).cloned().unwrap_or_default()
     }
@@ -321,6 +314,142 @@ pub fn can_modify(world: &world::World, entity: entity::Entity, creds: &hyprwire
     creds.uid.is_root() || creds.uid.as_raw() == session_uid
 }
 
+#[derive(Message)]
+pub struct SessionControlMessage {
+    pub entity: entity::Entity,
+    pub object: Option<session_core_session::SessionCoreSession>,
+    pub action: SessionControlAction,
+}
+
+pub enum SessionControlAction {
+    Terminate { creds: hyprwire::Creds },
+    Kill { creds: hyprwire::Creds },
+    Lock { creds: hyprwire::Creds },
+    Unlock { creds: hyprwire::Creds },
+    Destroy,
+}
+
+pub fn handle_session_control(
+    mut actions: MessageReader<SessionControlMessage>,
+    mut session_registry: ResMut<SessionRegistry>,
+    mut sessions: Query<
+        (
+            &SessionId,
+            &Uid,
+            &mut session_core_v1::ActiveState,
+            &Vt,
+            &mut Objects,
+        ),
+        With<Session>,
+    >,
+    cgroups: Query<(&SessionId, &cgroup::CgroupPath), With<cgroup::Cgroup>>,
+    loop_handle: NonSend<'_, calloop::LoopHandle<'static, crate::Sessiond>>,
+) {
+    for action in actions.read() {
+        match action.action {
+            SessionControlAction::Terminate { creds } => {
+                let Ok((session_id, uid, mut active_state, vt, _)) =
+                    sessions.get_mut(action.entity)
+                else {
+                    continue;
+                };
+                if !creds.uid.is_root() && creds.uid.as_raw() != uid.0 {
+                    if let Some(object) = &action.object {
+                        object.send_error(
+                            session_core_v1::ErrorCode::PermissionDenied,
+                            "permission denied",
+                        );
+                    }
+                    continue;
+                }
+                log::info!(session_id = session_id.as_raw(); "terminate requested");
+                *active_state = session_core_v1::ActiveState::Closing;
+                log::info!(session_id = session_id.0, vt = vt.0; "session state changed");
+                let Ok((cgroup_session_id, cgroup_path)) = cgroups.get(action.entity) else {
+                    continue;
+                };
+                if let Err(err) =
+                    cgroup::terminate(cgroup_path, *cgroup_session_id, *uid, &loop_handle)
+                {
+                    log::error!(session_id = session_id.as_raw(), err = err.to_string().as_str(); "terminate failed");
+                }
+            }
+            SessionControlAction::Kill { creds } => {
+                let Ok((session_id, uid, mut active_state, vt, _)) =
+                    sessions.get_mut(action.entity)
+                else {
+                    continue;
+                };
+                if !creds.uid.is_root() && creds.uid.as_raw() != uid.0 {
+                    if let Some(object) = &action.object {
+                        object.send_error(
+                            session_core_v1::ErrorCode::PermissionDenied,
+                            "permission denied",
+                        );
+                    }
+                    continue;
+                }
+                log::info!(session_id = session_id.as_raw(); "kill requested");
+                *active_state = session_core_v1::ActiveState::Closing;
+                log::info!(session_id = session_id.0, vt = vt.0; "session state changed");
+                let Ok((cgroup_session_id, cgroup_path)) = cgroups.get(action.entity) else {
+                    continue;
+                };
+                if let Err(err) = cgroup::kill(cgroup_path, *cgroup_session_id, *uid, &loop_handle)
+                {
+                    log::error!(session_id = session_id.as_raw(), err = err.to_string().as_str(); "kill failed");
+                }
+            }
+            SessionControlAction::Lock { creds } => {
+                let Ok((session_id, uid, _, _, objects)) = sessions.get_mut(action.entity) else {
+                    continue;
+                };
+                if !creds.uid.is_root() && creds.uid.as_raw() != uid.0 {
+                    if let Some(object) = &action.object {
+                        object.send_error(
+                            session_core_v1::ErrorCode::PermissionDenied,
+                            "permission denied",
+                        );
+                    }
+                    continue;
+                }
+                for object in &objects.0 {
+                    object.send_locked();
+                    object.send_ok();
+                }
+                log::info!(session_id = session_id.as_raw(); "lock requested");
+            }
+            SessionControlAction::Unlock { creds } => {
+                let Ok((session_id, uid, _, _, objects)) = sessions.get_mut(action.entity) else {
+                    continue;
+                };
+                if !creds.uid.is_root() && creds.uid.as_raw() != uid.0 {
+                    if let Some(object) = &action.object {
+                        object.send_error(
+                            session_core_v1::ErrorCode::PermissionDenied,
+                            "permission denied",
+                        );
+                    }
+                    continue;
+                }
+                for object in &objects.0 {
+                    object.send_unlocked();
+                    object.send_ok();
+                }
+                log::info!(session_id = session_id.as_raw(); "unlock requested");
+            }
+            SessionControlAction::Destroy => {
+                if let Some(object) = &action.object {
+                    session_registry.by_object.remove(object);
+                    if let Ok((_, _, _, _, mut objects)) = sessions.get_mut(action.entity) {
+                        objects.0.retain(|candidate| candidate != object);
+                    }
+                }
+            }
+        }
+    }
+}
+
 impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Sessiond {
     fn event(
         &mut self,
@@ -330,100 +459,63 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
         let Some(entity) = self
             .world
             .resource::<SessionRegistry>()
-            .entity_by_object(object)
+            .by_object
+            .get(object)
+            .copied()
         else {
             return;
         };
-        let Some(session_id) = self.world.get::<SessionId>(entity) else {
-            return;
-        };
-
-        if matches!(event, session_core_session::Event::Destroy) {
-            self.world
-                .resource_mut::<SessionRegistry>()
-                .by_object
-                .remove(object);
-            if let Some(mut objects) = self.world.get_mut::<Objects>(entity) {
-                objects.0.retain(|candidate| candidate != object);
-            }
-            return;
-        }
-
         let client = object.client();
-        if !can_modify(&self.world, entity, client.creds()) {
-            object.send_error(
-                session_core_v1::ErrorCode::PermissionDenied,
-                "permission denied",
-            );
-            return;
-        }
 
         match event {
             session_core_session::Event::Terminate => {
-                self.terminate_session(entity);
+                self.world.write_message(SessionControlMessage {
+                    entity,
+                    object: Some(object.clone()),
+                    action: SessionControlAction::Terminate {
+                        creds: *client.creds(),
+                    },
+                });
             }
             session_core_session::Event::Kill => {
-                self.kill_session(entity);
+                self.world.write_message(SessionControlMessage {
+                    entity,
+                    object: Some(object.clone()),
+                    action: SessionControlAction::Kill {
+                        creds: *client.creds(),
+                    },
+                });
             }
             session_core_session::Event::Lock => {
-                log::info!(session_id = session_id.as_raw(); "lock requested");
-                if let Some(objects) = self.world.get::<Objects>(entity) {
-                    for object in &objects.0 {
-                        object.send_locked();
-                        object.send_ok();
-                    }
-                }
+                self.world.write_message(SessionControlMessage {
+                    entity,
+                    object: Some(object.clone()),
+                    action: SessionControlAction::Lock {
+                        creds: *client.creds(),
+                    },
+                });
             }
             session_core_session::Event::Unlock => {
-                log::info!(session_id = session_id.as_raw(); "unlock requested");
-                if let Some(objects) = self.world.get::<Objects>(entity) {
-                    for object in &objects.0 {
-                        object.send_unlocked();
-                        object.send_ok();
-                    }
-                }
+                self.world.write_message(SessionControlMessage {
+                    entity,
+                    object: Some(object.clone()),
+                    action: SessionControlAction::Unlock {
+                        creds: *client.creds(),
+                    },
+                });
             }
-            _ => unreachable!(),
+            session_core_session::Event::Destroy => {
+                self.world.write_message(SessionControlMessage {
+                    entity,
+                    object: Some(object.clone()),
+                    action: SessionControlAction::Destroy,
+                });
+            }
         }
     }
 }
 
 impl crate::Sessiond {
-    pub fn kill_session(&mut self, entity: entity::Entity) {
-        let Some(session_id) = self.world.get::<SessionId>(entity).copied() else {
-            return;
-        };
-
-        log::info!(session_id = session_id.as_raw(); "kill requested");
-
-        set_active_state(
-            &mut self.world,
-            entity,
-            session_core_v1::ActiveState::Closing,
-        );
-        let Some(loop_handle) = self
-            .world
-            .get_non_send::<calloop::LoopHandle<'static, Self>>()
-        else {
-            return;
-        };
-        let Some(path) = self.world.get::<cgroup::CgroupPath>(entity) else {
-            log::error!(session_id = session_id.as_raw(); "session has no cgroup");
-            return;
-        };
-        let Some(cgroup_session_id) = self.world.get::<cgroup::CgroupSessionId>(entity) else {
-            log::error!(session_id = session_id.as_raw(); "session has no cgroup id");
-            return;
-        };
-        let Some(cgroup_uid) = self.world.get::<cgroup::CgroupUid>(entity) else {
-            log::error!(session_id = session_id.as_raw(); "session has no cgroup uid");
-            return;
-        };
-        if let Err(err) = cgroup::kill(path, *cgroup_session_id, *cgroup_uid, loop_handle) {
-            log::error!(session_id = session_id.as_raw(), err = err.to_string().as_str(); "kill failed");
-        }
-    }
-
     pub fn terminate_session(&mut self, entity: entity::Entity) {
         let Some(session_id) = self.world.get::<SessionId>(entity).copied() else {
             return;
@@ -446,15 +538,15 @@ impl crate::Sessiond {
             log::error!(session_id = session_id.as_raw(); "session has no cgroup");
             return;
         };
-        let Some(cgroup_session_id) = self.world.get::<cgroup::CgroupSessionId>(entity) else {
+        let Some(cgroup_session_id) = self.world.get::<SessionId>(entity) else {
             log::error!(session_id = session_id.as_raw(); "session has no cgroup id");
             return;
         };
-        let Some(cgroup_uid) = self.world.get::<cgroup::CgroupUid>(entity) else {
-            log::error!(session_id = session_id.as_raw(); "session has no cgroup uid");
+        let Some(uid) = self.world.get::<Uid>(entity) else {
+            log::error!(session_id = session_id.as_raw(); "session has no uid");
             return;
         };
-        if let Err(err) = cgroup::terminate(path, *cgroup_session_id, *cgroup_uid, loop_handle) {
+        if let Err(err) = cgroup::terminate(path, *cgroup_session_id, *uid, loop_handle) {
             log::error!(session_id = session_id.as_raw(), err = err.to_string().as_str(); "terminate failed");
         }
     }

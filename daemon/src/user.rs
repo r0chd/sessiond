@@ -181,78 +181,129 @@ pub fn add_object(
         .insert(object, entity);
 }
 
+#[derive(Message)]
+pub struct UserControlMessage {
+    pub object: session_core_user::SessionCoreUser,
+    pub action: UserControlAction,
+}
+
+pub enum UserControlAction {
+    Terminate { creds: hyprwire::Creds },
+    Kill { creds: hyprwire::Creds },
+    Destroy,
+}
+
+pub fn handle_user_control(
+    mut actions: MessageReader<UserControlMessage>,
+    mut session_actions: MessageWriter<session::SessionControlMessage>,
+    mut user_registry: ResMut<UserRegistry>,
+    mut users: Query<(&session::Uid, &mut Objects), With<User>>,
+    sessions: Query<(Entity, &session::Uid), With<session::Session>>,
+) {
+    for action in actions.read() {
+        let Some(user_entity) = user_registry.by_object.get(&action.object).copied() else {
+            continue;
+        };
+
+        match action.action {
+            UserControlAction::Terminate { creds } => {
+                let Ok((uid, _)) = users.get(user_entity) else {
+                    continue;
+                };
+                if !creds.uid.is_root() && uid.0 != creds.uid.as_raw() {
+                    action.object.send_error(
+                        session_core_v1::ErrorCode::PermissionDenied,
+                        "permission denied",
+                    );
+                    continue;
+                }
+
+                for (session_entity, _) in sessions
+                    .iter()
+                    .filter(|(_, session_uid)| *session_uid == uid)
+                {
+                    session_actions.write(session::SessionControlMessage {
+                        entity: session_entity,
+                        object: None,
+                        action: session::SessionControlAction::Terminate { creds },
+                    });
+                }
+
+                action.object.send_ok();
+            }
+            UserControlAction::Kill { creds } => {
+                let Ok((uid, _)) = users.get(user_entity) else {
+                    continue;
+                };
+                if !creds.uid.is_root() && uid.0 != creds.uid.as_raw() {
+                    action.object.send_error(
+                        session_core_v1::ErrorCode::PermissionDenied,
+                        "permission denied",
+                    );
+                    continue;
+                }
+
+                for (session_entity, _) in sessions
+                    .iter()
+                    .filter(|(_, session_uid)| *session_uid == uid)
+                {
+                    session_actions.write(session::SessionControlMessage {
+                        entity: session_entity,
+                        object: None,
+                        action: session::SessionControlAction::Kill { creds },
+                    });
+                }
+
+                action.object.send_ok();
+            }
+            UserControlAction::Destroy => {
+                user_registry.by_object.remove(&action.object);
+                if let Ok((_, mut objects)) = users.get_mut(user_entity) {
+                    objects.0.retain(|candidate| *candidate != action.object);
+                }
+            }
+        }
+    }
+}
+
 impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond {
     fn event(
         &mut self,
         object: &session_core_user::SessionCoreUser,
         event: <session_core_user::SessionCoreUser as hyprwire::Object>::Event<'_>,
     ) {
-        let Some(entity) = self
+        if !self
             .world
             .resource::<UserRegistry>()
             .by_object
-            .get(object)
-            .copied()
-        else {
+            .contains_key(object)
+        {
             return;
-        };
+        }
         let client = object.client();
 
         match event {
             session_core_user::Event::Destroy => {
-                self.world
-                    .resource_mut::<UserRegistry>()
-                    .by_object
-                    .remove(object);
-                if let Some(mut objects) = self.world.get_mut::<Objects>(entity) {
-                    objects.0.retain(|candidate| candidate != object);
-                }
+                self.world.write_message(UserControlMessage {
+                    object: object.clone(),
+                    action: UserControlAction::Destroy,
+                });
             }
             session_core_user::Event::Terminate => {
-                let uid = self
-                    .world
-                    .get::<session::Uid>(entity)
-                    .map_or(0, |uid| uid.0);
-                if !client.creds().uid.is_root() && uid != client.creds().uid.as_raw() {
-                    object.send_error(
-                        session_core_v1::ErrorCode::PermissionDenied,
-                        "permission denied",
-                    );
-                    return;
-                }
-
-                let entities = self
-                    .world
-                    .resource::<session::SessionRegistry>()
-                    .entities_by_uid(uid);
-                for entity in entities {
-                    self.terminate_session(entity);
-                }
-
-                object.send_ok();
+                self.world.write_message(UserControlMessage {
+                    object: object.clone(),
+                    action: UserControlAction::Terminate {
+                        creds: *client.creds(),
+                    },
+                });
             }
             session_core_user::Event::Kill => {
-                let uid = self
-                    .world
-                    .get::<session::Uid>(entity)
-                    .map_or(0, |uid| uid.0);
-                if !client.creds().uid.is_root() && uid != client.creds().uid.as_raw() {
-                    object.send_error(
-                        session_core_v1::ErrorCode::PermissionDenied,
-                        "permission denied",
-                    );
-                    return;
-                }
-
-                let entities = self
-                    .world
-                    .resource::<session::SessionRegistry>()
-                    .entities_by_uid(uid);
-                for entity in entities {
-                    self.kill_session(entity);
-                }
-
-                object.send_ok();
+                self.world.write_message(UserControlMessage {
+                    object: object.clone(),
+                    action: UserControlAction::Kill {
+                        creds: *client.creds(),
+                    },
+                });
             }
         }
     }

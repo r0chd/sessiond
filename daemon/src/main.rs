@@ -97,6 +97,8 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
 
     let mut world = World::new();
     message::MessageRegistry::register_message::<session::SessionManagementMessage>(&mut world);
+    message::MessageRegistry::register_message::<session::SessionControlMessage>(&mut world);
+    message::MessageRegistry::register_message::<user::UserControlMessage>(&mut world);
     message::MessageRegistry::register_message::<power::PowerActionRequest>(&mut world);
     world.init_resource::<session::PendingSessionEnvs>();
     world.init_resource::<session::PendingSessions>();
@@ -116,6 +118,15 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
     )));
 
     let mut schedule = Schedule::new(reconcile::Notify);
+    schedule.add_systems(user::handle_user_control.before(session::handle_session_control));
+    schedule.add_systems(
+        session::handle_session_control
+            .after(vt::refresh_current_vt)
+            .before(user::reconcile_user_states)
+            .before(state::write_state)
+            .before(reconcile::notify_session_active_states)
+            .before(reconcile::send_done),
+    );
     schedule
         .add_systems(session::handle_session_management_action.before(user::ensure_session_users));
     schedule.add_systems(user::ensure_session_users.before(user::reconcile_user_states));

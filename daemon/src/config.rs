@@ -3,32 +3,6 @@ use std::collections::BTreeMap;
 use std::{fs, io, path, sync};
 use uzers::os::unix::UserExt;
 
-fn default_user() -> String {
-    "root".to_string()
-}
-
-fn default_group() -> String {
-    "root".to_string()
-}
-
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ManagementConfig {
-    #[serde(default = "default_user")]
-    pub user: String,
-    #[serde(default = "default_group")]
-    pub group: String,
-}
-
-impl Default for ManagementConfig {
-    fn default() -> Self {
-        Self {
-            user: "root".to_string(),
-            group: "root".to_string(),
-        }
-    }
-}
-
 #[derive(Clone, serde::Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct UserConfig {
@@ -125,8 +99,6 @@ pub struct PowerConfig {
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 #[derive(Default)]
 pub struct Config {
-    #[serde(default)]
-    pub management: ManagementConfig,
     #[serde(default)]
     pub users: BTreeMap<sync::Arc<str>, UserConfig>,
     #[serde(default)]

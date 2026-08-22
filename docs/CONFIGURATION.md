@@ -6,10 +6,6 @@ Use `sessiond --config <path>` to load a different file.
 ## Example
 
 ```toml
-[management]
-user = "root"
-group = "root"
-
 [users.alice]
 linger = true
 runtime-dir = "/run/user/{uid}"
@@ -26,21 +22,11 @@ hibernate = ["/run/current-system/sw/bin/zzz", "-Z"]
 
 ## Top-level Fields
 
-- `management`: access rules for session management operations. Defaults to
-  `root:root`.
 - `users`: per-user session defaults, keyed by user name.
 - `power`: commands used by `sessionctl reboot`, `sessionctl poweroff`,
   `sessionctl suspend`, and `sessionctl hibernate`.
 
 Unknown fields are rejected.
-
-## Management Access
-
-`management.user` and `management.group` grant privileged session management
-access. Management access can modify users and can run power commands
-even when other users have active sessions.
-
-Both fields default to `root`.
 
 ## Users
 

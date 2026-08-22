@@ -4,7 +4,7 @@ use crate::session_core_v1::{session_core_manager, session_core_session};
 use crate::session_management_v1::session_manager as session_manager_v1;
 use crate::session_management_v2::{session_management_session, session_manager};
 use crate::{
-    access, cgroup, config, session_core_v1, session_management_v1, session_management_v2, user, vt,
+    cgroup, config, session_core_v1, session_management_v1, session_management_v2, user, vt,
 };
 use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
@@ -599,19 +599,13 @@ pub fn set_active_state(
 
 impl hyprwire::Handler<session_management_v1::SessionManagementV1> for crate::Sessiond {
     fn protocol_filter(&mut self, client: server::ServerClient) -> bool {
-        self.world
-            .resource::<access::AccessRules>()
-            .management
-            .allows(client.creds())
+        client.creds().uid.is_root()
     }
 }
 
 impl hyprwire::Handler<session_management_v2::SessionManagementV2> for crate::Sessiond {
     fn protocol_filter(&mut self, client: server::ServerClient) -> bool {
-        self.world
-            .resource::<access::AccessRules>()
-            .management
-            .allows(client.creds())
+        client.creds().uid.is_root()
     }
 }
 
@@ -1135,13 +1129,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                     return;
                 };
 
-                let management_access = self.world.resource::<access::AccessRules>().management;
-                user::add_object(
-                    &mut self.world,
-                    entity,
-                    session_core_user,
-                    management_access,
-                );
+                user::add_object(&mut self.world, entity, session_core_user);
             }
             session_core_manager::Event::Destroy => {
                 self.world

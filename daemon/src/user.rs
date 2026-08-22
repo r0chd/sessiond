@@ -53,33 +53,6 @@ pub fn spawn(
     entity
 }
 
-pub fn spawn_legacy(
-    world: &mut world::World,
-    uid: u32,
-    username: String,
-    lingering: bool,
-    state: session_core_v1::UserState,
-) -> entity::Entity {
-    let mut cmd = world.spawn(UserBundle {
-        marker: User,
-        uid: session::Uid(uid),
-        username: session::Username(username),
-        state,
-        objects: Objects::default(),
-    });
-
-    if lingering {
-        cmd.insert(Lingering);
-    }
-
-    let entity = cmd.id();
-    world
-        .resource_mut::<UserRegistry>()
-        .by_uid
-        .insert(uid, entity);
-    entity
-}
-
 pub fn create_runtime_dir(uid: u32, path: &str) {
     if let Err(e) = fs::create_dir_all(path) {
         log::error!(uid, error = e.to_string().as_str(); "failed to create runtime dir");
@@ -100,39 +73,38 @@ pub fn remove_runtime_dir(path: &str) -> io::Result<()> {
     }
 }
 
-pub fn create(world: &mut world::World, uid: u32, lingering: bool) -> Option<entity::Entity> {
-    let user = uzers::get_user_by_uid(uid)?;
-    let states = world
-        .resource::<session::SessionRegistry>()
-        .entities_by_uid(uid)
-        .into_iter()
-        .filter_map(|entity| world.get::<session_core_v1::ActiveState>(entity).copied())
-        .collect::<Vec<_>>();
-
-    let state = if states.contains(&session_core_v1::ActiveState::Active) {
-        session_core_v1::UserState::Active
-    } else if !states.is_empty() {
-        if states
-            .iter()
-            .all(|state| *state == session_core_v1::ActiveState::Closing)
-        {
-            session_core_v1::UserState::Closing
-        } else {
-            session_core_v1::UserState::Online
+pub fn ensure_session_users(
+    mut commands: Commands,
+    sessions: Query<
+        (
+            &session::Uid,
+            &session::Username,
+            &session_core_v1::ActiveState,
+        ),
+        (With<session::Session>, Added<session::Session>),
+    >,
+    mut user_registry: ResMut<UserRegistry>,
+) {
+    for (uid, username, session_state) in sessions {
+        if user_registry.by_uid.contains_key(&uid.0) {
+            continue;
         }
-    } else if lingering {
-        session_core_v1::UserState::Lingering
-    } else {
-        session_core_v1::UserState::Offline
-    };
 
-    Some(spawn_legacy(
-        world,
-        uid,
-        user.name().to_string_lossy().into_owned(),
-        lingering,
-        state,
-    ))
+        let state = match session_state {
+            session_core_v1::ActiveState::Active => session_core_v1::UserState::Active,
+            session_core_v1::ActiveState::Closing => session_core_v1::UserState::Closing,
+            _ => session_core_v1::UserState::Online,
+        };
+
+        spawn(
+            &mut commands,
+            uid.0,
+            username.0.clone(),
+            false,
+            state,
+            &mut user_registry,
+        );
+    }
 }
 
 pub fn reconcile_user_states(

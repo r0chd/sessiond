@@ -2,7 +2,7 @@ use crate::{access, cgroup, config, session, session_core_user, session_core_v1}
 use bevy_ecs::prelude::*;
 use bevy_ecs::{entity, world};
 use std::collections::HashMap;
-use std::{fs, io};
+use std::{fs, io, sync};
 
 #[derive(Resource, Default)]
 pub struct UserRegistry {
@@ -31,7 +31,7 @@ pub struct Objects(pub Vec<session_core_user::SessionCoreUser>);
 pub fn spawn(
     commands: &mut Commands,
     uid: u32,
-    username: String,
+    username: sync::Arc<str>,
     lingering: bool,
     state: session_core_v1::UserState,
     user_registry: &mut ResMut<UserRegistry>,
@@ -99,7 +99,7 @@ pub fn ensure_session_users(
         spawn(
             &mut commands,
             uid.0,
-            username.0.clone(),
+            sync::Arc::clone(&username.0),
             false,
             state,
             &mut user_registry,
@@ -293,7 +293,7 @@ pub fn initialize_lingering_users(
         .iter()
         .filter(|(_, config)| config.linger)
         .filter_map(|(name, config)| {
-            let user = uzers::get_user_by_name(name)?;
+            let user = uzers::get_user_by_name(name.as_ref())?;
             let uid = user.uid();
             Some((uid, config.runtime_dir(uid)))
         })
@@ -303,7 +303,7 @@ pub fn initialize_lingering_users(
             spawn(
                 &mut commands,
                 uid,
-                user.name().to_string_lossy().into_owned(),
+                user.name().to_string_lossy().into(),
                 true,
                 session_core_v1::UserState::Lingering,
                 &mut user_registry,

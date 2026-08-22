@@ -20,14 +20,14 @@ pub struct State {
 #[serde(rename_all = "kebab-case")]
 pub struct Session {
     pub uid: u32,
-    pub username: String,
+    pub username: sync::Arc<str>,
     #[serde(default)]
     pub class: String,
     #[serde(default)]
     pub vt: Option<u32>,
     pub leader: i32,
     #[serde(default)]
-    pub remote_host: Option<String>,
+    pub remote_host: Option<sync::Arc<str>>,
     pub timestamp: u128,
     #[serde(default)]
     pub env: BTreeMap<sync::Arc<str>, sync::Arc<str>>,
@@ -118,11 +118,11 @@ pub fn write_state(
                     id.as_raw().to_string(),
                     Session {
                         uid: uid.0,
-                        username: username.0.clone(),
+                        username: sync::Arc::clone(&username.0),
                         class: class.to_owned(),
                         vt: vt.map(|vt| vt.0.get()),
                         leader: leader.0,
-                        remote_host: remote_host.map(|host| host.0.to_string()),
+                        remote_host: remote_host.map(|host| sync::Arc::clone(&host.0)),
                         timestamp,
                         env: env
                             .0
@@ -234,10 +234,10 @@ pub fn load_state(
                         session_id,
                         saved_session.class(),
                         saved_session.uid,
-                        saved_session.username.clone(),
+                        sync::Arc::clone(&saved_session.username),
                         saved_session.vt,
                         saved_session.leader,
-                        saved_session.remote_host.clone().map(Into::into),
+                        saved_session.remote_host.as_ref().map(sync::Arc::clone),
                         active_state,
                         None,
                         saved_session.env.clone(),

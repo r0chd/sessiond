@@ -168,7 +168,7 @@ pub struct IsLocal;
 pub struct Uid(pub u32);
 
 #[derive(Component, Debug, Clone, PartialEq, Eq)]
-pub struct Username(pub String);
+pub struct Username(pub sync::Arc<str>);
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Vt(pub num::NonZeroU32);
@@ -257,7 +257,7 @@ pub fn spawn(
     session_id: SessionId,
     class: SessionClass,
     uid: u32,
-    username: String,
+    username: sync::Arc<str>,
     vt: Option<u32>,
     leader_id: i32,
     remote_host: Option<sync::Arc<str>>,
@@ -469,7 +469,7 @@ impl crate::Sessiond {
         let username = self
             .world
             .get::<Username>(entity)
-            .map_or("", |username| username.0.as_str());
+            .map_or("", |username| username.0.as_ref());
         log::info!(session_id = session_id.as_raw(), uid, username; "session destroyed");
 
         if let Some(objects) = self.world.get::<Objects>(entity) {
@@ -803,7 +803,7 @@ pub fn handle_session_management_action(
                         );
                         return;
                     };
-                    let username = user.name().to_string_lossy().into_owned();
+                    let username = user.name().to_string_lossy().into();
 
                     let session_id = next_id.take();
 

@@ -70,7 +70,10 @@ impl UserConfig {
                 sync::Arc::from("XDG_SESSION_ID"),
                 session_id.to_string().into(),
             ),
-            (sync::Arc::from("TERM"), term.unwrap_or_else(|| "linux".into())),
+            (
+                sync::Arc::from("TERM"),
+                term.unwrap_or_else(|| "linux".into()),
+            ),
         ]);
 
         if let Some(user) = uzers::get_user_by_uid(uid) {
@@ -125,7 +128,7 @@ pub struct Config {
     #[serde(default)]
     pub management: ManagementConfig,
     #[serde(default)]
-    pub users: BTreeMap<String, UserConfig>,
+    pub users: BTreeMap<sync::Arc<str>, UserConfig>,
     #[serde(default)]
     pub power: PowerConfig,
 }

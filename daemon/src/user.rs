@@ -122,21 +122,34 @@ pub fn reconcile_user_states(
         ),
         With<User>,
     >,
-    sessions: Query<(&session::Uid, &session_core_v1::ActiveState), With<session::Session>>,
+    sessions: Query<
+        (
+            &session::Uid,
+            &session::SessionClass,
+            &session_core_v1::ActiveState,
+        ),
+        With<session::Session>,
+    >,
 ) {
     for (uid, lingering, mut user_state) in users {
         let states: Vec<_> = sessions
             .iter()
-            .filter(|(session_uid, _)| session_uid.0 == uid.0)
-            .map(|(_, state)| *state)
+            .filter(|(session_uid, class, _)| {
+                session_uid.0 == uid.0
+                    && !matches!(
+                        class,
+                        session::SessionClass::Manager | session::SessionClass::ManagerEarly
+                    )
+            })
+            .map(|(_, _, state)| state)
             .collect();
 
-        let desired = if states.contains(&session_core_v1::ActiveState::Active) {
+        let desired = if states.contains(&&session_core_v1::ActiveState::Active) {
             session_core_v1::UserState::Active
         } else if !states.is_empty()
             && states
                 .iter()
-                .all(|state| *state == session_core_v1::ActiveState::Closing)
+                .all(|state| **state == session_core_v1::ActiveState::Closing)
         {
             session_core_v1::UserState::Closing
         } else if !states.is_empty() {

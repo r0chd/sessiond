@@ -309,16 +309,6 @@ impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond 
     }
 }
 
-pub fn is_lingering(world: &world::World, uid: u32) -> bool {
-    world
-        .resource::<UserRegistry>()
-        .by_uid
-        .get(&uid)
-        .copied()
-        .and_then(|entity| world.get::<Lingering>(entity))
-        .is_some()
-}
-
 pub fn initialize_lingering_users(
     mut commands: Commands,
     config: Res<config::DaemonConfig>,

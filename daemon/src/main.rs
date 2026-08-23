@@ -61,9 +61,17 @@ enum LogTarget {
     Syslog,
 }
 
+#[derive(Resource, Default, Clone, Copy, PartialEq, Eq)]
+pub enum ShutdownState {
+    #[default]
+    Running,
+    Stopping,
+}
+
+#[derive(Resource)]
+pub struct LoopSignal(pub calloop::LoopSignal);
+
 struct Sessiond {
-    shutting_down: bool,
-    loop_signal: calloop::LoopSignal,
     world: World,
     notify_schedule: Schedule,
 }
@@ -85,7 +93,6 @@ fn notify(message: &[u8]) -> rustix::io::Result<()> {
 
 fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
     let mut event_loop = calloop::EventLoop::try_new()?;
-    let loop_signal = event_loop.get_signal();
     #[cfg(feature = "consolekit")]
     let (consolekit_power_sender, consolekit_power_channel) = channel::channel();
     let signals = signals::Signals::new(&[
@@ -104,11 +111,13 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
     world.init_resource::<session::PendingSessions>();
     world.insert_resource(session::NextSessionId(session::SessionId::from_raw(1)));
     world.init_resource::<session::SessionInfoManagers>();
+    world.init_resource::<ShutdownState>();
     world.init_resource::<reconcile::NotifyBatch>();
     world.init_resource::<session::SessionRegistry>();
     world.init_resource::<user::UserRegistry>();
     world.insert_resource(cgroup::CgroupManager::new()?);
     world.insert_resource(config::DaemonConfig(config));
+    world.insert_resource(LoopSignal(event_loop.get_signal()));
     let state_path = runtime_dir.join("state.toml");
     world.insert_resource(state::StateWriter(state_path));
     world.insert_non_send(event_loop.handle());
@@ -116,6 +125,7 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
     world.insert_resource(consolekit::ConsoleKit(consolekit::Server::start(
         consolekit_power_sender,
     )));
+    world.add_observer(cgroup::handle_cgroup_empty);
 
     let mut schedule = Schedule::new(reconcile::Notify);
     schedule.add_systems(user::handle_user_control.before(session::handle_session_control));
@@ -127,8 +137,11 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
             .before(reconcile::notify_session_active_states)
             .before(reconcile::send_done),
     );
-    schedule
-        .add_systems(session::handle_session_management_action.before(user::ensure_session_users));
+    schedule.add_systems(
+        session::handle_session_management_action
+            .before(session::handle_session_control)
+            .before(user::ensure_session_users),
+    );
     schedule.add_systems(user::ensure_session_users.before(user::reconcile_user_states));
     schedule.add_systems(vt::refresh_current_vt.before(user::reconcile_user_states));
     schedule.add_systems(
@@ -156,8 +169,6 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
     schedule.add_systems(message::message_update_system.after(reconcile::send_done));
 
     let mut sessiond = Sessiond {
-        shutting_down: false,
-        loop_signal,
         world,
         notify_schedule: schedule,
     };
@@ -198,7 +209,7 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
     event_loop
         .handle()
         .insert_source(source, move |_, _, state: &mut Sessiond| {
-            if state.shutting_down {
+            if *state.world.resource::<ShutdownState>() == ShutdownState::Stopping {
                 return Ok(calloop::PostAction::Continue);
             }
 
@@ -280,7 +291,7 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
                 }
             }
             signals::Signal::SIGTERM | signals::Signal::SIGINT => {
-                if state.shutting_down {
+                if *state.world.resource::<ShutdownState>() == ShutdownState::Stopping {
                     return;
                 }
 
@@ -288,8 +299,8 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
                     log::warn!("Failed to send shutdown notification: {e}");
                 }
 
-                state.shutting_down = true;
-                state.loop_signal.stop();
+                *state.world.resource_mut::<ShutdownState>() = ShutdownState::Stopping;
+                state.world.resource::<LoopSignal>().0.stop();
             }
             _ => unreachable!(),
         })?;

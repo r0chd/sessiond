@@ -1,5 +1,3 @@
-#[cfg(feature = "consolekit")]
-use crate::consolekit;
 use crate::session_core_v1::{session_core_manager, session_core_session};
 use crate::session_management_v1::session_manager as session_manager_v1;
 use crate::session_management_v2::{session_management_session, session_manager};
@@ -337,7 +335,7 @@ pub fn handle_session_control(
             &SessionId,
             &Uid,
             &mut session_core_v1::ActiveState,
-            &Vt,
+            Option<&Vt>,
             &mut Objects,
         ),
         With<Session>,
@@ -364,7 +362,7 @@ pub fn handle_session_control(
                 }
                 log::info!(session_id = session_id.as_raw(); "terminate requested");
                 *active_state = session_core_v1::ActiveState::Closing;
-                log::info!(session_id = session_id.0, vt = vt.0; "session state changed");
+                log::info!(session_id = session_id.0, vt = vt.map_or(0, |vt| vt.0.get()); "session state changed");
                 let Ok((cgroup_session_id, cgroup_path)) = cgroups.get(action.entity) else {
                     continue;
                 };
@@ -391,7 +389,7 @@ pub fn handle_session_control(
                 }
                 log::info!(session_id = session_id.as_raw(); "kill requested");
                 *active_state = session_core_v1::ActiveState::Closing;
-                log::info!(session_id = session_id.0, vt = vt.0; "session state changed");
+                log::info!(session_id = session_id.0, vt = vt.map_or(0, |vt| vt.0.get()); "session state changed");
                 let Ok((cgroup_session_id, cgroup_path)) = cgroups.get(action.entity) else {
                     continue;
                 };
@@ -515,96 +513,6 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
     }
 }
 
-impl crate::Sessiond {
-    pub fn terminate_session(&mut self, entity: entity::Entity) {
-        let Some(session_id) = self.world.get::<SessionId>(entity).copied() else {
-            return;
-        };
-
-        log::info!(session_id = session_id.as_raw(); "terminate requested");
-
-        set_active_state(
-            &mut self.world,
-            entity,
-            session_core_v1::ActiveState::Closing,
-        );
-        let Some(loop_handle) = self
-            .world
-            .get_non_send::<calloop::LoopHandle<'static, Self>>()
-        else {
-            return;
-        };
-        let Some(path) = self.world.get::<cgroup::CgroupPath>(entity) else {
-            log::error!(session_id = session_id.as_raw(); "session has no cgroup");
-            return;
-        };
-        let Some(cgroup_session_id) = self.world.get::<SessionId>(entity) else {
-            log::error!(session_id = session_id.as_raw(); "session has no cgroup id");
-            return;
-        };
-        let Some(uid) = self.world.get::<Uid>(entity) else {
-            log::error!(session_id = session_id.as_raw(); "session has no uid");
-            return;
-        };
-        if let Err(err) = cgroup::terminate(path, *cgroup_session_id, *uid, loop_handle) {
-            log::error!(session_id = session_id.as_raw(), err = err.to_string().as_str(); "terminate failed");
-        }
-    }
-
-    pub(crate) fn finish_session_destroy(&mut self, session_id: SessionId) {
-        let Some(entity) = entity(&self.world, session_id) else {
-            log::warn!(session_id = session_id.as_raw(); "destroy requested for unknown session");
-            return;
-        };
-
-        let uid = self.world.get::<Uid>(entity).map_or(0, |uid| uid.0);
-        let username = self
-            .world
-            .get::<Username>(entity)
-            .map_or("", |username| username.0.as_ref());
-        log::info!(session_id = session_id.as_raw(), uid, username; "session destroyed");
-
-        if let Some(objects) = self.world.get::<Objects>(entity) {
-            for object in &objects.0 {
-                object.send_destroyed();
-            }
-        }
-
-        self.world
-            .resource_mut::<SessionRegistry>()
-            .remove_entity(entity);
-        self.world.despawn(entity);
-        #[cfg(feature = "consolekit")]
-        self.world
-            .resource::<consolekit::ConsoleKit>()
-            .0
-            .remove_session(session_id);
-
-        self.cleanup_user_runtime_dir(uid);
-    }
-
-    pub(crate) fn cleanup_user_runtime_dir(&self, uid: u32) {
-        let Some(user) = uzers::get_user_by_uid(uid) else {
-            return;
-        };
-
-        if !user::is_lingering(&self.world, uid)
-            && self
-                .world
-                .resource::<SessionRegistry>()
-                .entities_by_uid(uid)
-                .is_empty()
-            && let Err(e) = user::remove_runtime_dir(
-                &self
-                    .user_config(&user.name().to_string_lossy())
-                    .runtime_dir(uid),
-            )
-        {
-            log::error!(uid, error = e.to_string().as_str(); "failed to remove runtime dir");
-        }
-    }
-}
-
 pub fn add_object(
     world: &mut world::World,
     session_id: SessionId,
@@ -665,30 +573,6 @@ pub fn add_object(
         .insert(object, entity);
 }
 
-pub fn set_active_state(
-    world: &mut world::World,
-    entity: entity::Entity,
-    state: session_core_v1::ActiveState,
-) {
-    let session_id = world
-        .get::<SessionId>(entity)
-        .map(|session_id| session_id.as_raw())
-        .unwrap_or_default();
-    let vt = world
-        .get::<Vt>(entity)
-        .map(|vt| vt.0.get())
-        .unwrap_or_default();
-
-    if let Some(mut active_state) = world.get_mut::<session_core_v1::ActiveState>(entity) {
-        if *active_state == state {
-            return;
-        }
-
-        log::info!(session_id, vt; "session state changed");
-        *active_state = state;
-    }
-}
-
 impl hyprwire::Handler<session_management_v1::SessionManagementV1> for crate::Sessiond {
     fn protocol_filter(&mut self, client: server::ServerClient) -> bool {
         client.creds().uid.is_root()
@@ -714,18 +598,6 @@ impl hyprwire::Handler<session_core_v1::SessionCoreV1> for crate::Sessiond {
             .resource_mut::<SessionInfoManagers>()
             .0
             .push(object);
-    }
-}
-
-impl crate::Sessiond {
-    pub fn user_config(&self, username: &str) -> config::UserConfig {
-        self.world
-            .resource::<config::DaemonConfig>()
-            .0
-            .users
-            .get(username)
-            .cloned()
-            .unwrap_or_default()
     }
 }
 
@@ -800,6 +672,7 @@ pub enum SessionManagementAction {
 pub fn handle_session_management_action(
     mut commands: Commands,
     mut actions: MessageReader<SessionManagementMessage>,
+    mut session_control: MessageWriter<SessionControlMessage>,
     mut pending_sessions: ResMut<PendingSessions>,
     mut next_id: ResMut<NextSessionId>,
     cgroup_manager: Res<cgroup::CgroupManager>,
@@ -819,6 +692,32 @@ pub fn handle_session_management_action(
         let Some(object) = action.object.as_ref() else {
             continue;
         };
+
+        if let SessionManagementTarget::V2(management_object) = object
+            && let Some(entity) = session_registry
+                .by_management_object
+                .get(management_object)
+                .copied()
+        {
+            match action.action {
+                SessionManagementAction::Destroy => {
+                    session_control.write(SessionControlMessage {
+                        entity,
+                        object: None,
+                        action: SessionControlAction::Terminate {
+                            creds: *management_object.client().creds(),
+                        },
+                    });
+                }
+                _ => {
+                    management_object.error(
+                        session_management_v2::ErrorCode::Io as u32,
+                        "session is no longer pending",
+                    );
+                }
+            }
+            continue;
+        }
 
         match &action.action {
             SessionManagementAction::ManagerDestroy { .. } => unreachable!(),
@@ -1066,8 +965,20 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                     .insert(name.into(), value.into());
             }
             session_manager_v1::Event::DestroySession { session_id } => {
-                if let Some(entity) = entity(&self.world, SessionId::from_raw(session_id)) {
-                    self.terminate_session(entity);
+                if let Some(entity) = self
+                    .world
+                    .resource::<SessionRegistry>()
+                    .by_id
+                    .get(&SessionId::from_raw(session_id))
+                    .copied()
+                {
+                    self.world.write_message(SessionControlMessage {
+                        entity,
+                        object: None,
+                        action: SessionControlAction::Terminate {
+                            creds: *client.creds(),
+                        },
+                    });
                 }
             }
             session_manager_v1::Event::Destroy => {
@@ -1088,55 +999,32 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
             '_,
         >,
     ) {
-        let Some(entity) = self
-            .world
-            .resource::<SessionRegistry>()
-            .by_management_object
-            .get(object)
-            .copied()
-        else {
-            let action = match event {
-                session_management_session::Event::Vt { vt } => SessionManagementAction::Vt { vt },
-                session_management_session::Event::RemoteHost { remote_host } => {
-                    SessionManagementAction::RemoteHost {
-                        remote_host: remote_host.into(),
-                    }
+        let action = match event {
+            session_management_session::Event::Vt { vt } => SessionManagementAction::Vt { vt },
+            session_management_session::Event::RemoteHost { remote_host } => {
+                SessionManagementAction::RemoteHost {
+                    remote_host: remote_host.into(),
                 }
-                session_management_session::Event::Class { class } => {
-                    SessionManagementAction::Class {
-                        class: SessionClass::from(class),
-                    }
+            }
+            session_management_session::Event::Class { class } => SessionManagementAction::Class {
+                class: SessionClass::from(class),
+            },
+            session_management_session::Event::Env { name, value } => {
+                SessionManagementAction::Env {
+                    key: name.into(),
+                    value: value.into(),
                 }
-                session_management_session::Event::Env { name, value } => {
-                    SessionManagementAction::Env {
-                        key: name.into(),
-                        value: value.into(),
-                    }
-                }
-                session_management_session::Event::DelegateCgroup => {
-                    SessionManagementAction::DelegateCgroup
-                }
-                session_management_session::Event::Done => SessionManagementAction::Done,
-                session_management_session::Event::Destroy => SessionManagementAction::Destroy,
-            };
-            self.world.write_message(SessionManagementMessage {
-                action,
-                object: Some(SessionManagementTarget::V2(object.clone())),
-            });
-            return;
+            }
+            session_management_session::Event::DelegateCgroup => {
+                SessionManagementAction::DelegateCgroup
+            }
+            session_management_session::Event::Done => SessionManagementAction::Done,
+            session_management_session::Event::Destroy => SessionManagementAction::Destroy,
         };
-
-        match event {
-            session_management_session::Event::Destroy => {
-                self.terminate_session(entity);
-            }
-            _ => {
-                object.error(
-                    session_management_v2::ErrorCode::Io as u32,
-                    "session is no longer pending",
-                );
-            }
-        }
+        self.world.write_message(SessionManagementMessage {
+            action,
+            object: Some(SessionManagementTarget::V2(object.clone())),
+        });
     }
 }
 

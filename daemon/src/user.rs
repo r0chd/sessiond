@@ -35,6 +35,7 @@ pub fn spawn(
     lingering: bool,
     state: session_core_v1::UserState,
     user_registry: &mut ResMut<UserRegistry>,
+    info_managers: &session::SessionInfoManagers,
 ) -> entity::Entity {
     let mut cmd = commands.spawn(UserBundle {
         marker: User,
@@ -50,6 +51,9 @@ pub fn spawn(
 
     let entity = cmd.id();
     user_registry.by_uid.insert(uid, entity);
+    for manager in &info_managers.0 {
+        manager.send_user_added(uid);
+    }
     entity
 }
 
@@ -84,6 +88,7 @@ pub fn ensure_session_users(
         (With<session::Session>, Added<session::Session>),
     >,
     mut user_registry: ResMut<UserRegistry>,
+    info_managers: Res<session::SessionInfoManagers>,
 ) {
     for (uid, username, session_state) in sessions {
         if user_registry.by_uid.contains_key(&uid.0) {
@@ -103,6 +108,7 @@ pub fn ensure_session_users(
             false,
             state,
             &mut user_registry,
+            &info_managers,
         );
     }
 }
@@ -314,6 +320,7 @@ pub fn initialize_lingering_users(
     config: Res<config::DaemonConfig>,
     cgroup_manager: Res<cgroup::CgroupManager>,
     mut user_registry: ResMut<UserRegistry>,
+    info_managers: Res<session::SessionInfoManagers>,
 ) {
     let lingering_users = config
         .0
@@ -335,6 +342,7 @@ pub fn initialize_lingering_users(
                 true,
                 session_core_v1::UserState::Lingering,
                 &mut user_registry,
+                &info_managers,
             );
 
             create_runtime_dir(uid, &runtime_dir);

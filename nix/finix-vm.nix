@@ -52,11 +52,14 @@ in
       enable = true;
       package = sessiond;
       logLevel = "trace";
-      settings.power = {
-        suspend = lib.mkDefault [ "${pkgs.zzz}/bin/zzz" ];
-        hibernate = lib.mkDefault [ "${pkgs.zzz}/bin/ZZZ" ];
-        reboot = lib.mkDefault [ "${pkgs.finit}/bin/reboot" ];
-        poweroff = lib.mkDefault [ "${pkgs.finit}/bin/poweroff" ];
+      settings = {
+        users.user_3.linger = true;
+        power = {
+          suspend = lib.mkDefault [ "${pkgs.zzz}/bin/zzz" ];
+          hibernate = lib.mkDefault [ "${pkgs.zzz}/bin/ZZZ" ];
+          reboot = lib.mkDefault [ "${pkgs.finit}/bin/reboot" ];
+          poweroff = lib.mkDefault [ "${pkgs.finit}/bin/poweroff" ];
+        };
       };
     };
     mdevd.enable = true;
@@ -138,6 +141,12 @@ in
       extraGroups = [ "wheel" ];
     };
     user_2 = {
+      isNormalUser = true;
+      password = "";
+      createHome = true;
+      extraGroups = [ "wheel" ];
+    };
+    user_3 = {
       isNormalUser = true;
       password = "";
       createHome = true;

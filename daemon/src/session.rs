@@ -587,6 +587,11 @@ impl hyprwire::Handler<session_management_v2::SessionManagementV2> for crate::Se
 
 impl hyprwire::Handler<session_core_v1::SessionCoreV1> for crate::Sessiond {
     fn bind(&mut self, object: session_core_manager::SessionCoreManager) {
+        self.world
+            .resource::<user::UserRegistry>()
+            .by_uid
+            .keys()
+            .for_each(|uid| object.send_user_added(*uid));
         entities(&self.world)
             .into_iter()
             .filter_map(|entity| self.world.get::<SessionId>(entity))

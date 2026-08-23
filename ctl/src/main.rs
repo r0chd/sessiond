@@ -417,6 +417,10 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for State {
                 self.session(object, session_id);
                 self.done = false;
             }
+            session_core_manager::Event::UserAdded { uid } => {
+                self.user(object, uid);
+                self.done = false;
+            }
             session_core_manager::Event::Done => self.done = true,
             session_core_manager::Event::Error { message, .. } => {
                 self.error = Some(message);
@@ -985,7 +989,7 @@ fn main() -> anyhow::Result<()> {
     queue.wait_for_handshake(&mut state)?;
 
     let manager =
-        socket.bind::<session_core_manager::SessionCoreManager, _>(&queue, &mut state, 1)?;
+        socket.bind::<session_core_manager::SessionCoreManager, _>(&queue, &mut state, 2)?;
     let power_manager =
         socket.bind::<session_power_manager::SessionPowerManager, _>(&queue, &mut state, 1)?;
 
@@ -1007,10 +1011,6 @@ fn main() -> anyhow::Result<()> {
     }
 
     if matches!(&cli.command, Command::User { .. }) {
-        let uids: Vec<_> = state.sessions.iter().map(|s| s.uid).collect();
-        for uid in uids {
-            state.user(&manager, uid);
-        }
         while state.users.iter().any(|u| !u.done) {
             queue.dispatch_events(&mut state, true)?;
         }

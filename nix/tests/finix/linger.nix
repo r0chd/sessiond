@@ -140,6 +140,10 @@ sessiondTest {
     user_2_uid = machine.succeed("id -u user_2").strip()
     user_3_uid = machine.succeed("id -u user_3").strip()
 
+    machine.wait_until_succeeds("sessionctl user list --json > /tmp/users.json && jq -e '.users | length == 3' /tmp/users.json >/dev/null")
+    machine.succeed(f"jq -e '.users[] | select(.uid == {user_2_uid} and .username == \"user_2\" and .state == \"lingering\" and .lingering)' /tmp/users.json >/dev/null")
+    machine.succeed(f"jq -e '.users[] | select(.uid == {user_3_uid} and .username == \"user_3\" and .state == \"lingering\" and .lingering)' /tmp/users.json >/dev/null")
+
     for uid in (user_2_uid, user_3_uid):
         machine.wait_until_succeeds(f"test -d /run/user/{uid}")
         machine.wait_until_succeeds(f"test -d /sys/fs/cgroup/system/sessiond/user-{uid}")
@@ -178,6 +182,7 @@ sessiondTest {
     wait_no_sessions("user_2")
     wait_no_session_cgroup(user_2_uid, session)
     assert_linger_paths(user_2_uid)
+    machine.wait_until_succeeds(f"sessionctl user list --json | jq -e '.users[] | select(.uid == {user_2_uid} and .state == \"lingering\" and .lingering)' >/dev/null")
 
     login("sessiond-test-login-user-2-tty3", "user_2", 3)
     session = session_id("user_2", 3)

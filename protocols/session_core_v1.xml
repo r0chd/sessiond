@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<protocol name="session_core_v1" version="1">
+<protocol name="session_core_v1" version="2">
  <copyright>
   Copyright (c) 2026 Oskar Rochowiak
 
@@ -23,8 +23,8 @@
  </copyright>
 
  <object name="session_core_manager" version="1">
-  <description summary="session observer">
-   Unprivileged read-only interface for observing active sessions.
+  <description summary="session and user observer">
+   Unprivileged read-only interface for observing sessions and users.
   </description>
   <s2c name="session_added">
    <description summary="a new session was created">
@@ -40,6 +40,14 @@
    <description summary="last operation failed"/>
    <arg name="code" type="enum" interface="error_code" summary="error kind"/>
    <arg name="message" type="varchar" summary="human-readable error detail"/>
+  </s2c>
+  <s2c name="user_added" since="2">
+   <description summary="a user became known">
+    Broadcast to all connected clients when a user is created. Sent once for
+    each already-known user when the manager is first created, including users
+    that are lingering without an active session.
+   </description>
+   <arg name="uid" type="uint" summary="user identifier"/>
   </s2c>
   <c2s name="get_session">
    <description summary="create a per-session info object">

@@ -1,4 +1,6 @@
-use crate::{session, user};
+#[cfg(feature = "consolekit")]
+use crate::consolekit;
+use crate::{config, session, user};
 use anyhow::Context;
 use bevy_ecs::prelude::*;
 use calloop::{generic, timer};
@@ -7,7 +9,7 @@ use std::collections::HashSet;
 use std::io::{Read, Seek};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
-use std::{fs, io, path, time};
+use std::{fs, io, path, sync, time};
 
 #[derive(Resource)]
 pub struct CgroupManager {
@@ -268,6 +270,102 @@ pub fn terminate(
     Ok(())
 }
 
+#[derive(Event)]
+pub struct CgroupEmpty {
+    session_id: session::SessionId,
+    uid: session::Uid,
+}
+
+pub fn handle_cgroup_empty(
+    empty: On<CgroupEmpty>,
+    mut commands: Commands,
+    sessions: Query<
+        (
+            Entity,
+            &session::SessionId,
+            &session::Uid,
+            &session::Username,
+            &session::Objects,
+        ),
+        With<session::Session>,
+    >,
+    mut session_registry: ResMut<session::SessionRegistry>,
+    lingering_users: Query<(), (With<user::User>, With<user::Lingering>)>,
+    user_registry: Res<user::UserRegistry>,
+    cgroup_manager: Res<CgroupManager>,
+    cgroups: Query<&CgroupPath, With<Cgroup>>,
+    config: Res<config::DaemonConfig>,
+    shutdown_state: Res<crate::ShutdownState>,
+    loop_signal: Res<crate::LoopSignal>,
+    #[cfg(feature = "consolekit")] console_kit: Res<consolekit::ConsoleKit>,
+) {
+    let last_session = session_registry
+        .entities_by_uid(empty.uid.0)
+        .len()
+        == 1;
+
+    let is_lingering = user_registry
+        .by_uid
+        .get(&empty.uid.0)
+        .is_some_and(|&entity| lingering_users.contains(entity));
+
+    if let Some((entity, session_id, uid, username, objects)) = sessions
+        .iter()
+        .find(|(_, id, _, _, _)| **id == empty.session_id)
+    {
+        log::info!(
+            session_id = session_id.as_raw(),
+            uid = uid.0,
+            username = username.0;
+            "session destroyed"
+        );
+
+        for object in &objects.0 {
+            object.send_destroyed();
+        }
+
+        session_registry.remove_entity(entity);
+        commands.entity(entity).despawn();
+        #[cfg(feature = "consolekit")]
+        console_kit.0.remove_session(*session_id);
+
+        let Some(user) = uzers::get_user_by_uid(uid.0) else {
+            return;
+        };
+
+        let default_config = config::UserConfig::default();
+
+        if !is_lingering
+            && session_registry.entities_by_uid(uid.0).is_empty()
+            && let Err(e) = user::remove_runtime_dir(
+                &config
+                    .0
+                    .users
+                    .get(&sync::Arc::from(user.name().to_string_lossy()))
+                    .unwrap_or(&default_config)
+                    .runtime_dir(uid.0),
+            )
+        {
+            log::error!(uid = uid.0, error = e.to_string().as_str(); "failed to remove runtime dir");
+        }
+    }
+
+    if last_session
+        && !is_lingering
+        && let Err(e) = cgroup_manager.remove_user_cgroup(empty.uid.0)
+    {
+        log::error!(
+            uid = empty.uid.0,
+            error = e.to_string().as_str();
+            "failed to remove user cgroup"
+        );
+    }
+
+    if *shutdown_state == crate::ShutdownState::Stopping && cgroups.iter().next().is_none() {
+        loop_signal.0.stop();
+    }
+}
+
 fn poll_destroy(
     path: &CgroupPath,
     session_id: session::SessionId,
@@ -300,33 +398,7 @@ fn poll_destroy(
                     "cgroup destroyed"
                 );
 
-                let last_session = state
-                    .world
-                    .resource::<session::SessionRegistry>()
-                    .entities_by_uid(uid.0)
-                    .len()
-                    == 1;
-
-                state.finish_session_destroy(session_id);
-
-                if last_session
-                    && !user::is_lingering(&state.world, uid.0)
-                    && let Err(e) = state
-                        .world
-                        .resource::<CgroupManager>()
-                        .remove_user_cgroup(uid.0)
-                {
-                    log::error!(
-                        uid = uid.0,
-                        error = e.to_string().as_str();
-                        "failed to remove user cgroup"
-                    );
-                }
-
-                let mut cgroups = state.world.query::<&Cgroup>();
-                if state.shutting_down && cgroups.iter(&state.world).next().is_none() {
-                    state.loop_signal.stop();
-                }
+                state.world.trigger(CgroupEmpty { session_id, uid });
 
                 return Ok(calloop::PostAction::Remove);
             }

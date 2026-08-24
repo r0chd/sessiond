@@ -101,7 +101,7 @@ struct State {
     sessions: Vec<Session>,
     users: Vec<User>,
     done: bool,
-    can_control_power: bool,
+    can_control_power: Option<bool>,
     error: Option<String>,
 }
 
@@ -437,7 +437,7 @@ impl hyprwire::Dispatch<session_power_manager::SessionPowerManager> for State {
     ) {
         match event {
             session_power_manager::Event::CanControl { can_control } => {
-                self.can_control_power = can_control != 0;
+                self.can_control_power = Some(can_control != 0);
             }
             session_power_manager::Event::Error { message, .. } => {
                 self.error = Some(message);
@@ -1163,8 +1163,11 @@ fn main() -> anyhow::Result<()> {
             }
         }
         Command::Reboot | Command::Poweroff | Command::Suspend | Command::Hibernate => {
+            while state.can_control_power.is_none() {
+                queue.dispatch_events(&mut state, true)?;
+            }
             anyhow::ensure!(
-                state.can_control_power,
+                state.can_control_power == Some(true),
                 "power operation is not permitted while other users have active sessions"
             );
             match cli.command {

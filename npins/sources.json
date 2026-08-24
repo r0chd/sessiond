@@ -31,6 +31,18 @@
       "revision": "81b759ed1550fed377f831d4b370e05988ffd57b",
       "url": null,
       "hash": "sha256-D2hIbkCB5hdjil3+soydTqHitEB4nF+TaHJevCFX2GM="
+    },
+    "sessiond-hooks": {
+      "type": "Git",
+      "repository": {
+        "type": "Git",
+        "url": "https://tangled.org/r0chd.pl/sessiond-hooks"
+      },
+      "branch": "master",
+      "submodules": false,
+      "revision": "061692a1edb527a8fa011884a67db8f6dedc66d5",
+      "url": null,
+      "hash": "sha256-TvjtXju1IUJjbeCx140iAZrCp8nn9r9ypeI3PPs1EPE="
     }
   },
   "version": 8

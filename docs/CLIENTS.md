@@ -8,4 +8,5 @@ This document lists known `sessiond` clients.
 
 ## Device access helpers
 
+- [sessiond-backlight](https://tangled.org/r0chd.pl/sessiond-backlight): controls backlight and LED brightness for active local sessions
 - [sessiond-uaccess](https://tangled.org/r0chd.pl/sessiond-uaccess): manages `uaccess` device access

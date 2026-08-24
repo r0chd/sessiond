@@ -299,10 +299,7 @@ pub fn handle_cgroup_empty(
     loop_signal: Res<crate::LoopSignal>,
     #[cfg(feature = "consolekit")] console_kit: Res<consolekit::ConsoleKit>,
 ) {
-    let last_session = session_registry
-        .entities_by_uid(empty.uid.0)
-        .len()
-        == 1;
+    let last_session = session_registry.entities_by_uid(empty.uid.0).len() == 1;
 
     let is_lingering = user_registry
         .by_uid

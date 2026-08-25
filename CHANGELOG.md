@@ -24,6 +24,5 @@ Initial public release of `sessiond`.
 
 ## UNRELEASED
 
-### Added
-
-- cgroup delegation
+### Fixed
+- Derive the cgroup root from `/proc/self/cgroup`

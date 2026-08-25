@@ -60,16 +60,6 @@ impl CgroupManager {
         }
     }
 
-    pub(crate) fn remove_session_cgroup(path: &path::Path) -> anyhow::Result<()> {
-        if !path.exists() {
-            return Ok(());
-        }
-
-        fs::write(path.join("cgroup.kill"), b"1")?;
-        remove_cgroup_tree(path)?;
-        Ok(())
-    }
-
     pub(crate) fn ensure_user_cgroup(&self, uid: u32) -> anyhow::Result<path::PathBuf> {
         let user_cgroup_path = self.user_cgroup_path(uid);
         if !user_cgroup_path.exists() {
@@ -84,7 +74,7 @@ impl CgroupManager {
         &self,
         user: &uzers::User,
         session_id: session::SessionId,
-        leader_pid: Option<i32>,
+        leader_pid: i32,
     ) -> anyhow::Result<CgroupBundle> {
         let user_cgroup_path = self.ensure_user_cgroup(user.uid())?;
         Self::enable_all_controllers(&self.root_path).with_context(|| {
@@ -102,14 +92,12 @@ impl CgroupManager {
         let session_cgroup_path = user_cgroup_path.join(format!("session-{}", session_id.as_raw()));
         fs::create_dir(&session_cgroup_path)?;
         fs::set_permissions(&session_cgroup_path, fs::Permissions::from_mode(0o755))?;
-        if let Some(leader_pid) = leader_pid {
-            fs::write(
-                session_cgroup_path.join("cgroup.procs"),
-                leader_pid.to_string(),
-            )?;
-        }
+        fs::write(
+            session_cgroup_path.join("cgroup.procs"),
+            leader_pid.to_string(),
+        )?;
 
-        log::info!(session_id = session_id.as_raw(), leader_pid:? = leader_pid, path = session_cgroup_path.to_str(); "cgroup created");
+        log::info!(session_id = session_id.as_raw(), leader_pid = leader_pid, path = session_cgroup_path.to_str(); "cgroup created");
 
         Ok(CgroupBundle {
             marker: Cgroup,
@@ -117,37 +105,6 @@ impl CgroupManager {
             uid: session::Uid(user.uid()),
             path: CgroupPath(session_cgroup_path),
         })
-    }
-
-    pub(crate) fn delegate_cgroup(
-        user: &uzers::User,
-        cgroup: &CgroupBundle,
-    ) -> anyhow::Result<String> {
-        let supervisor_path = cgroup.path.0.join("supervisor");
-        fs::create_dir(&supervisor_path)?;
-
-        for path in [&cgroup.path.0, &supervisor_path] {
-            rustix::fs::chown(
-                path,
-                Some(rustix::process::Uid::from_raw(user.uid())),
-                Some(rustix::process::Gid::from_raw(user.primary_group_id())),
-            )?;
-            fs::set_permissions(path, fs::Permissions::from_mode(0o755))?;
-            for name in ["cgroup.procs", "cgroup.threads", "cgroup.subtree_control"] {
-                let file = path.join(name);
-                rustix::fs::chown(
-                    &file,
-                    Some(rustix::process::Uid::from_raw(user.uid())),
-                    Some(rustix::process::Gid::from_raw(user.primary_group_id())),
-                )?;
-                fs::set_permissions(&file, fs::Permissions::from_mode(0o644))?;
-            }
-        }
-
-        let hierarchy_path = supervisor_path
-            .strip_prefix("/sys/fs/cgroup")
-            .context("supervisor cgroup is outside the cgroup hierarchy")?;
-        Ok(format!("/{}", hierarchy_path.display()))
     }
 
     fn enable_all_controllers(parent: &path::Path) -> anyhow::Result<()> {

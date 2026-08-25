@@ -44,12 +44,6 @@ impl SessionManagementTarget {
         }
     }
 
-    fn send_cgroup_path(&self, path: &str) {
-        if let Self::V2(object) = self {
-            object.send_cgroup_path(path);
-        }
-    }
-
     fn send_done(&self) {
         match self {
             Self::V1(object) => object.send_done(),
@@ -86,7 +80,6 @@ pub struct PendingSession {
     pub remote_host: Option<sync::Arc<str>>,
     pub env: BTreeMap<sync::Arc<str>, sync::Arc<str>>,
     pub leader_id: i32,
-    pub delegate_cgroup: bool,
 }
 
 #[derive(Resource, Default)]
@@ -669,7 +662,6 @@ pub enum SessionManagementAction {
     Vt {
         vt: u32,
     },
-    DelegateCgroup,
     RemoteHost {
         remote_host: sync::Arc<str>,
     },
@@ -747,7 +739,6 @@ pub fn handle_session_management_action(
                         remote_host: None,
                         env: BTreeMap::new(),
                         leader_id: *leader_id,
-                        delegate_cgroup: false,
                     },
                 );
                 continue;
@@ -782,13 +773,6 @@ pub fn handle_session_management_action(
                     continue;
                 }
             }
-            SessionManagementAction::DelegateCgroup => {
-                if let Some(pending_session) = pending_sessions.by_management_object.get_mut(object)
-                {
-                    pending_session.delegate_cgroup = true;
-                    continue;
-                }
-            }
             SessionManagementAction::Done => {
                 if let Some(pending_session) = pending_sessions.by_management_object.remove(object)
                 {
@@ -806,7 +790,7 @@ pub fn handle_session_management_action(
                     let cgroup = match cgroup_manager.create_session_cgroup(
                         &user,
                         session_id,
-                        (!pending_session.delegate_cgroup).then_some(pending_session.leader_id),
+                        pending_session.leader_id,
                     ) {
                         Ok(cgroup) => cgroup,
                         Err(e) => {
@@ -846,31 +830,6 @@ pub fn handle_session_management_action(
                     }
                     env.extend(pending_session.env.clone());
                     let protocol_env = env.clone();
-
-                    if pending_session.delegate_cgroup {
-                        let path = match cgroup::CgroupManager::delegate_cgroup(&user, &cgroup) {
-                            Ok(path) => path,
-                            Err(error) => {
-                                if let Err(cleanup_error) =
-                                    cgroup::CgroupManager::remove_session_cgroup(&cgroup.path.0)
-                                {
-                                    log::error!(
-                                        session_id = session_id.as_raw(),
-                                        error = cleanup_error.to_string().as_str();
-                                        "failed to clean up session cgroup after delegation failure"
-                                    );
-                                }
-
-                                object.send_error(
-                                    SessionManagementError::Io,
-                                    format!("failed to delegate session cgroup: {error}"),
-                                );
-                                return;
-                            }
-                        };
-
-                        object.send_cgroup_path(&path);
-                    }
 
                     spawn(
                         &mut commands,
@@ -1031,9 +990,6 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                     key: name.into(),
                     value: value.into(),
                 }
-            }
-            session_management_session::Event::DelegateCgroup => {
-                SessionManagementAction::DelegateCgroup
             }
             session_management_session::Event::Done => SessionManagementAction::Done,
             session_management_session::Event::Destroy => SessionManagementAction::Destroy,

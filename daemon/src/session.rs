@@ -44,6 +44,12 @@ impl SessionManagementTarget {
         }
     }
 
+    fn send_cgroup_path(&self, path: &str) {
+        if let Self::V2(object) = self {
+            object.send_cgroup_path(path);
+        }
+    }
+
     fn send_done(&self) {
         match self {
             Self::V1(object) => object.send_done(),
@@ -800,7 +806,7 @@ pub fn handle_session_management_action(
                     let cgroup = match cgroup_manager.create_session_cgroup(
                         &user,
                         session_id,
-                        pending_session.leader_id,
+                        (!pending_session.delegate_cgroup).then_some(pending_session.leader_id),
                     ) {
                         Ok(cgroup) => cgroup,
                         Err(e) => {
@@ -812,25 +818,6 @@ pub fn handle_session_management_action(
                             return;
                         }
                     };
-
-                    if pending_session.delegate_cgroup
-                        && let Err(error) = cgroup::CgroupManager::delegate_cgroup(&user, &cgroup)
-                    {
-                        if let Err(cleanup_error) =
-                            cgroup::CgroupManager::remove_session_cgroup(&cgroup.path.0)
-                        {
-                            log::error!(
-                                session_id = session_id.as_raw(),
-                                error = cleanup_error.to_string().as_str();
-                                "failed to clean up session cgroup after delegation failure"
-                            );
-                        }
-                        object.send_error(
-                            SessionManagementError::Io,
-                            format!("failed to delegate session cgroup: {error}"),
-                        );
-                        return;
-                    }
 
                     let user_config = config.0.users.get(&username).cloned().unwrap_or_default();
                     user::create_runtime_dir(
@@ -859,6 +846,31 @@ pub fn handle_session_management_action(
                     }
                     env.extend(pending_session.env.clone());
                     let protocol_env = env.clone();
+
+                    if pending_session.delegate_cgroup {
+                        let path = match cgroup::CgroupManager::delegate_cgroup(&user, &cgroup) {
+                            Ok(path) => path,
+                            Err(error) => {
+                                if let Err(cleanup_error) =
+                                    cgroup::CgroupManager::remove_session_cgroup(&cgroup.path.0)
+                                {
+                                    log::error!(
+                                        session_id = session_id.as_raw(),
+                                        error = cleanup_error.to_string().as_str();
+                                        "failed to clean up session cgroup after delegation failure"
+                                    );
+                                }
+
+                                object.send_error(
+                                    SessionManagementError::Io,
+                                    format!("failed to delegate session cgroup: {error}"),
+                                );
+                                return;
+                            }
+                        };
+
+                        object.send_cgroup_path(&path);
+                    }
 
                     spawn(
                         &mut commands,

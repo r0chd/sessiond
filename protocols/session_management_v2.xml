@@ -87,6 +87,15 @@
    <arg name="name" type="varchar" summary="environment variable name"/>
    <arg name="value" type="varchar" summary="environment variable value"/>
   </s2c>
+  <s2c name="cgroup_path" since="2">
+   <description summary="delegatee cgroup path">
+    Sent before done when cgroup delegation was requested. This is the
+    absolute path of the supervisor subgroup in the unified cgroup hierarchy.
+    The delegatee should be placed in this cgroup. Its parent is the delegated
+    root and is suitable for resolving managed cgroups beneath it.
+   </description>
+   <arg name="path" type="varchar" summary="delegatee cgroup path"/>
+  </s2c>
   <s2c name="done">
    <description summary="session created, initial field dump complete"/>
   </s2c>
@@ -102,7 +111,8 @@
    <description summary="delegate the session cgroup">
     Must be sent while staged. The daemon will create and delegate the
     session cgroup when the session is committed. The requesting process is
-    placed in it and may discover its path through /proc/self/cgroup.
+    not moved. The delegatee's supervisor subgroup is reported by the
+    cgroup_path event.
    </description>
   </c2s>
  </object>

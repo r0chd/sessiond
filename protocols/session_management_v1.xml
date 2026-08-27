@@ -32,8 +32,8 @@
   <c2s name="create_session">
    <description summary="[unsafe: can leak the session] register a session without an owning object">
     Registers a session and replies on this object with session_id and env
-    variables. Any env variables sent before create_session are attached to
-    the created session. The caller must pair it with
+    variables. The supplied environment entries are attached to the created
+    session. The caller must pair it with
     destroy_session or the session's resources (cgroup, runtime
     directory) leak.
    </description>
@@ -42,6 +42,7 @@
    <arg name="is_local" type="uint" summary="non-zero if local, zero if remote"/>
    <arg name="remote_host" type="varchar" summary="remote host, empty for local sessions"/>
    <arg name="class" type="enum" interface="session_class" summary="session class"/>
+   <arg name="env" type="array varchar" summary="environment as KEY=VALUE strings"/>
   </c2s>
   <s2c name="session_id">
    <arg name="session_id" type="uint" summary="unique session identifier"/>
@@ -64,13 +65,6 @@
     create_session leaks the session's resources.
    </description>
    <arg name="session_id" type="uint" summary="session identifier from session_id"/>
-  </c2s>
-  <c2s name="env">
-   <description summary="stage an environment variable for the next created session">
-    Optional. May be sent multiple times before create_session.
-   </description>
-   <arg name="name" type="varchar" summary="environment variable name"/>
-   <arg name="value" type="varchar" summary="environment variable value"/>
   </c2s>
   <c2s name="destroy" destructor="true">
    <description summary="destroy this object"/>

@@ -4,8 +4,8 @@ use crate::session_management_v2::{session_management_session, session_manager};
 use crate::{
     cgroup, config, session_core_v1, session_management_v1, session_management_v2, user, vt,
 };
+use bevy_ecs::entity;
 use bevy_ecs::prelude::*;
-use bevy_ecs::{entity, world};
 use hyprwire::server;
 use std::collections::{BTreeMap, HashMap};
 use std::{num, sync, time};
@@ -128,11 +128,6 @@ impl NextSessionId {
 
 #[derive(Resource, Default)]
 pub struct SessionInfoManagers(pub Vec<session_core_manager::SessionCoreManager>);
-
-#[derive(Resource, Default)]
-pub struct PendingSessionEnvs(
-    pub HashMap<session_manager_v1::SessionManager, BTreeMap<sync::Arc<str>, sync::Arc<str>>>,
-);
 
 #[derive(Bundle)]
 pub struct SessionBundle {
@@ -289,26 +284,6 @@ pub fn spawn(
     session_registry.by_id.insert(session_id, entity);
     session_registry.by_uid.entry(uid).or_default().push(entity);
     entity
-}
-
-pub fn entities(world: &world::World) -> Vec<entity::Entity> {
-    let Some(mut sessions) = world.try_query_filtered::<Entity, With<Session>>() else {
-        return Vec::new();
-    };
-    sessions.iter(world).collect()
-}
-
-pub fn entity(world: &world::World, session_id: SessionId) -> Option<entity::Entity> {
-    world
-        .resource::<SessionRegistry>()
-        .by_id
-        .get(&session_id)
-        .copied()
-}
-
-pub fn can_modify(world: &world::World, entity: entity::Entity, creds: &hyprwire::Creds) -> bool {
-    let session_uid = world.get::<Uid>(entity).map_or(0, |uid| uid.0);
-    creds.uid.is_root() || creds.uid.as_raw() == session_uid
 }
 
 #[derive(Message)]
@@ -512,64 +487,95 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
     }
 }
 
-pub fn add_object(
-    world: &mut world::World,
+#[derive(Message)]
+pub struct AddObject {
     session_id: SessionId,
-    entity: entity::Entity,
     object: session_core_session::SessionCoreSession,
-) {
-    log::debug!(session_id = session_id.as_raw(), uid = object.client().creds().uid.as_raw(); "session info requested");
+    creds: hyprwire::Creds,
+}
 
-    object.send_session_id(session_id.as_raw());
-    if let Some(uid) = world.get::<Uid>(entity) {
-        object.send_uid(uid.0);
-    }
-    if let Some(username) = world.get::<Username>(entity) {
-        object.send_username(&username.0);
-    }
-    if let Some(class) = world.get::<SessionClass>(entity) {
-        object.send_class((*class).into());
-    }
-    if let Some(vt) = world.get::<Vt>(entity).map(|vt| vt.0.get()) {
-        object.send_vt(vt);
-    }
-    if let Some(active_state) = world.get::<session_core_v1::ActiveState>(entity) {
-        object.send_active(*active_state);
-    }
-    object.send_can_modify(u32::from(can_modify(
-        world,
-        entity,
-        object.client().creds(),
-    )));
-    if let Some(leader_id) = world.get::<LeaderId>(entity) {
-        object.send_leader(leader_id.0.cast_unsigned());
-    }
-    if let Some(timestamp) = world.get::<Timestamp>(entity) {
+pub fn handle_add_object(
+    mut requests: MessageReader<AddObject>,
+    mut sessions: Query<
+        (
+            Entity,
+            &SessionId,
+            &Uid,
+            &Username,
+            Option<&Vt>,
+            &SessionClass,
+            &session_core_v1::ActiveState,
+            &LeaderId,
+            &Timestamp,
+            Option<&IsLocal>,
+            Option<&RemoteHost>,
+            &mut Objects,
+        ),
+        With<Session>,
+    >,
+    mut session_registry: ResMut<SessionRegistry>,
+) {
+    for request in requests.read() {
+        let Some((
+            entity,
+            session_id,
+            uid,
+            username,
+            vt,
+            class,
+            state,
+            leader_id,
+            timestamp,
+            is_local,
+            remote_host,
+            mut objects,
+        )) = sessions
+            .iter_mut()
+            .find(|(_, session_id, _, _, _, _, _, _, _, _, _, _)| {
+                **session_id == request.session_id
+            })
+        else {
+            log::warn!(session_id = request.session_id.as_raw(); "get_session_by_pid requested for unknown session");
+            request.object.send_destroyed();
+            continue;
+        };
+
+        log::debug!(session_id = request.session_id.as_raw(), uid = request.object.client().creds().uid.as_raw(); "session info requested");
+        request.object.send_session_id(session_id.as_raw());
+        request.object.send_uid(uid.0);
+        request.object.send_username(&username.0);
+        request.object.send_class((*class).into());
+        request.object.send_vt(vt.map_or(0, |vt| vt.0.get()));
+        request.object.send_active(*state);
+        request.object.send_leader(leader_id.0.cast_unsigned());
         let timestamp_secs = timestamp
             .0
             .duration_since(time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
         let timestamp = u32::try_from(timestamp_secs).unwrap_or(u32::MAX);
-        object.send_timestamp(timestamp);
-    }
-    if world.get::<IsLocal>(entity).is_some() {
-        object.send_is_local(1);
-    } else {
-        object.send_is_local(0);
-    }
-    if let Some(remote_host) = world.get::<RemoteHost>(entity) {
-        object.send_remote_host(&remote_host.0);
-    }
-    object.send_done();
+        request.object.send_timestamp(timestamp);
 
-    if let Some(mut objects) = world.get_mut::<Objects>(entity) {
-        objects.0.push(object.clone());
+        if is_local.is_some() {
+            request.object.send_is_local(1);
+        } else {
+            request.object.send_is_local(0);
+        }
+        if let Some(remote_host) = remote_host {
+            request.object.send_remote_host(&remote_host.0);
+        }
+
+        request.object.send_can_modify(u32::from(
+            request.creds.uid.is_root() || request.creds.uid.as_raw() == uid.0,
+        ));
+
+        request.object.send_done();
+
+        objects.0.push(request.object.clone());
+        session_registry
+            .by_object
+            .insert(request.object.clone(), entity);
     }
-    world
-        .resource_mut::<SessionRegistry>()
-        .by_object
-        .insert(object, entity);
 }
 
 impl hyprwire::Handler<session_management_v1::SessionManagementV1> for crate::Sessiond {
@@ -584,24 +590,49 @@ impl hyprwire::Handler<session_management_v2::SessionManagementV2> for crate::Se
     }
 }
 
+#[derive(Message)]
+pub struct SessionInfoManagerMessage {
+    pub object: session_core_manager::SessionCoreManager,
+    pub action: SessionInfoManagerAction,
+}
+
+pub enum SessionInfoManagerAction {
+    Initialize,
+    Destroy,
+}
+
+pub fn handle_session_info_manager(
+    mut actions: MessageReader<SessionInfoManagerMessage>,
+    users: Res<user::UserRegistry>,
+    sessions: Query<&SessionId, With<Session>>,
+    mut info_managers: ResMut<SessionInfoManagers>,
+) {
+    for action in actions.read() {
+        match action.action {
+            SessionInfoManagerAction::Initialize => {
+                users
+                    .by_uid
+                    .keys()
+                    .for_each(|uid| action.object.send_user_added(*uid));
+                sessions
+                    .iter()
+                    .for_each(|session_id| action.object.send_session_added(session_id.as_raw()));
+                action.object.send_done();
+                info_managers.0.push(action.object.clone());
+            }
+            SessionInfoManagerAction::Destroy => {
+                info_managers.0.retain(|manager| manager != &action.object);
+            }
+        }
+    }
+}
+
 impl hyprwire::Handler<session_core_v1::SessionCoreV1> for crate::Sessiond {
     fn bind(&mut self, object: session_core_manager::SessionCoreManager) {
-        self.world
-            .resource::<user::UserRegistry>()
-            .by_uid
-            .keys()
-            .for_each(|uid| object.send_user_added(*uid));
-        entities(&self.world)
-            .into_iter()
-            .filter_map(|entity| self.world.get::<SessionId>(entity))
-            .for_each(|session_id| {
-                object.send_session_added(session_id.as_raw());
-            });
-        object.send_done();
-        self.world
-            .resource_mut::<SessionInfoManagers>()
-            .0
-            .push(object);
+        self.world.write_message(SessionInfoManagerMessage {
+            object,
+            action: SessionInfoManagerAction::Initialize,
+        });
     }
 }
 
@@ -886,13 +917,8 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                 is_local,
                 remote_host,
                 class,
+                env,
             } => {
-                let pending_env = self
-                    .world
-                    .resource_mut::<PendingSessionEnvs>()
-                    .0
-                    .remove(object)
-                    .unwrap_or_default();
                 let target = SessionManagementTarget::V1(object.clone());
 
                 self.world.write_message(SessionManagementMessage {
@@ -921,9 +947,15 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                     },
                     object: Some(target.clone()),
                 });
-                for (key, value) in pending_env {
+                for env in env {
+                    let Some((key, value)) = env.split_once('=') else {
+                        continue;
+                    };
                     self.world.write_message(SessionManagementMessage {
-                        action: SessionManagementAction::Env { key, value },
+                        action: SessionManagementAction::Env {
+                            key: key.into(),
+                            value: value.into(),
+                        },
                         object: Some(target.clone()),
                     });
                 }
@@ -931,14 +963,6 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                     action: SessionManagementAction::Done,
                     object: Some(target),
                 });
-            }
-            session_manager_v1::Event::Env { name, value } => {
-                self.world
-                    .resource_mut::<PendingSessionEnvs>()
-                    .0
-                    .entry(object.clone())
-                    .or_default()
-                    .insert(name.into(), value.into());
             }
             session_manager_v1::Event::DestroySession { session_id } => {
                 if let Some(entity) = self
@@ -958,10 +982,10 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                 }
             }
             session_manager_v1::Event::Destroy => {
-                self.world
-                    .resource_mut::<PendingSessionEnvs>()
-                    .0
-                    .remove(object);
+                self.world.write_message(SessionManagementMessage {
+                    action: SessionManagementAction::Destroy,
+                    object: Some(SessionManagementTarget::V1(object.clone())),
+                });
             }
         }
     }
@@ -1012,14 +1036,11 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                 session_core_session,
                 session_id,
             } => {
-                let session_id = SessionId::from_raw(session_id);
-                if let Some(entity) = entity(&self.world, session_id) {
-                    add_object(&mut self.world, session_id, entity, session_core_session);
-                    return;
-                }
-
-                log::warn!(session_id = session_id.as_raw(); "get_session requested for unknown session");
-                session_core_session.send_destroyed();
+                self.world.write_message(AddObject {
+                    session_id: SessionId::from_raw(session_id),
+                    object: session_core_session,
+                    creds: *object.client().creds(),
+                });
             }
             session_core_manager::Event::GetSessionByPid {
                 session_core_session,
@@ -1035,13 +1056,11 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                     return;
                 };
 
-                if let Some(entity) = entity(&self.world, session_id) {
-                    add_object(&mut self.world, session_id, entity, session_core_session);
-                    return;
-                }
-
-                log::warn!(session_id = session_id.as_raw(); "get_session_by_pid requested for unknown session");
-                session_core_session.send_destroyed();
+                self.world.write_message(AddObject {
+                    session_id,
+                    object: session_core_session,
+                    creds: *object.client().creds(),
+                });
             }
             session_core_manager::Event::GetSessionByUid {
                 session_core_session,
@@ -1059,7 +1078,11 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                     })
                     && let Some(session_id) = self.world.get::<SessionId>(entity).copied()
                 {
-                    add_object(&mut self.world, session_id, entity, session_core_session);
+                    self.world.write_message(AddObject {
+                        session_id,
+                        object: session_core_session,
+                        creds: *object.client().creds(),
+                    });
                     return;
                 }
 
@@ -1070,25 +1093,17 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                 session_core_user,
                 uid,
             } => {
-                let Some(entity) = self
-                    .world
-                    .resource::<user::UserRegistry>()
-                    .by_uid
-                    .get(&uid)
-                    .copied()
-                else {
-                    log::warn!(uid; "get_user requested for unknown user");
-                    session_core_user.send_not_found();
-                    return;
-                };
-
-                user::add_object(&mut self.world, entity, session_core_user);
+                self.world.write_message(user::AddObject {
+                    uid,
+                    object: session_core_user,
+                    creds: *object.client().creds(),
+                });
             }
             session_core_manager::Event::Destroy => {
-                self.world
-                    .resource_mut::<SessionInfoManagers>()
-                    .0
-                    .retain(|m| m != object);
+                self.world.write_message(SessionInfoManagerMessage {
+                    object: object.clone(),
+                    action: SessionInfoManagerAction::Destroy,
+                });
             }
         }
     }

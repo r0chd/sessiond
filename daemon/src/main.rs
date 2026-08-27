@@ -71,6 +71,9 @@ pub enum ShutdownState {
 #[derive(Resource)]
 pub struct LoopSignal(pub calloop::LoopSignal);
 
+#[derive(Message)]
+struct ShutdownRequested;
+
 struct Sessiond {
     world: World,
     notify_schedule: Schedule,
@@ -91,6 +94,23 @@ fn notify(message: &[u8]) -> rustix::io::Result<()> {
     Ok(())
 }
 
+fn handle_shutdown(
+    mut requests: MessageReader<ShutdownRequested>,
+    mut shutdown_state: ResMut<ShutdownState>,
+    loop_signal: Res<LoopSignal>,
+) {
+    if requests.read().next().is_none() || *shutdown_state == ShutdownState::Stopping {
+        return;
+    }
+
+    if let Err(error) = notify(b"STOPPING=1\n") {
+        log::warn!(error = error.to_string().as_str(); "failed to send shutdown notification");
+    }
+
+    *shutdown_state = ShutdownState::Stopping;
+    loop_signal.0.stop();
+}
+
 fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
     let mut event_loop = calloop::EventLoop::try_new()?;
     #[cfg(feature = "consolekit")]
@@ -105,9 +125,15 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
     let mut world = World::new();
     message::MessageRegistry::register_message::<session::SessionManagementMessage>(&mut world);
     message::MessageRegistry::register_message::<session::SessionControlMessage>(&mut world);
+    message::MessageRegistry::register_message::<session::AddObject>(&mut world);
+    message::MessageRegistry::register_message::<session::SessionInfoManagerMessage>(&mut world);
     message::MessageRegistry::register_message::<user::UserControlMessage>(&mut world);
+    message::MessageRegistry::register_message::<user::AddObject>(&mut world);
+    message::MessageRegistry::register_message::<power::PowerManagerDestroy>(&mut world);
     message::MessageRegistry::register_message::<power::PowerActionRequest>(&mut world);
-    world.init_resource::<session::PendingSessionEnvs>();
+    #[cfg(feature = "consolekit")]
+    message::MessageRegistry::register_message::<power::PowerCanRequest>(&mut world);
+    message::MessageRegistry::register_message::<ShutdownRequested>(&mut world);
     world.init_resource::<session::PendingSessions>();
     world.insert_resource(session::NextSessionId(session::SessionId::from_raw(1)));
     world.init_resource::<session::SessionInfoManagers>();
@@ -142,6 +168,10 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
             .before(session::handle_session_control)
             .before(user::ensure_session_users),
     );
+    schedule.add_systems(session::handle_add_object.before(reconcile::send_done));
+    schedule.add_systems(session::handle_session_info_manager.before(reconcile::send_done));
+    schedule.add_systems(user::handle_add_object.before(reconcile::send_done));
+    schedule.add_systems(handle_shutdown.before(reconcile::send_done));
     schedule.add_systems(user::ensure_session_users.before(user::reconcile_user_states));
     schedule.add_systems(vt::refresh_current_vt.before(user::reconcile_user_states));
     schedule.add_systems(
@@ -155,6 +185,9 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
         power::initialize_power_manager_permissions.before(power::notify_power_control),
     );
     schedule.add_systems(power::handle_power_action.before(reconcile::send_done));
+    #[cfg(feature = "consolekit")]
+    schedule.add_systems(power::handle_power_can.before(reconcile::send_done));
+    schedule.add_systems(power::handle_power_manager_control.before(power::notify_power_control));
     schedule.add_systems(
         (
             state::write_state,
@@ -235,21 +268,11 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
                     });
                 }
                 consolekit::PowerRequestKind::Can(action) => {
-                    let _ = action;
-                    let can = request.creds.uid.is_root()
-                        || session::entities(&state.world)
-                            .into_iter()
-                            .filter_map(|entity| {
-                                Some((
-                                    state.world.get::<session::Uid>(entity)?,
-                                    state.world.get::<session::SessionClass>(entity)?,
-                                ))
-                            })
-                            .all(|(uid, class)| {
-                                uid.0 == request.creds.uid.as_raw()
-                                    || *class != session::SessionClass::User
-                            });
-                    let _ = request.reply.send(consolekit::PowerResponse::Can(can));
+                    state.world.write_message(power::PowerCanRequest {
+                        action,
+                        creds: request.creds,
+                        responder: request.reply,
+                    });
                 }
             }
         })
@@ -291,16 +314,7 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
                 }
             }
             signals::Signal::SIGTERM | signals::Signal::SIGINT => {
-                if *state.world.resource::<ShutdownState>() == ShutdownState::Stopping {
-                    return;
-                }
-
-                if let Err(e) = notify(b"STOPPING=1\n") {
-                    log::warn!("Failed to send shutdown notification: {e}");
-                }
-
-                *state.world.resource_mut::<ShutdownState>() = ShutdownState::Stopping;
-                state.world.resource::<LoopSignal>().0.stop();
+                state.world.write_message(ShutdownRequested);
             }
             _ => unreachable!(),
         })?;

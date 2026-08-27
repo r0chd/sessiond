@@ -142,20 +142,30 @@ impl hyprwire::Dispatch<session_power_manager::SessionPowerManager> for crate::S
                 });
             }
             session_power_manager::Event::Destroy => {
-                let entity = {
-                    let mut managers = self.world.query_filtered::<
-                        (Entity, &session_power_manager::SessionPowerManager),
-                        With<PowerManager>,
-                    >();
-                    managers
-                        .iter(&self.world)
-                        .find_map(|(entity, manager)| (manager == object).then_some(entity))
-                };
-
-                if let Some(entity) = entity {
-                    self.world.despawn(entity);
-                }
+                self.world.write_message(PowerManagerDestroy {
+                    object: object.clone(),
+                });
             }
+        }
+    }
+}
+
+#[derive(Message)]
+pub struct PowerManagerDestroy {
+    pub object: session_power_manager::SessionPowerManager,
+}
+
+pub fn handle_power_manager_control(
+    mut actions: MessageReader<PowerManagerDestroy>,
+    managers: Query<(Entity, &session_power_manager::SessionPowerManager), With<PowerManager>>,
+    mut commands: Commands,
+) {
+    for action in actions.read() {
+        if let Some((entity, _)) = managers
+            .iter()
+            .find(|(_, manager)| *manager == &action.object)
+        {
+            commands.entity(entity).despawn();
         }
     }
 }
@@ -245,6 +255,30 @@ pub fn handle_power_action(
         }
 
         send_power_result(&request.responder, Ok(()));
+    }
+}
+
+#[cfg(feature = "consolekit")]
+#[derive(Message)]
+pub struct PowerCanRequest {
+    pub action: PowerAction,
+    pub creds: hyprwire::Creds,
+    pub responder: std::sync::mpsc::Sender<consolekit::PowerResponse>,
+}
+
+#[cfg(feature = "consolekit")]
+pub fn handle_power_can(
+    mut requests: MessageReader<PowerCanRequest>,
+    sessions: Query<(&session::Uid, &session::SessionClass), With<session::Session>>,
+) {
+    for request in requests.read() {
+        let _ = request.action;
+        let can = request.creds.uid.is_root()
+            || sessions
+                .iter()
+                .filter(|(_, class)| **class == session::SessionClass::User)
+                .all(|(uid, _)| uid.0 == request.creds.uid.as_raw());
+        let _ = request.responder.send(consolekit::PowerResponse::Can(can));
     }
 }
 

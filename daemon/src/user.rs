@@ -1,6 +1,6 @@
 use crate::{cgroup, config, session, session_core_user, session_core_v1};
+use bevy_ecs::entity;
 use bevy_ecs::prelude::*;
-use bevy_ecs::{entity, world};
 use std::collections::HashMap;
 use std::{fs, io, sync};
 
@@ -166,38 +166,57 @@ pub fn reconcile_user_states(
     }
 }
 
-pub fn add_object(
-    world: &mut world::World,
-    entity: entity::Entity,
-    object: session_core_user::SessionCoreUser,
-) {
-    if let Some(uid) = world.get::<session::Uid>(entity) {
-        object.send_uid(uid.0);
-    }
-    if let Some(username) = world.get::<session::Username>(entity) {
-        object.send_username(&username.0);
-    }
-    if world.get::<Lingering>(entity).is_some() {
-        object.send_lingering(1);
-    } else {
-        object.send_lingering(0);
-    }
-    if let Some(state) = world.get::<session_core_v1::UserState>(entity) {
-        object.send_state(*state);
-    }
-    let client = object.client();
-    let uid = world.get::<session::Uid>(entity).map_or(0, |uid| uid.0);
-    let can_modify = client.creds().uid.is_root() || uid == client.creds().uid.as_raw();
-    object.send_can_modify(u32::from(can_modify));
-    object.send_done();
+#[derive(Message)]
+pub struct AddObject {
+    pub uid: u32,
+    pub object: session_core_user::SessionCoreUser,
+    pub creds: hyprwire::Creds,
+}
 
-    if let Some(mut objects) = world.get_mut::<Objects>(entity) {
-        objects.0.push(object.clone());
+pub fn handle_add_object(
+    mut requests: MessageReader<AddObject>,
+    mut users: Query<
+        (
+            Entity,
+            &session::Uid,
+            &session::Username,
+            Option<&Lingering>,
+            &session_core_v1::UserState,
+            &mut Objects,
+        ),
+        With<User>,
+    >,
+    mut user_registry: ResMut<UserRegistry>,
+) {
+    for request in requests.read() {
+        let Some((entity, uid, username, lingering, state, mut objects)) = users
+            .iter_mut()
+            .find(|(_, uid, _, _, _, _)| uid.0 == request.uid)
+        else {
+            log::warn!(uid = request.uid; "get_user requested for unknown user");
+            request.object.send_not_found();
+            continue;
+        };
+
+        request.object.send_uid(uid.0);
+        request.object.send_username(&username.0);
+        if lingering.is_some() {
+            request.object.send_lingering(1);
+        } else {
+            request.object.send_lingering(0);
+        }
+        request.object.send_state(*state);
+
+        request.object.send_can_modify(u32::from(
+            request.creds.uid.is_root() || uid.0 == request.creds.uid.as_raw(),
+        ));
+        request.object.send_done();
+
+        objects.0.push(request.object.clone());
+        user_registry
+            .by_object
+            .insert(request.object.clone(), entity);
     }
-    world
-        .resource_mut::<UserRegistry>()
-        .by_object
-        .insert(object, entity);
 }
 
 #[derive(Message)]

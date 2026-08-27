@@ -91,14 +91,15 @@ impl PamServiceModule for Pam {
             let envlist = pamh.getenvlist()?;
 
             let mut class = session_management_v1::SessionClass::User;
-            for env in envlist.iter() {
-                let env = env.to_string_lossy();
+            let mut env = Vec::new();
+            for entry in envlist.iter() {
+                let entry = entry.to_string_lossy().into_owned();
 
-                let Some((name, value)) = env.split_once('=') else {
+                let Some((name, value)) = entry.split_once('=') else {
                     continue;
                 };
 
-                manager.send_env(name, value);
+                env.push(entry.clone());
 
                 if name == "XDG_SESSION_CLASS" {
                     class = match value {
@@ -113,7 +114,7 @@ impl PamServiceModule for Pam {
                 }
             }
 
-            manager.send_create_session(uid, vt, is_local, remote_host, class);
+            manager.send_create_session(uid, vt, is_local, remote_host, class, &env);
 
             while !session.done {
                 event_queue

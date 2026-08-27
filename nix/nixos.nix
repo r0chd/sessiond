@@ -20,6 +20,7 @@ in
       serviceConfig = {
         ExecStart = "${cfg.package}/bin/sessiond --config ${daemonConfig}";
         Environment = "LOG_LEVEL=${cfg.logLevel}";
+        Type = "notify";
         Delegate = true;
         DelegateSubgroup = "supervisor";
         RuntimeDirectory = "sessiond";

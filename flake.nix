@@ -49,7 +49,7 @@
               ];
             };
           in
-          import ./nix/shell.nix { inherit pkgs rustToolchain; };
+          import ./nix/internal/shell.nix { inherit pkgs rustToolchain; };
       });
 
       apps.x86_64-linux.finix-vm =
@@ -105,7 +105,7 @@
             ];
           };
         in
-        import ./nix/formatter.nix { inherit pkgs rustToolchain; }
+        import ./nix/internal/formatter.nix { inherit pkgs rustToolchain; }
       );
 
       nixosConfigurations =
@@ -120,7 +120,7 @@
             };
             modules = [
               ./nix/nixos.nix
-              ./nix/nixos-vm.nix
+              ./nix/internal/nixos-vm.nix
             ];
           };
         };
@@ -138,8 +138,8 @@
             };
             modules = [
               { nixpkgs = { inherit pkgs; }; }
-              ./nix/finix-vm.nix
               ./nix/finix.nix
+              ./nix/internal/finix-vm.nix
               "${finix.outPath}/modules/virtualisation/qemu.nix"
             ]
             ++ builtins.attrValues {
@@ -159,8 +159,8 @@
             inherit self finix pkgs;
           };
         in
-        (import ./nix/finix-checks.nix checkArgs)
-        // (import ./nix/nixos-checks.nix checkArgs)
+        (import ./nix/internal/finix-checks.nix checkArgs)
+        // (import ./nix/internal/nixos-checks.nix checkArgs)
       );
     };
 }

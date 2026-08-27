@@ -1,6 +1,6 @@
 {
   pkgs,
-  self ? ../.,
+  self ? ../../.,
   finix,
 }:
 let
@@ -19,11 +19,11 @@ let
   };
 
   checks = prefixAttrs "finix" {
-    basic = pkgs.callPackage ./tests/finix/basic.nix testArgs;
-    vt-switch = pkgs.callPackage ./tests/finix/vt-switch.nix testArgs;
-    termination = pkgs.callPackage ./tests/finix/termination.nix testArgs;
-    linger = pkgs.callPackage ./tests/finix/linger.nix testArgs;
-    consolekit = pkgs.callPackage ./tests/finix/consolekit.nix testArgs;
+    basic = pkgs.callPackage "${self}/nix/tests/finix/basic.nix" testArgs;
+    vt-switch = pkgs.callPackage "${self}/nix/tests/finix/vt-switch.nix" testArgs;
+    termination = pkgs.callPackage "${self}/nix/tests/finix/termination.nix" testArgs;
+    linger = pkgs.callPackage "${self}/nix/tests/finix/linger.nix" testArgs;
+    consolekit = pkgs.callPackage "${self}/nix/tests/finix/consolekit.nix" testArgs;
   };
 in
 checks

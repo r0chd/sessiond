@@ -1,7 +1,7 @@
 {
   pkgs,
-  self ? ../.,
-  finix,
+  self ? ../../.,
+  ...
 }:
 let
   sessiondTest = test: pkgs.testers.nixosTest test;
@@ -15,7 +15,7 @@ let
   };
 
   checks = prefixAttrs "nixos" {
-    basic = pkgs.callPackage ./tests/nixos/basic.nix testArgs;
+    basic = pkgs.callPackage "${self}/nix/tests/nixos/basic.nix" testArgs;
   };
 in
 checks

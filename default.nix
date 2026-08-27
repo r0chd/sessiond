@@ -1,5 +1,5 @@
 {
-  rust-overlay ? import (import ./nix/flake-parse.nix "rust-overlay"),
+  rust-overlay ? import (import ./nix/internal/flake-parse.nix "rust-overlay"),
   pkgs ? import (import ./nix/flake-parse.nix "nixpkgs") {
     system = builtins.currentSystem;
     overlays = [ rust-overlay ];
@@ -16,7 +16,7 @@ let
   };
 in
 {
-  shell = import ./nix/shell.nix {
+  shell = import ./nix/internal/shell.nix {
     inherit pkgs rustToolchain;
   };
 
@@ -30,7 +30,7 @@ in
     sessiond = default;
   };
 
-  formatter = import ./nix/formatter.nix { inherit pkgs rustToolchain; };
+  formatter = import ./nix/internal/formatter.nix { inherit pkgs rustToolchain; };
 
   packages =
     let

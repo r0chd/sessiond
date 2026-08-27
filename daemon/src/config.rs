@@ -1,4 +1,5 @@
 use anyhow::Context;
+use bevy_ecs::prelude::*;
 use std::collections::BTreeMap;
 use std::{fs, io, path, sync};
 use uzers::os::unix::UserExt;
@@ -138,7 +139,6 @@ impl Config {
             .with_context(|| format!("failed to parse config file {}", path.display()))
     }
 }
-use bevy_ecs::prelude::Resource;
 
 #[derive(Resource)]
 pub struct DaemonConfig(pub Config);

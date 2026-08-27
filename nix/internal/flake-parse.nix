@@ -1,6 +1,6 @@
 inputName:
 let
-  lock = builtins.fromJSON (builtins.readFile ../flake.lock);
+  lock = builtins.fromJSON (builtins.readFile ../../flake.lock);
   namedNode = lock.nodes.${lock.nodes.root.inputs.${inputName}}.locked;
   githubTarball = fetchTarball {
     url =

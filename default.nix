@@ -1,6 +1,6 @@
 {
   rust-overlay ? import (import ./nix/internal/flake-parse.nix "rust-overlay"),
-  pkgs ? import (import ./nix/flake-parse.nix "nixpkgs") {
+  pkgs ? import (import ./nix/internal/flake-parse.nix "nixpkgs") {
     system = builtins.currentSystem;
     overlays = [ rust-overlay ];
   },

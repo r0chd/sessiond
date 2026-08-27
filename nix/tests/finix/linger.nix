@@ -76,12 +76,15 @@ sessiondTest {
       '';
       ttys = virtualTerminals;
     };
-    services.sessiond = {
-      enable = true;
-      package = sessiondPackage;
-      settings.users = {
-        user_2.linger = true;
-        user_3.linger = true;
+    services = {
+      sysklogd.enable = true;
+      sessiond = {
+        enable = true;
+        package = sessiondPackage;
+        settings.users = {
+          user_2.linger = true;
+          user_3.linger = true;
+        };
       };
     };
     virtualisation.qemu.extraArgs = [

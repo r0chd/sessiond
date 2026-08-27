@@ -47,6 +47,7 @@ sessiondTest {
       '';
       ttys = virtualTerminals;
     };
+    services.sysklogd.enable = true;
     services.sessiond = {
       enable = true;
       package = sessiondPackage;

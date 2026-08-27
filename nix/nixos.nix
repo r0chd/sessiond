@@ -35,9 +35,5 @@ in
       order = 900;
     };
 
-    security.polkit.package = pkgs.callPackage ./polkit {
-      useConsoleKit = true;
-      useSystemd = false;
-    };
   };
 }

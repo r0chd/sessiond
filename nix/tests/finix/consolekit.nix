@@ -61,6 +61,7 @@ sessiondTest {
       ttys = [ "ttyS0" ];
     };
     services.mdevd.enable = true;
+    services.sysklogd.enable = true;
     services.polkit = {
       enable = true;
       extraConfig = ''

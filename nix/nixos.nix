@@ -34,6 +34,5 @@ in
       modulePath = "${cfg.package}/lib/security/pam_sessiond.so";
       order = 900;
     };
-
   };
 }

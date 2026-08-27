@@ -1,5 +1,4 @@
 {
-  lib,
   pkgs,
   sessiond,
   ...
@@ -55,10 +54,10 @@ in
       settings = {
         users.user_3.linger = true;
         power = {
-          suspend = lib.mkDefault [ "${pkgs.zzz}/bin/zzz" ];
-          hibernate = lib.mkDefault [ "${pkgs.zzz}/bin/ZZZ" ];
-          reboot = lib.mkDefault [ "${pkgs.finit}/bin/reboot" ];
-          poweroff = lib.mkDefault [ "${pkgs.finit}/bin/poweroff" ];
+          suspend = [ "${pkgs.zzz}/bin/zzz" ];
+          hibernate = [ "${pkgs.zzz}/bin/ZZZ" ];
+          reboot = [ "${pkgs.finit}/bin/reboot" ];
+          poweroff = [ "${pkgs.finit}/bin/poweroff" ];
         };
       };
     };

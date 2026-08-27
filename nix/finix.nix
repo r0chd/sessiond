@@ -16,7 +16,10 @@ in
     finit = {
       services.sessiond = {
         description = "session management daemon";
-        conditions = [ "service/syslogd/ready" ];
+        conditions = [
+          "service/syslogd/ready"
+          "hook/svc/up"
+        ];
         command = "${cfg.package}/bin/sessiond --config ${daemonConfig} --log-target syslog";
         cgroup = {
           delegate = true;
@@ -30,7 +33,7 @@ in
       session   optional   ${cfg.package}/lib/security/pam_sessiond.so
     '';
 
-    services.polkit.package = pkgs.callPackage ./polkit {
+    services.polkit.package = pkgs.polkit.override {
       useConsoleKit = true;
       useSystemd = false;
     };

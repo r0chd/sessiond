@@ -28,3 +28,7 @@ steps:
       nix --extra-experimental-features 'nix-command flakes' --option system-features 'benchmark big-parallel nixos-test uid-range kvm' build -L .#checks.x86_64-linux.finix-vt-switch
       nix --extra-experimental-features 'nix-command flakes' --option system-features 'benchmark big-parallel nixos-test uid-range kvm' build -L .#checks.x86_64-linux.finix-termination
       nix --extra-experimental-features 'nix-command flakes' --option system-features 'benchmark big-parallel nixos-test uid-range kvm' build -L .#checks.x86_64-linux.finix-linger
+
+  - name: nixos vm tests
+    command: |
+      nix --extra-experimental-features 'nix-command flakes' --option system-features 'benchmark big-parallel nixos-test uid-range kvm' build -L .#checks.x86_64-linux.nixos-basic

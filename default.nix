@@ -46,5 +46,7 @@ in
       sessiond = default;
     };
 
-  checks = import ./nix/finix-checks.nix { inherit finix pkgs; };
+  checks =
+    (import ./nix/finix-checks.nix { inherit finix pkgs; })
+    // (import ./nix/nixos-checks.nix { inherit finix pkgs; });
 }

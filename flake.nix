@@ -154,10 +154,13 @@
 
       checks = forAllSystems (
         pkgs:
-        import ./nix/finix-checks.nix {
-          inherit self finix;
-          inherit pkgs;
-        }
+        let
+          checkArgs = {
+            inherit self finix pkgs;
+          };
+        in
+        (import ./nix/finix-checks.nix checkArgs)
+        // (import ./nix/nixos-checks.nix checkArgs)
       );
     };
 }

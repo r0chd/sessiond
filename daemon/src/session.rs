@@ -146,6 +146,12 @@ pub struct SessionBundle {
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Session;
 
+// Mark sessions that should be recovered across restarts,
+// this is only marked for session management v1 protocol
+// created sessions
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Recoverable;
+
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IsLocal;
 
@@ -248,6 +254,7 @@ pub fn spawn(
     remote_host: Option<sync::Arc<str>>,
     active_state: session_core_v1::ActiveState,
     session_object: Option<session_management_session::SessionManagementSession>,
+    recoverable: bool,
     env: BTreeMap<sync::Arc<str>, sync::Arc<str>>,
     cgroup: cgroup::CgroupBundle,
     session_registry: &mut ResMut<SessionRegistry>,
@@ -278,6 +285,10 @@ pub fn spawn(
         session_registry
             .by_management_object
             .insert(session_object, cmd.id());
+    }
+
+    if recoverable {
+        cmd.insert(Recoverable);
     }
 
     let entity = cmd.id();
@@ -873,6 +884,7 @@ pub fn handle_session_management_action(
                         pending_session.remote_host,
                         active_state,
                         object.owned_session(),
+                        matches!(object, SessionManagementTarget::V1(_)),
                         env,
                         cgroup,
                         &mut session_registry,

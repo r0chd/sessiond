@@ -1,11 +1,11 @@
-use crate::{cgroup, config, session, session_core_v1, user, vt};
+use crate::{cgroup, config, session, session_core_v1, user};
 use anyhow::Context;
 use bevy_ecs::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
-use std::{fs, num, path, sync, time};
+use std::{fs, path, sync, time};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -30,6 +30,8 @@ pub struct Session {
     pub timestamp: u128,
     #[serde(default)]
     pub env: BTreeMap<sync::Arc<str>, sync::Arc<str>>,
+    #[serde(default)]
+    pub active: String,
 }
 
 impl Session {
@@ -49,6 +51,15 @@ impl Session {
         time::UNIX_EPOCH
             + time::Duration::from_micros(u64::try_from(self.timestamp).unwrap_or(u64::MAX))
     }
+
+    pub fn active_state(&self) -> session_core_v1::ActiveState {
+        match self.active.as_str() {
+            "active" => session_core_v1::ActiveState::Active,
+            "closing" => session_core_v1::ActiveState::Closing,
+            "opening" => session_core_v1::ActiveState::Opening,
+            _ => session_core_v1::ActiveState::Online,
+        }
+    }
 }
 
 #[derive(Resource)]
@@ -67,6 +78,7 @@ pub fn write_state(
             Option<&session::RemoteHost>,
             &session::Timestamp,
             &session::SessionEnv,
+            &session_core_v1::ActiveState,
         ),
         (With<session::Session>, With<session::Recoverable>),
     >,
@@ -84,6 +96,7 @@ pub fn write_state(
                 Changed<session::RemoteHost>,
                 Changed<session::Timestamp>,
                 Changed<session::SessionEnv>,
+                Changed<session_core_v1::ActiveState>,
             )>,
         ),
     >,
@@ -97,7 +110,7 @@ pub fn write_state(
     let sessions = sessions
         .iter()
         .map(
-            |(id, uid, username, class, vt, leader, remote_host, timestamp, env)| {
+            |(id, uid, username, class, vt, leader, remote_host, timestamp, env, active_state)| {
                 let timestamp = timestamp
                     .0
                     .duration_since(time::UNIX_EPOCH)
@@ -111,6 +124,12 @@ pub fn write_state(
                     session::SessionClass::BackgroundLight => "background-light",
                     session::SessionClass::Manager => "manager",
                     session::SessionClass::ManagerEarly => "manager-early",
+                };
+                let active = match active_state {
+                    session_core_v1::ActiveState::Active => "active",
+                    session_core_v1::ActiveState::Closing => "closing",
+                    session_core_v1::ActiveState::Opening => "opening",
+                    session_core_v1::ActiveState::Online => "online",
                 };
 
                 (
@@ -128,6 +147,7 @@ pub fn write_state(
                             .iter()
                             .map(|(name, value)| (sync::Arc::clone(name), sync::Arc::clone(value)))
                             .collect(),
+                        active: active.to_owned(),
                     },
                 )
             },
@@ -216,16 +236,7 @@ pub fn load_state(
                         .runtime_dir(saved_session.uid);
                     user::create_runtime_dir(saved_session.uid, &runtime_dir);
 
-                    let active_state = if saved_session
-                        .vt
-                        .and_then(num::NonZeroU32::new)
-                        .is_some_and(|vt| vt::current_vt().ok() == Some(vt))
-                        && saved_session.remote_host.is_none()
-                    {
-                        session_core_v1::ActiveState::Active
-                    } else {
-                        session_core_v1::ActiveState::Online
-                    };
+                    let active_state = saved_session.active_state();
 
                     let entity = session::spawn(
                         &mut commands,

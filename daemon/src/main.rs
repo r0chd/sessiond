@@ -213,7 +213,8 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
             .after(user::initialize_lingering_users)
             .after(state::load_state),
     );
-    startup.add_systems(user::reconcile_user_states.after(user::ensure_session_users));
+    startup.add_systems(vt::refresh_current_vt.after(user::ensure_session_users));
+    startup.add_systems(user::reconcile_user_states.after(vt::refresh_current_vt));
     startup.run(&mut sessiond.world);
 
     sessiond.world.clear_trackers();

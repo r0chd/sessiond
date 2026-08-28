@@ -24,6 +24,7 @@ let
     termination = pkgs.callPackage "${self}/nix/tests/finix/termination.nix" testArgs;
     linger = pkgs.callPackage "${self}/nix/tests/finix/linger.nix" testArgs;
     consolekit = pkgs.callPackage "${self}/nix/tests/finix/consolekit.nix" testArgs;
+    state-recovery = pkgs.callPackage "${self}/nix/tests/finix/state-recovery.nix" testArgs;
   };
 in
 checks

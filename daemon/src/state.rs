@@ -10,7 +10,6 @@ use std::{fs, num, path, sync, time};
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct State {
-    pub version: u32,
     pub next_session_id: u32,
     #[serde(default)]
     pub sessions: BTreeMap<String, Session>,
@@ -69,7 +68,7 @@ pub fn write_state(
             &session::Timestamp,
             &session::SessionEnv,
         ),
-        With<session::Session>,
+        (With<session::Session>, With<session::Recoverable>),
     >,
     changed: Query<
         Entity,
@@ -136,7 +135,6 @@ pub fn write_state(
         .collect();
 
     let state = State {
-        version: 1,
         next_session_id: next_session_id.0.as_raw(),
         sessions,
     };
@@ -240,6 +238,7 @@ pub fn load_state(
                         saved_session.remote_host.as_ref().map(sync::Arc::clone),
                         active_state,
                         None,
+                        true,
                         saved_session.env.clone(),
                         cgroup,
                         &mut session_registry,

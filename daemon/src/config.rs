@@ -40,7 +40,7 @@ impl UserConfig {
     ) -> BTreeMap<sync::Arc<str>, sync::Arc<str>> {
         let runtime_dir = self.runtime_dir(uid);
         let mut env: BTreeMap<sync::Arc<str>, sync::Arc<str>> = BTreeMap::from([
-            (sync::Arc::from("XDG_RUNTIME_DIR"), runtime_dir.clone()),
+            (sync::Arc::from("XDG_RUNTIME_DIR"), runtime_dir),
             (
                 sync::Arc::from("XDG_SESSION_ID"),
                 session_id.to_string().into(),
@@ -70,7 +70,6 @@ impl UserConfig {
                 sync::Arc::clone(name),
                 value
                     .replace(concat!("{", "uid", "}"), &uid.to_string())
-                    .replace(concat!("{", "runtime-dir", "}"), &runtime_dir)
                     .into(),
             );
         }

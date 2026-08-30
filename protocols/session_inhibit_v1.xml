@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="session_inhibit_v1" version="1">
+ <copyright>
+  Copyright (c) 2026 Oskar Rochowiak
+
+  Permission is hereby granted, free of charge, to any person obtaining a
+  copy of this software and associated documentation files (the "Software"),
+  to deal in the Software without restriction, including without limitation
+  the rights to use, copy, modify, merge, publish, distribute, sublicense,
+  and/or sell copies of the Software, and to permit persons to whom the
+  Software is furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in
+  all copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+ </copyright>
+
+ <object name="session_inhibit_manager" version="1">
+  <description summary="destructive operation inhibition">
+   Creates lifetime-bound inhibitors for system operations, idle handling,
+   and low-level handling of power keys and the lid switch.
+  </description>
+  <c2s name="inhibit">
+   <description summary="create an inhibitor"/>
+   <arg name="what" type="uint" summary="bitmask of what values to inhibit"/>
+   <arg name="who" type="varchar" summary="application or component requesting the inhibitor"/>
+   <arg name="why" type="varchar" summary="human-readable reason for the inhibitor"/>
+   <arg name="mode" type="enum" interface="mode" summary="inhibitor mode"/>
+   <returns iface="session_inhibitor"/>
+  </c2s>
+  <c2s name="destroy" destructor="true"></c2s>
+ </object>
+
+ <object name="session_inhibitor" version="1">
+  <description summary="inhibitor"/>
+  <s2c name="active">
+   <description summary="the inhibitor is active"/>
+  </s2c>
+  <s2c name="error">
+   <description summary="the inhibitor could not be created"/>
+   <arg name="code" type="enum" interface="error_code" summary="error kind"/>
+   <arg name="message" type="varchar" summary="human-readable error detail"/>
+  </s2c>
+  <c2s name="destroy" destructor="true">
+   <description summary="release the inhibitor"/>
+  </c2s>
+ </object>
+
+ <enum name="what">
+  <value idx="1" name="shutdown" summary="powering off or rebooting the system"/>
+  <value idx="2" name="sleep" summary="suspending or hibernating the system"/>
+  <value idx="4" name="idle" summary="automatic idle handling"/>
+  <value idx="8" name="handle_power_key" summary="low-level handling of the power key"/>
+  <value idx="16" name="handle_suspend_key" summary="low-level handling of the suspend key"/>
+  <value idx="32" name="handle_hibernate_key" summary="low-level handling of the hibernate key"/>
+  <value idx="64" name="handle_lid_switch" summary="low-level handling of the lid switch"/>
+  <value idx="128" name="handle_reboot_key" summary="low-level handling of the reboot key"/>
+ </enum>
+
+ <enum name="mode">
+  <value idx="0" name="block" summary="block the operation"/>
+  <value idx="1" name="block_weak" summary="block unprivileged operations requested by other users"/>
+  <value idx="2" name="delay" summary="delay the operation"/>
+ </enum>
+
+ <enum name="error_code">
+  <value idx="0" name="invalid_what" summary="what is zero or contains unknown bits"/>
+  <value idx="1" name="unsupported" summary="one or more requested inhibitor types are unsupported"/>
+ </enum>
+</protocol>

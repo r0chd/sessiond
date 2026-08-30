@@ -1,5 +1,4 @@
 use crate::{cgroup, config, session, session_core_user, session_core_v1};
-use bevy_ecs::entity;
 use bevy_ecs::prelude::*;
 use std::collections::HashMap;
 use std::{fs, io, sync};
@@ -36,7 +35,7 @@ pub fn spawn(
     state: session_core_v1::UserState,
     user_registry: &mut ResMut<UserRegistry>,
     info_managers: &session::SessionInfoManagers,
-) -> entity::Entity {
+) -> Entity {
     let mut cmd = commands.spawn(UserBundle {
         marker: User,
         uid: session::Uid(uid),

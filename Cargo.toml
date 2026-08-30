@@ -19,7 +19,7 @@ categories = []
 edition = "2024"
 license = "GPLv3"
 repository = "https://tangled.org/r0chd.pl/sessiond"
-version = "0.1.0"
+version = "0.2.1"
 description = "session management daemon"
 readme = "README.md"
 

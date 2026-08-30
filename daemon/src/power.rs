@@ -1,14 +1,14 @@
 #[cfg(feature = "consolekit")]
 use crate::consolekit;
 use crate::session_power_v1::session_power_manager;
-use crate::{config, session, session_power_v1};
-use bevy_ecs::component::{Mutable, StorageType};
+use crate::{config, inhibit, session, session_inhibit_v1, session_power_v1};
+use bevy_ecs::component;
 use bevy_ecs::prelude::*;
 use std::process;
 
 impl Component for session_power_manager::SessionPowerManager {
-    const STORAGE_TYPE: StorageType = StorageType::Table;
-    type Mutability = Mutable;
+    const STORAGE_TYPE: component::StorageType = component::StorageType::Table;
+    type Mutability = component::Mutable;
 }
 
 #[derive(Component)]
@@ -205,8 +205,52 @@ pub fn handle_power_action(
     mut requests: MessageReader<PowerActionRequest>,
     config: Res<config::DaemonConfig>,
     sessions: Query<(&session::Uid, &session::SessionClass), With<session::Session>>,
+    shutdown_inhibitors: Query<
+        (
+            &session_inhibit_v1::Mode,
+            &inhibit::Who,
+            &inhibit::Why,
+            &inhibit::Uid,
+        ),
+        With<inhibit::Shutdown>,
+    >,
+    sleep_inhibitors: Query<
+        (
+            &session_inhibit_v1::Mode,
+            &inhibit::Who,
+            &inhibit::Why,
+            &inhibit::Uid,
+        ),
+        With<inhibit::Sleep>,
+    >,
 ) {
     for request in requests.read() {
+        let blocks = |(mode, _, _, owner): (
+            &session_inhibit_v1::Mode,
+            &inhibit::Who,
+            &inhibit::Why,
+            &inhibit::Uid,
+        )| match mode {
+            session_inhibit_v1::Mode::Block => true,
+            session_inhibit_v1::Mode::BlockWeak => {
+                !request.creds.uid.is_root() && owner.0 != request.creds.uid.as_raw()
+            }
+            session_inhibit_v1::Mode::Delay => false,
+        };
+        if match request.action {
+            PowerAction::Reboot | PowerAction::Poweroff => shutdown_inhibitors.iter().any(blocks),
+            PowerAction::Suspend | PowerAction::Hibernate => sleep_inhibitors.iter().any(blocks),
+        } {
+            send_power_result(
+                &request.responder,
+                Err(PowerError::ActiveSessions(format!(
+                    "cannot {} while an active inhibitor blocks the operation",
+                    request.action.display_name(),
+                ))),
+            );
+            continue;
+        }
+
         let foreign_session_count = sessions
             .iter()
             .filter(|(uid, class)| {

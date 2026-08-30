@@ -22,7 +22,10 @@ Initial public release of `sessiond`.
 - Added the `session_power_v1` protocol for system power control
 - Added session state recovery across daemon restarts
 
-## UNRELEASED
+## v0.2.1 - 2026-08-31
 
 ### Fixed
 - Derive the cgroup root from `/proc/self/cgroup`
+
+### Added
+- inhibit protocol

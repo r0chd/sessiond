@@ -1,47 +1,45 @@
 {
   lib,
   pkgs,
-  config,
   ...
 }:
 let
-  inherit (lib) types;
-  cfg = config.services.sessiond;
-  settingsFormat = pkgs.formats.toml { };
-  normalUsers = lib.filterAttrs (_: user: user.isNormalUser or false) config.users.users;
+  format = pkgs.formats.toml { };
 in
 {
   options.services.sessiond = {
-    enable = lib.mkEnableOption "sessiond";
-    package = lib.mkPackageOption pkgs "sessiond" { };
-    logLevel = lib.mkOption {
-      type = types.enum [
-        "trace"
-        "debug"
-        "info"
-        "warn"
-        "error"
-        "off"
-      ];
-      default = "info";
-      description = "Maximum verbosity of sessiond log messages.";
+    enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Whether to enable [sessiond](${pkgs.sessiond.meta.homepage}) as a system service.
+      '';
     };
+
+    package = lib.mkOption {
+      type = lib.types.package;
+      default = pkgs.sessiond;
+      defaultText = lib.literalExpression "pkgs.sessiond";
+      description = ''
+        The package to use for `sessiond`.
+      '';
+    };
+
+    debug = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Whether to enable debug logging.
+      '';
+    };
+
     settings = lib.mkOption {
-      type = settingsFormat.type;
+      type = format.type;
       default = { };
-      description = "sessiond daemon configuration, serialized directly to sessiond.toml.";
+      description = ''
+        `sessiond` configuration. See [upstream documentation](https://tangled.org/r0chd.pl/sessiond/blob/master/docs/CONFIGURATION.md)
+        for additional details.
+      '';
     };
-  };
-
-  config = lib.mkIf cfg.enable {
-    services.sessiond.settings = {
-      users = lib.mapAttrs (_userName: _userCfg: {
-        env.DBUS_SESSION_BUS_ADDRESS = lib.mkDefault "unix:path={runtime-dir}/bus";
-      }) normalUsers;
-    };
-
-    environment.systemPackages = [ cfg.package ];
-    services.dbus.packages = [ cfg.package ];
-
   };
 }

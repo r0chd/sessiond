@@ -11,7 +11,7 @@ linger = true
 runtime-dir = "/run/user/{uid}"
 
 [users.alice.env]
-DBUS_SESSION_BUS_ADDRESS = "unix:path={runtime-dir}/bus"
+DBUS_SESSION_BUS_ADDRESS = "unix:path=/run/user/{uid}/bus"
 
 [power]
 reboot = ["/run/current-system/sw/bin/reboot"]
@@ -38,7 +38,7 @@ linger = true
 runtime-dir = "/run/user/{uid}"
 
 [users.alice.env]
-DBUS_SESSION_BUS_ADDRESS = "unix:path={runtime-dir}/bus"
+DBUS_SESSION_BUS_ADDRESS = "unix:path=/run/user/{uid}/bus"
 ```
 
 Supported fields:
@@ -48,11 +48,7 @@ Supported fields:
 - `runtime-dir`: runtime directory template. Defaults to `/run/user/{uid}`.
 - `env`: extra environment variables sent to newly created sessions.
 
-Values in `runtime-dir` and `env` may use these placeholders:
-
-- `{uid}`: numeric user ID.
-- `{runtime-dir}`: the resolved runtime directory. This placeholder is only
-  expanded in `env` values.
+Values in `runtime-dir` and `env` may use placeholder `{uid}`
 
 ## Power Commands
 
@@ -61,5 +57,8 @@ remaining elements are arguments:
 
 ```toml
 [power]
-suspend = ["/run/current-system/sw/bin/loginctl", "suspend"]
+suspend = ["/run/current-system/sw/bin/zzz"]
+hibernate = ["/run/current-system/sw/bin/zzz", "-H"]
+reboot = ["/run/current-system/sw/bin/reboot" ]
+poweroff = ["/run/current-system/sw/bin/poweroff" ]
 ```

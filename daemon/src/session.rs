@@ -2,7 +2,8 @@ use crate::session_core_v1::{session_core_manager, session_core_session};
 use crate::session_management_v1::session_manager as session_manager_v1;
 use crate::session_management_v2::{session_management_session, session_manager};
 use crate::{
-    cgroup, config, session_core_v1, session_management_v1, session_management_v2, user, vt,
+    cgroup, config, inhibit, session_core_v1, session_management_v1, session_management_v2, user,
+    vt,
 };
 use bevy_ecs::entity;
 use bevy_ecs::prelude::*;
@@ -616,6 +617,7 @@ pub fn handle_session_info_manager(
     mut actions: MessageReader<SessionInfoManagerMessage>,
     users: Res<user::UserRegistry>,
     sessions: Query<&SessionId, With<Session>>,
+    inhibitors: Query<&inhibit::InhibitorId, With<inhibit::Inhibitor>>,
     mut info_managers: ResMut<SessionInfoManagers>,
 ) {
     for action in actions.read() {
@@ -628,6 +630,9 @@ pub fn handle_session_info_manager(
                 sessions
                     .iter()
                     .for_each(|session_id| action.object.send_session_added(session_id.as_raw()));
+                inhibitors.iter().for_each(|inhibitor_id| {
+                    action.object.send_inhibitor_added(inhibitor_id.as_raw());
+                });
                 action.object.send_done();
                 info_managers.0.push(action.object.clone());
             }
@@ -1109,6 +1114,15 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                     uid,
                     object: session_core_user,
                     creds: *object.client().creds(),
+                });
+            }
+            session_core_manager::Event::GetInhibitor {
+                session_core_inhibitor,
+                inhibitor_id,
+            } => {
+                self.world.write_message(inhibit::AddObject {
+                    inhibitor_id: inhibit::InhibitorId::from_raw(inhibitor_id),
+                    object: session_core_inhibitor,
                 });
             }
             session_core_manager::Event::Destroy => {

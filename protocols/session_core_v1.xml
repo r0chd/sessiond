@@ -49,44 +49,48 @@
    </description>
    <arg name="uid" type="uint" summary="user identifier"/>
   </s2c>
+  <s2c name="inhibitor_added" since="2">
+   <arg name="inhibitor_id" type="uint" summary="inhibitor identifier"/>
+  </s2c>
+  <s2c name="inhibitor_removed" since="2">
+   <arg name="inhibitor_id" type="uint" summary="inhibitor identifier"/>
+  </s2c>
   <c2s name="get_session">
    <description summary="create a per-session info object">
-    Creates a `session_core_session` object for the given session_id.
-    The daemon immediately pushes all fields, followed by done.
-    If the session does not exist, destroyed is sent instead.
+    Initial fields are followed by done. If the session does not exist,
+    destroyed is sent instead.
    </description>
    <arg name="session_id" type="uint" summary="session to query"/>
    <returns iface="session_core_session"/>
   </c2s>
   <c2s name="get_session_by_pid">
    <description summary="create a per-session info object by process PID">
-    Creates a session_core_session object for the session containing the
-    process with the given pid. The daemon immediately pushes all fields,
-    followed by done. If no matching session exists, destroyed is sent instead.
+    Selects the session containing the process. Initial fields are followed by
+    done. If no matching session exists, destroyed is sent instead.
    </description>
    <arg name="pid" type="uint" summary="process PID of the session to query"/>
    <returns iface="session_core_session"/>
   </c2s>
   <c2s name="get_session_by_uid">
    <description summary="create a per-session info object by user ID">
-    Creates a session_core_session object for the session whose user ID
-    matches the given uid. The daemon immediately pushes all fields,
-    followed by done. If no matching session exists, destroyed is sent instead.
+    Selects a session belonging to the user. Initial fields are followed by
+    done. If no matching session exists, destroyed is sent instead.
    </description>
    <arg name="uid" type="uint" summary="user ID of the session to query"/>
    <returns iface="session_core_session"/>
   </c2s>
   <c2s name="get_user">
    <description summary="create a per-user info object">
-    Creates a session_core_user object for the given uid. The daemon
-    immediately pushes all fields, followed by done. If uid does not
-    correspond to a known user, not_found is sent instead.
+    Initial fields are followed by done. If the uid is unknown, not_found is
+    sent instead.
    </description>
    <arg name="uid" type="uint" summary="user ID to query"/>
    <returns iface="session_core_user"/>
   </c2s>
-  <c2s name="destroy" destructor="true">
-   <description summary="destroy this object"/>
+  <c2s name="destroy" destructor="true"></c2s>
+  <c2s name="get_inhibitor" since="2">
+   <arg name="inhibitor_id" type="uint" summary="inhibitor identifier"/>
+   <returns iface="session_core_inhibitor"/>
   </c2s>
  </object>
  <object name="session_core_session" version="1">
@@ -137,7 +141,7 @@
   <s2c name="destroyed">
    <description summary="session has ended or did not exist">
     Sent when the session is destroyed or if the `session_id` passed to
-    `get_session` was not found. The client should release this object.
+    `get_session` was not found.
    </description>
   </s2c>
   <s2c name="ok">
@@ -160,15 +164,54 @@
   <c2s name="kill">
    <description summary="forcibly kill all processes in the session via cgroup.kill"/>
   </c2s>
-  <c2s name="destroy" destructor="true">
-   <description summary="destroy this object"/>
-  </c2s>
+  <c2s name="destroy" destructor="true"></c2s>
   <s2c name="can_modify">
    <description summary="client may modify this session">
     Non-zero if this client may lock, unlock, terminate, or kill this session.
    </description>
    <arg name="can_modify" type="uint" summary="non-zero if mutating requests are allowed"/>
   </s2c>
+ </object>
+
+ <object name="session_core_inhibitor" version="1">
+  <description summary="per-inhibitor information"/>
+  <s2c name="inhibitor_id">
+   <arg name="inhibitor_id" type="uint" summary="inhibitor identifier"/>
+  </s2c>
+  <s2c name="who">
+   <arg name="who" type="varchar" summary="application or component holding the inhibitor"/>
+  </s2c>
+  <s2c name="uid">
+   <arg name="uid" type="uint" summary="owner user identifier"/>
+  </s2c>
+  <s2c name="username">
+   <arg name="username" type="varchar" summary="owner user name"/>
+  </s2c>
+  <s2c name="pid">
+   <arg name="pid" type="uint" summary="owner process identifier"/>
+  </s2c>
+  <s2c name="comm">
+   <arg name="comm" type="varchar" summary="owner process name"/>
+  </s2c>
+  <s2c name="what">
+   <arg name="what" type="uint" summary="inhibitor type bitmask"/>
+  </s2c>
+  <s2c name="why">
+   <arg name="why" type="varchar" summary="inhibitor reason"/>
+  </s2c>
+  <s2c name="mode">
+   <arg name="mode" type="enum" interface="inhibitor_mode" summary="inhibitor mode"/>
+  </s2c>
+  <s2c name="active">
+   <arg name="active" type="uint" summary="non-zero while active"/>
+  </s2c>
+  <s2c name="done">
+   <description summary="initial field dump complete"/>
+  </s2c>
+  <s2c name="destroyed">
+   <description summary="inhibitor was released or did not exist"/>
+  </s2c>
+  <c2s name="destroy" destructor="true"></c2s>
  </object>
 
  <object name="session_core_user" version="1">
@@ -198,8 +241,7 @@
   </s2c>
   <s2c name="not_found">
    <description summary="no such user">
-    Sent when the uid passed to get_user does not correspond to a known
-    user. The client should release this object.
+    Sent when the uid passed to get_user does not correspond to a known user.
    </description>
   </s2c>
   <s2c name="ok">
@@ -216,9 +258,7 @@
   <c2s name="kill">
    <description summary="kill the user"/>
   </c2s>
-  <c2s name="destroy" destructor="true">
-   <description summary="destroy this object"/>
-  </c2s>
+  <c2s name="destroy" destructor="true"></c2s>
   <s2c name="can_modify">
    <description summary="client may modify this user">
     Non-zero if this client may terminate or kill this user's sessions.
@@ -257,5 +297,11 @@
   <value idx="1" name="permission_denied" summary="insufficient permissions to signal processes"/>
   <value idx="2" name="io" summary="generic I/O error"/>
   <value idx="3" name="active_sessions" summary="other sessions are active"/>
+ </enum>
+
+ <enum name="inhibitor_mode">
+  <value idx="0" name="block" summary="block the operation"/>
+  <value idx="1" name="block_weak" summary="block unprivileged operations requested by other users"/>
+  <value idx="2" name="delay" summary="delay the operation"/>
  </enum>
 </protocol>

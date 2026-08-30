@@ -6,6 +6,12 @@ mod session_core_v1 {
 mod session_power_v1 {
     hyprwire::include_protocol!("session_power_v1");
     pub use client::*;
+    pub use spec::*;
+}
+mod session_inhibit_v1 {
+    hyprwire::include_protocol!("session_inhibit_v1");
+    pub use client::*;
+    pub use spec::*;
 }
 mod seat_core_v1 {
     hyprwire::include_protocol!("seat_core_v1");
@@ -18,7 +24,10 @@ use comfy_table::presets;
 use hyprwire::client;
 use seat_core_v1::{seat_core_client, seat_core_device, seat_core_manager, seat_core_seat};
 use serde_json::json;
-use session_core_v1::{session_core_manager, session_core_session, session_core_user};
+use session_core_v1::{
+    session_core_inhibitor, session_core_manager, session_core_session, session_core_user,
+};
+use session_inhibit_v1::{session_inhibit_manager, session_inhibitor};
 use session_power_v1::session_power_manager;
 use std::{fs, io, time};
 
@@ -44,6 +53,48 @@ struct User {
     state: session_core_v1::UserState,
     can_modify: bool,
     done: bool,
+}
+
+struct Inhibitor {
+    object: Option<session_core_inhibitor::SessionCoreInhibitor>,
+    id: u32,
+    who: String,
+    uid: u32,
+    username: String,
+    pid: u32,
+    comm: String,
+    what: u32,
+    why: String,
+    mode: session_core_v1::InhibitorMode,
+    done: bool,
+}
+
+#[derive(Default)]
+struct InhibitState {
+    active: bool,
+    error: Option<String>,
+}
+
+impl hyprwire::Dispatch<session_inhibit_manager::SessionInhibitManager> for InhibitState {
+    fn event(
+        &mut self,
+        _object: &session_inhibit_manager::SessionInhibitManager,
+        _event: <session_inhibit_manager::SessionInhibitManager as hyprwire::Object>::Event<'_>,
+    ) {
+    }
+}
+
+impl hyprwire::Dispatch<session_inhibitor::SessionInhibitor> for InhibitState {
+    fn event(
+        &mut self,
+        _object: &session_inhibitor::SessionInhibitor,
+        event: <session_inhibitor::SessionInhibitor as hyprwire::Object>::Event<'_>,
+    ) {
+        match event {
+            session_inhibitor::Event::Active => self.active = true,
+            session_inhibitor::Event::Error { message, .. } => self.error = Some(message),
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -100,8 +151,11 @@ struct SeatState {
 struct State {
     sessions: Vec<Session>,
     users: Vec<User>,
+    inhibitors: Vec<Inhibitor>,
     done: bool,
     can_control_power: Option<bool>,
+    power_done: bool,
+    power_error: Option<(session_power_v1::ErrorCode, String)>,
     error: Option<String>,
 }
 
@@ -139,6 +193,27 @@ impl State {
                 lingering: false,
                 state: session_core_v1::UserState::Offline,
                 can_modify: false,
+                done: false,
+            });
+        }
+    }
+
+    fn inhibitor(&mut self, manager: &session_core_manager::SessionCoreManager, id: u32) {
+        if self.inhibitors.iter().any(|inhibitor| inhibitor.id == id) {
+            return;
+        }
+        if let Some(object) = manager.send_get_inhibitor::<Self>(id) {
+            self.inhibitors.push(Inhibitor {
+                object: Some(object),
+                id,
+                who: String::new(),
+                uid: 0,
+                username: String::new(),
+                pid: 0,
+                comm: String::new(),
+                what: 0,
+                why: String::new(),
+                mode: session_core_v1::InhibitorMode::Block,
                 done: false,
             });
         }
@@ -421,6 +496,14 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for State {
                 self.user(object, uid);
                 self.done = false;
             }
+            session_core_manager::Event::InhibitorAdded { inhibitor_id } => {
+                self.inhibitor(object, inhibitor_id);
+                self.done = false;
+            }
+            session_core_manager::Event::InhibitorRemoved { inhibitor_id } => {
+                self.inhibitors
+                    .retain(|inhibitor| inhibitor.id != inhibitor_id);
+            }
             session_core_manager::Event::Done => self.done = true,
             session_core_manager::Event::Error { message, .. } => {
                 self.error = Some(message);
@@ -439,10 +522,11 @@ impl hyprwire::Dispatch<session_power_manager::SessionPowerManager> for State {
             session_power_manager::Event::CanControl { can_control } => {
                 self.can_control_power = Some(can_control != 0);
             }
-            session_power_manager::Event::Error { message, .. } => {
-                self.error = Some(message);
+            session_power_manager::Event::Error { code, message } => {
+                self.power_error = Some((code, message));
+                self.power_done = true;
             }
-            session_power_manager::Event::Done => {}
+            session_power_manager::Event::Done => self.power_done = true,
         }
     }
 }
@@ -501,6 +585,43 @@ impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for State {
     }
 }
 
+impl hyprwire::Dispatch<session_core_inhibitor::SessionCoreInhibitor> for State {
+    fn event(
+        &mut self,
+        object: &session_core_inhibitor::SessionCoreInhibitor,
+        event: <session_core_inhibitor::SessionCoreInhibitor as hyprwire::Object>::Event<'_>,
+    ) {
+        let Some(index) = self
+            .inhibitors
+            .iter()
+            .position(|inhibitor| inhibitor.object.as_ref() == Some(object))
+        else {
+            return;
+        };
+
+        match event {
+            session_core_inhibitor::Event::InhibitorId { inhibitor_id } => {
+                self.inhibitors[index].id = inhibitor_id;
+            }
+            session_core_inhibitor::Event::Who { who } => self.inhibitors[index].who = who,
+            session_core_inhibitor::Event::Uid { uid } => self.inhibitors[index].uid = uid,
+            session_core_inhibitor::Event::Username { username } => {
+                self.inhibitors[index].username = username;
+            }
+            session_core_inhibitor::Event::Pid { pid } => self.inhibitors[index].pid = pid,
+            session_core_inhibitor::Event::Comm { comm } => self.inhibitors[index].comm = comm,
+            session_core_inhibitor::Event::What { what } => self.inhibitors[index].what = what,
+            session_core_inhibitor::Event::Why { why } => self.inhibitors[index].why = why,
+            session_core_inhibitor::Event::Mode { mode } => self.inhibitors[index].mode = mode,
+            session_core_inhibitor::Event::Active { .. } => {}
+            session_core_inhibitor::Event::Done => self.inhibitors[index].done = true,
+            session_core_inhibitor::Event::Destroyed => {
+                self.inhibitors.remove(index);
+            }
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum SessionCommand {
     List {
@@ -527,6 +648,69 @@ enum UserCommand {
         uids: Vec<u32>,
     },
 }
+
+#[derive(Subcommand)]
+enum InhibitorCommand {
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    Acquire {
+        #[arg(long, required = true, value_delimiter = ':')]
+        what: Vec<InhibitWhat>,
+        #[arg(long, default_value = "sessionctl")]
+        who: String,
+        #[arg(long)]
+        why: String,
+        #[arg(long, default_value = "block")]
+        mode: InhibitMode,
+    },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum InhibitWhat {
+    Shutdown,
+    Sleep,
+    Idle,
+    HandlePowerKey,
+    HandleSuspendKey,
+    HandleHibernateKey,
+    HandleLidSwitch,
+    HandleRebootKey,
+}
+
+impl InhibitWhat {
+    const fn bit(self) -> u32 {
+        match self {
+            Self::Shutdown => session_inhibit_v1::What::Shutdown as u32,
+            Self::Sleep => session_inhibit_v1::What::Sleep as u32,
+            Self::Idle => session_inhibit_v1::What::Idle as u32,
+            Self::HandlePowerKey => session_inhibit_v1::What::HandlePowerKey as u32,
+            Self::HandleSuspendKey => session_inhibit_v1::What::HandleSuspendKey as u32,
+            Self::HandleHibernateKey => session_inhibit_v1::What::HandleHibernateKey as u32,
+            Self::HandleLidSwitch => session_inhibit_v1::What::HandleLidSwitch as u32,
+            Self::HandleRebootKey => session_inhibit_v1::What::HandleRebootKey as u32,
+        }
+    }
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum InhibitMode {
+    Block,
+    BlockWeak,
+    Delay,
+}
+
+impl From<InhibitMode> for session_inhibit_v1::Mode {
+    fn from(mode: InhibitMode) -> Self {
+        match mode {
+            InhibitMode::Block => Self::Block,
+            InhibitMode::BlockWeak => Self::BlockWeak,
+            InhibitMode::Delay => Self::Delay,
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum SeatCommand {
     #[command(about = "list seats managed by sessiond-seat")]
@@ -554,6 +738,10 @@ enum Command {
     User {
         #[command(subcommand)]
         command: UserCommand,
+    },
+    Inhibitor {
+        #[command(subcommand)]
+        command: InhibitorCommand,
     },
     #[command(about = "inspect seats, clients, and devices")]
     Seat {
@@ -660,6 +848,56 @@ const fn user_state_name(s: session_core_v1::UserState) -> &'static str {
         session_core_v1::UserState::Online => "online",
         session_core_v1::UserState::Active => "active",
         session_core_v1::UserState::Closing => "closing",
+    }
+}
+
+fn inhibitor_what_name(what: u32) -> String {
+    const FLAGS: [(u32, &str); 8] = [
+        (1, "shutdown"),
+        (2, "sleep"),
+        (4, "idle"),
+        (8, "handle-power-key"),
+        (16, "handle-suspend-key"),
+        (32, "handle-hibernate-key"),
+        (64, "handle-lid-switch"),
+        (128, "handle-reboot-key"),
+    ];
+
+    FLAGS
+        .into_iter()
+        .filter_map(|(flag, name)| (what & flag != 0).then_some(name))
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
+const fn inhibitor_mode_name(mode: session_core_v1::InhibitorMode) -> &'static str {
+    match mode {
+        session_core_v1::InhibitorMode::Block => "block",
+        session_core_v1::InhibitorMode::BlockWeak => "block-weak",
+        session_core_v1::InhibitorMode::Delay => "delay",
+    }
+}
+
+fn print_power_inhibitors(inhibitors: &[Inhibitor], what: u32, requester_uid: u32) {
+    for inhibitor in inhibitors.iter().filter(|inhibitor| {
+        inhibitor.what & what != 0
+            && match inhibitor.mode {
+                session_core_v1::InhibitorMode::Block => true,
+                session_core_v1::InhibitorMode::BlockWeak => {
+                    requester_uid != 0 && inhibitor.uid != requester_uid
+                }
+                session_core_v1::InhibitorMode::Delay => false,
+            }
+    }) {
+        let username = if inhibitor.username.is_empty() {
+            inhibitor.uid.to_string()
+        } else {
+            inhibitor.username.clone()
+        };
+        eprintln!(
+            "Operation inhibited by \"{}\" (PID {} \"{}\", user {}), reason is \"{}\".",
+            inhibitor.who, inhibitor.pid, inhibitor.comm, username, inhibitor.why,
+        );
     }
 }
 
@@ -963,6 +1201,41 @@ fn run_seat(command: &SeatCommand, socket: client::Client) -> anyhow::Result<()>
     Ok(())
 }
 
+fn acquire_inhibitor(
+    what: &[InhibitWhat],
+    who: &str,
+    why: &str,
+    mode: InhibitMode,
+) -> anyhow::Result<()> {
+    let mut state = InhibitState::default();
+    let mut socket = client::Client::connect("/run/sessiond/sessiond.sock")?;
+    let queue = socket.new_event_queue();
+
+    socket.add_implementation::<session_inhibit_v1::SessionInhibitV1>();
+    queue.wait_for_handshake(&mut state)?;
+    let manager =
+        socket.bind::<session_inhibit_manager::SessionInhibitManager, _>(&queue, &mut state, 1)?;
+    let what = what.iter().fold(0, |mask, value| mask | value.bit());
+    let _inhibitor = manager
+        .send_inhibit::<InhibitState>(what, who, why, mode.into())
+        .ok_or_else(|| anyhow::anyhow!("failed to create inhibitor object"))?;
+
+    while !state.active && state.error.is_none() {
+        queue.dispatch_events(&mut state, true)?;
+    }
+    if let Some(error) = state.error.take() {
+        anyhow::bail!("failed to acquire inhibitor: {error}");
+    }
+
+    eprintln!("Inhibitor active; press Ctrl-C to release it.");
+    loop {
+        queue.dispatch_events(&mut state, true)?;
+        if let Some(error) = state.error.take() {
+            anyhow::bail!("inhibitor error: {error}");
+        }
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     let seat_connection = client::Client::connect("/run/sessiond-seat.sock").ok();
     let mut command = cli_command(seat_connection.is_some());
@@ -977,6 +1250,18 @@ fn main() -> anyhow::Result<()> {
             anyhow::bail!("seat daemon is unavailable at /run/sessiond-seat.sock");
         };
         return run_seat(command, socket);
+    }
+    if let Command::Inhibitor {
+        command:
+            InhibitorCommand::Acquire {
+                what,
+                who,
+                why,
+                mode,
+            },
+    } = &cli.command
+    {
+        return acquire_inhibitor(what, who, why, *mode);
     }
 
     let mut state = State::default();
@@ -1012,6 +1297,19 @@ fn main() -> anyhow::Result<()> {
 
     if matches!(&cli.command, Command::User { .. }) {
         while state.users.iter().any(|u| !u.done) {
+            queue.dispatch_events(&mut state, true)?;
+        }
+    }
+
+    if matches!(
+        &cli.command,
+        Command::Inhibitor { .. }
+            | Command::Reboot
+            | Command::Poweroff
+            | Command::Suspend
+            | Command::Hibernate
+    ) {
+        while state.inhibitors.iter().any(|inhibitor| !inhibitor.done) {
             queue.dispatch_events(&mut state, true)?;
         }
     }
@@ -1162,7 +1460,51 @@ fn main() -> anyhow::Result<()> {
                 }
             }
         }
+        Command::Inhibitor {
+            command: InhibitorCommand::List { json: output_json },
+        } => {
+            if output_json {
+                return json(&json!({
+                    "inhibitors": state.inhibitors.iter().map(|inhibitor| json!({
+                        "who": inhibitor.who,
+                        "uid": inhibitor.uid,
+                        "username": inhibitor.username,
+                        "pid": inhibitor.pid,
+                        "comm": inhibitor.comm,
+                        "what": inhibitor_what_name(inhibitor.what),
+                        "why": inhibitor.why,
+                        "mode": inhibitor_mode_name(inhibitor.mode),
+                    })).collect::<Vec<_>>(),
+                }));
+            }
+
+            if state.inhibitors.is_empty() {
+                println!("No inhibitors.");
+                return Ok(());
+            }
+
+            let mut table = new_table();
+            table.set_header(["WHO", "UID", "USER", "PID", "COMM", "WHAT", "WHY", "MODE"]);
+            for inhibitor in state.inhibitors {
+                table.add_row([
+                    inhibitor.who,
+                    inhibitor.uid.to_string(),
+                    inhibitor.username,
+                    inhibitor.pid.to_string(),
+                    inhibitor.comm,
+                    inhibitor_what_name(inhibitor.what),
+                    inhibitor.why,
+                    inhibitor_mode_name(inhibitor.mode).to_owned(),
+                ]);
+            }
+            println!("{table}");
+        }
         Command::Reboot | Command::Poweroff | Command::Suspend | Command::Hibernate => {
+            let inhibitor_what = match cli.command {
+                Command::Reboot | Command::Poweroff => session_inhibit_v1::What::Shutdown as u32,
+                Command::Suspend | Command::Hibernate => session_inhibit_v1::What::Sleep as u32,
+                _ => unreachable!(),
+            };
             while state.can_control_power.is_none() {
                 queue.dispatch_events(&mut state, true)?;
             }
@@ -1177,8 +1519,25 @@ fn main() -> anyhow::Result<()> {
                 Command::Hibernate => power_manager.send_hibernate(),
                 _ => unreachable!(),
             }
+            while !state.power_done {
+                queue.dispatch_events(&mut state, true)?;
+            }
+            if let Some((code, message)) = state.power_error.take() {
+                if matches!(code, session_power_v1::ErrorCode::PermissionDenied) {
+                    print_power_inhibitors(
+                        &state.inhibitors,
+                        inhibitor_what,
+                        rustix::process::geteuid().as_raw(),
+                    );
+                }
+                anyhow::bail!("{message}");
+            }
         }
-        Command::Completions { .. } | Command::Seat { .. } => unreachable!(),
+        Command::Inhibitor {
+            command: InhibitorCommand::Acquire { .. },
+        }
+        | Command::Completions { .. }
+        | Command::Seat { .. } => unreachable!(),
     }
     Ok(())
 }

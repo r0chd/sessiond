@@ -56,9 +56,7 @@
   <c2s name="hibernate">
    <description summary="hibernate the system"/>
   </c2s>
-  <c2s name="destroy" destructor="true">
-   <description summary="destroy this object"/>
-  </c2s>
+  <c2s name="destroy" destructor="true"></c2s>
  </object>
 
  <enum name="error_code">

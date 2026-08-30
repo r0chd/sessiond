@@ -46,7 +46,7 @@
    <arg name="seat" type="varchar" summary="seat name"/>
    <returns iface="seat_core_seat"/>
   </c2s>
-  <c2s name="destroy" destructor="true"><description summary="destroy this object"/></c2s>
+  <c2s name="destroy" destructor="true"></c2s>
  </object>
 
  <object name="seat_core_seat" version="1">
@@ -69,7 +69,7 @@
    <arg name="code" type="enum" interface="error_code" summary="error kind"/>
    <arg name="message" type="varchar" summary="human-readable error detail"/>
   </s2c>
-  <c2s name="destroy" destructor="true"><description summary="destroy this object"/></c2s>
+  <c2s name="destroy" destructor="true"></c2s>
  </object>
 
  <object name="seat_core_client" version="1">
@@ -92,7 +92,7 @@
   </c2s>
   <s2c name="done"><description summary="initial client dump complete"/></s2c>
   <s2c name="destroyed"><description summary="client has been removed or did not exist"/></s2c>
-  <c2s name="destroy" destructor="true"><description summary="destroy this object"/></c2s>
+  <c2s name="destroy" destructor="true"></c2s>
  </object>
 
  <object name="seat_core_device" version="1">
@@ -105,7 +105,7 @@
   <s2c name="active"><description summary="device active state"/><arg name="active" type="uint" summary="non-zero if active"/></s2c>
   <s2c name="done"><description summary="initial device dump complete"/></s2c>
   <s2c name="destroyed"><description summary="device has been removed or did not exist"/></s2c>
-  <c2s name="destroy" destructor="true"><description summary="destroy this object"/></c2s>
+  <c2s name="destroy" destructor="true"></c2s>
  </object>
 
  <enum name="seat_mode">

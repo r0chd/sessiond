@@ -11,11 +11,16 @@ fn main() -> io::Result<()> {
             ".session_core_v1.user_state",
             "#[derive(bevy_ecs::component::Component)]",
         )
+        .type_attribute(
+            ".session_inhibit_v1.mode",
+            "#[derive(bevy_ecs::component::Component)]",
+        )
         .compile(&[
             "../protocols/session_management_v1.xml",
             "../protocols/session_management_v2.xml",
             "../protocols/session_core_v1.xml",
             "../protocols/session_power_v1.xml",
+            "../protocols/session_inhibit_v1.xml",
         ])?;
 
     Ok(())

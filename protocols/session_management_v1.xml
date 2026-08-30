@@ -66,9 +66,7 @@
    </description>
    <arg name="session_id" type="uint" summary="session identifier from session_id"/>
   </c2s>
-  <c2s name="destroy" destructor="true">
-   <description summary="destroy this object"/>
-  </c2s>
+  <c2s name="destroy" destructor="true"></c2s>
  </object>
 
  <enum name="error_code">

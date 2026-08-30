@@ -29,25 +29,20 @@
   </description>
   <c2s name="create_session">
    <description summary="start registering a new session, returning an owning session object">
-    Returns a session_management_session object bound to the calling
-    connection. The client may stage optional fields before creating the
-    session.
+    Optional fields may be staged before creating the session.
    </description>
    <arg name="uid" type="uint" summary="user id"/>
    <returns iface="session_management_session"/>
   </c2s>
-  <c2s name="destroy" destructor="true">
-   <description summary="destroy this object"/>
-  </c2s>
+  <c2s name="destroy" destructor="true"></c2s>
  </object>
 
  <object name="session_management_session" version="1">
   <description summary="owning handle for a session created via create_session">
-   Bound to the connection that created the session. Optional fields may be
-   sent while the session is staged. Setting remote_host marks the session as
-   remote. Once the session has been committed, modifying staged fields or
-   committing it again is a protocol error. Destroying this object tears down
-   the session and its resources.
+   Optional fields may be sent while the session is staged. Setting
+   remote_host marks the session as remote. Once the session has been
+   committed, modifying staged fields or committing it again is a protocol
+   error. Destroying this object tears down the session and its resources.
   </description>
   <c2s name="vt">
    <description summary="stage the virtual terminal number">
@@ -96,7 +91,7 @@
    <arg name="message" type="varchar" summary="human-readable error detail"/>
   </s2c>
   <c2s name="destroy" destructor="true">
-   <description summary="destroy this object and tear down the session"/>
+   <description summary="tear down the session"/>
   </c2s>
  </object>
 

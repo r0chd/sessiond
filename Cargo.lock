@@ -532,7 +532,7 @@ dependencies = [
 
 [[package]]
 name = "ctl"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -549,7 +549,7 @@ dependencies = [
 
 [[package]]
 name = "daemon"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "bevy_ecs",
@@ -1075,7 +1075,7 @@ checksum = "d211803b9b6b570f68772237e415a029d5a50c65d382910b879fb19d3271f94d"
 
 [[package]]
 name = "pam"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "hyprwire",
  "hyprwire-scanner",

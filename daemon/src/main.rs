@@ -18,11 +18,17 @@ mod session_power_v1 {
     pub use server::*;
     pub use spec::*;
 }
+mod session_inhibit_v1 {
+    hyprwire::include_protocol!("session_inhibit_v1");
+    pub use server::*;
+    pub use spec::*;
+}
 
 mod cgroup;
 mod config;
 #[cfg(feature = "consolekit")]
 mod consolekit;
+mod inhibit;
 mod power;
 mod reconcile;
 mod session;
@@ -126,6 +132,7 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
     message::MessageRegistry::register_message::<session::SessionManagementMessage>(&mut world);
     message::MessageRegistry::register_message::<session::SessionControlMessage>(&mut world);
     message::MessageRegistry::register_message::<session::AddObject>(&mut world);
+    message::MessageRegistry::register_message::<inhibit::AddObject>(&mut world);
     message::MessageRegistry::register_message::<session::SessionInfoManagerMessage>(&mut world);
     message::MessageRegistry::register_message::<user::UserControlMessage>(&mut world);
     message::MessageRegistry::register_message::<user::AddObject>(&mut world);
@@ -136,6 +143,7 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
     message::MessageRegistry::register_message::<ShutdownRequested>(&mut world);
     world.init_resource::<session::PendingSessions>();
     world.insert_resource(session::NextSessionId(session::SessionId::from_raw(1)));
+    world.insert_resource(inhibit::NextInhibitorId(inhibit::InhibitorId::from_raw(1)));
     world.init_resource::<session::SessionInfoManagers>();
     world.init_resource::<ShutdownState>();
     world.init_resource::<reconcile::NotifyBatch>();
@@ -169,6 +177,7 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
             .before(user::ensure_session_users),
     );
     schedule.add_systems(session::handle_add_object.before(reconcile::send_done));
+    schedule.add_systems(inhibit::handle_add_object.before(reconcile::send_done));
     schedule.add_systems(session::handle_session_info_manager.before(reconcile::send_done));
     schedule.add_systems(user::handle_add_object.before(reconcile::send_done));
     schedule.add_systems(handle_shutdown.before(reconcile::send_done));
@@ -230,6 +239,7 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
     socket.add_implementation::<session_management_v2::SessionManagementV2, _>(&mut sessiond, 1);
     socket.add_implementation::<session_core_v1::SessionCoreV1, _>(&mut sessiond, 2);
     socket.add_implementation::<session_power_v1::SessionPowerV1, _>(&mut sessiond, 1);
+    socket.add_implementation::<session_inhibit_v1::SessionInhibitV1, _>(&mut sessiond, 1);
 
     let fd_wrapper = unsafe { generic::FdWrapper::new(socket.extract_loop_fd().as_raw_fd()) };
     let source = generic::Generic::new(

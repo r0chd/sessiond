@@ -1,5 +1,7 @@
 {
+  lib,
   pkgs,
+  config,
   sessiond,
   ...
 }:
@@ -153,4 +155,8 @@ in
     };
     root.password = "";
   };
+
+  security.pam.services.login.text = lib.mkAfter ''
+    session   optional   ${config.services.sessiond.package}/lib/security/pam_sessiond.so
+  '';
 }

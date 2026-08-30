@@ -1,41 +1,53 @@
 {
+  modules,
+  config,
   lib,
   pkgs,
-  config,
   ...
 }:
 let
   cfg = config.services.sessiond;
-  settingsFormat = pkgs.formats.toml { };
-  daemonConfig = settingsFormat.generate "sessiond.toml" cfg.settings;
+
+  format = pkgs.formats.toml { };
+  configFile = format.generate "sessiond.toml" cfg.settings;
 in
 {
-  imports = [ ./common.nix ];
+  imports = [
+    ./common.nix
+    modules.polkit
+  ];
 
   config = lib.mkIf cfg.enable {
-    finit = {
-      services.sessiond = {
-        description = "session management daemon";
-        conditions = [
-          "service/syslogd/ready"
-          "hook/svc/up"
-        ];
-        command = "${cfg.package}/bin/sessiond --config ${daemonConfig} --log-target syslog";
-        cgroup = {
-          delegate = true;
-        };
-        environment.LOG_LEVEL = cfg.logLevel;
-        notify = "systemd";
+    environment.systemPackages = [ cfg.package ];
+
+    services.dbus = {
+      enable = true;
+      packages = [ cfg.package ];
+    };
+
+    services.polkit = {
+      enable = true;
+      package = pkgs.polkit.override {
+        useSystemd = false;
+        useConsoleKit = true;
       };
     };
 
-    security.pam.services.login.text = lib.mkAfter ''
-      session   optional   ${cfg.package}/lib/security/pam_sessiond.so
-    '';
-
-    services.polkit.package = pkgs.polkit.override {
-      useConsoleKit = true;
-      useSystemd = false;
+    finit.services.sessiond = {
+      description = "daemon for power management";
+      conditions = "service/dbus/ready";
+      command = "${lib.getExe' cfg.package "sessiond"} --config ${configFile} --log-target syslog";
+      notify = "systemd";
+      cgroup.delegate = true;
+      environment =
+        if cfg.debug then
+          {
+            LOG_LEVEL = "debug";
+          }
+        else
+          {
+            LOG_LEVEL = lib.mkDefault "info";
+          };
     };
   };
 }

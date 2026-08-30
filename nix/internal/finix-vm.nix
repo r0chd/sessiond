@@ -50,7 +50,7 @@ in
     sessiond = {
       enable = true;
       package = sessiond;
-      logLevel = "trace";
+      debug = true;
       settings = {
         users.user_3.linger = true;
         power = {

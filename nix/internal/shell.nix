@@ -22,4 +22,11 @@ pkgs.mkShell {
   buildInputs = [ sessiond ];
 
   RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
+
+  shellHook = ''
+    if [[ $- == *i* ]] && [ -z "''${IN_NIX_SHELL_NU:-}" ]; then
+      export IN_NIX_SHELL_NU=1
+      exec ${pkgs.nushell}/bin/nu
+    fi
+  '';
 }

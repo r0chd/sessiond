@@ -14,24 +14,6 @@ let
       "llvm-tools"
     ];
   };
-in
-{
-  shell = import ./nix/internal/shell.nix {
-    inherit pkgs rustToolchain;
-  };
-
-  nixosModules = rec {
-    default = import ./nix/nixos.nix;
-    sessiond = default;
-  };
-
-  finixModules = rec {
-    default = import ./nix/finix.nix;
-    sessiond = default;
-  };
-
-  formatter = import ./nix/internal/formatter.nix { inherit pkgs rustToolchain; };
-
   packages =
     let
       rustPlatform = pkgs.makeRustPlatform {
@@ -45,6 +27,26 @@ in
       };
       sessiond = default;
     };
+in
+{
+  inherit packages;
+
+  shell = import ./nix/internal/shell.nix {
+    inherit pkgs rustToolchain;
+    inherit (packages) sessiond;
+  };
+
+  nixosModules = rec {
+    default = import ./nix/nixos.nix;
+    sessiond = default;
+  };
+
+  finixModules = rec {
+    default = import ./nix/finix.nix;
+    sessiond = default;
+  };
+
+  formatter = import ./nix/internal/formatter.nix { inherit pkgs rustToolchain; };
 
   checks =
     (import ./nix/finix-checks.nix { inherit finix pkgs; })

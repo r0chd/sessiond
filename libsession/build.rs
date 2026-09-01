@@ -1,5 +1,6 @@
 use std::io;
 
+#[allow(clippy::unnecessary_wraps)]
 fn main() -> io::Result<()> {
     #[cfg(feature = "sessiond")]
     hyprwire_scanner::configure()

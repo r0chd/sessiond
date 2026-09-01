@@ -19,6 +19,12 @@ rustPlatform.buildRustPackage {
   pname = "sessiond";
   inherit (cargoToml.workspace.package) version;
 
+  outputs = [
+    "out"
+    "dev"
+    "lib"
+  ];
+
   cargoLock = {
     lockFile = ../Cargo.lock;
     outputHashes = {
@@ -54,6 +60,8 @@ rustPlatform.buildRustPackage {
     linux-pam
   ];
 
+  buildNoDefaultFeatures = true;
+
   buildFeatures =
     lib.optionals withConsoleKit [
       "daemon/consolekit"
@@ -65,6 +73,26 @@ rustPlatform.buildRustPackage {
     mv $out/lib/libpam.so $out/lib/security/pam_sessiond.so
     mv $out/bin/daemon $out/bin/sessiond
     mv $out/bin/ctl $out/bin/sessionctl
+
+    install -Dm644 libsession/include/libsession.h $out/include/libsession.h
+
+    mkdir -p $out/lib/pkgconfig
+    cat > $out/lib/pkgconfig/libsession.pc <<EOF
+prefix=$lib
+libdir=''${prefix}/lib
+includedir=$dev/include
+
+Name: libsession
+Description: C ABI session management client library
+Version: ${cargoToml.workspace.package.version}
+Libs: -L''${libdir} -lsession
+Cflags: -I''${includedir}
+EOF
+
+    moveToOutput lib/libsession.so $lib
+    moveToOutput lib/libsession.a $lib
+    moveToOutput include $dev
+    moveToOutput lib/pkgconfig $dev
   ''
   + lib.optionalString (stdenv.buildPlatform.canExecute stdenv.hostPlatform) ''
     installShellCompletion --cmd sessionctl \
@@ -79,6 +107,7 @@ rustPlatform.buildRustPackage {
   '';
 
   meta = {
+    outputsToInstall = [ "out" ];
     description = "Session management daemon";
     homepage = "https://tangled.org/r0chd.pl/sessiond";
     license = lib.licenses.gpl3Only;

@@ -1,5 +1,10 @@
 mod backend;
 
+#[cfg(not(any(feature = "sessiond", feature = "logind", feature = "consolekit")))]
+compile_error!(
+    "libsession requires at least one backend feature: `sessiond`, `logind`, or `consolekit`"
+);
+
 #[cfg(feature = "consolekit")]
 use backend::consolekit;
 #[cfg(feature = "logind")]

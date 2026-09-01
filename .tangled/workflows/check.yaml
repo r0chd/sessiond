@@ -18,4 +18,4 @@ steps:
     command: |
       rustup toolchain install stable
       rustup default stable
-      cargo check
+      cargo check --workspace --all-features

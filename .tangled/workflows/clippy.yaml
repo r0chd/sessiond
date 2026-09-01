@@ -19,4 +19,4 @@ steps:
       rustup toolchain install stable
       rustup default stable
       rustup component add clippy
-      cargo clippy -- -D warnings
+      cargo clippy --workspace --all-features -- -D warnings

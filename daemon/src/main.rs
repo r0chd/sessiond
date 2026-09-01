@@ -237,7 +237,7 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
 
     socket.add_implementation::<session_management_v1::SessionManagementV1, _>(&mut sessiond, 1);
     socket.add_implementation::<session_management_v2::SessionManagementV2, _>(&mut sessiond, 1);
-    socket.add_implementation::<session_core_v1::SessionCoreV1, _>(&mut sessiond, 2);
+    socket.add_implementation::<session_core_v1::SessionCoreV1, _>(&mut sessiond, 3);
     socket.add_implementation::<session_power_v1::SessionPowerV1, _>(&mut sessiond, 1);
     socket.add_implementation::<session_inhibit_v1::SessionInhibitV1, _>(&mut sessiond, 1);
 

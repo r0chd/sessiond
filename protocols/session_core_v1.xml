@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<protocol name="session_core_v1" version="2">
+<protocol name="session_core_v1" version="3">
  <copyright>
   Copyright (c) 2026 Oskar Rochowiak
 
@@ -69,6 +69,15 @@
     done. If no matching session exists, destroyed is sent instead.
    </description>
    <arg name="pid" type="uint" summary="process PID of the session to query"/>
+   <returns iface="session_core_session"/>
+  </c2s>
+  <c2s name="get_current_session" since="3">
+   <description summary="create a per-session info object for the calling process">
+    Selects the session containing the connecting client, identified from the
+    connection's peer credentials rather than a client-supplied PID. Initial
+    fields are followed by done. If no matching session exists, destroyed is
+    sent instead.
+   </description>
    <returns iface="session_core_session"/>
   </c2s>
   <c2s name="get_session_by_uid">

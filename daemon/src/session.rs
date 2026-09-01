@@ -1049,6 +1049,26 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
         event: <session_core_manager::SessionCoreManager as hyprwire::Object>::Event<'_>,
     ) {
         match event {
+            session_core_manager::Event::GetCurrentSession {
+                session_core_session,
+            } => {
+                let pid = object.client().creds().pid.as_raw_pid().cast_unsigned();
+                let Ok(Some(session_id)) = self
+                    .world
+                    .resource::<cgroup::CgroupManager>()
+                    .find_session_by_pid(pid)
+                else {
+                    log::warn!(pid; "get_current_session: no session found for pid");
+                    session_core_session.send_destroyed();
+                    return;
+                };
+
+                self.world.write_message(AddObject {
+                    session_id,
+                    object: session_core_session,
+                    creds: *object.client().creds(),
+                });
+            }
             session_core_manager::Event::GetSession {
                 session_core_session,
                 session_id,

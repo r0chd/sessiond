@@ -32,11 +32,8 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for Sessiond {
         else {
             return;
         };
-        match event {
-            session_core_session::Event::SessionId { session_id } => {
-                session.id = Some(session_id);
-            }
-            _ => {}
+        if let session_core_session::Event::SessionId { session_id } = event {
+            session.id = Some(session_id);
         }
     }
 }
@@ -60,7 +57,7 @@ impl Sessiond {
         eq.wait_for_handshake(&mut sessiond).ok()?;
 
         // if we fail to bind manager the connectionn is useless, try another backend
-        sessiond.session_manager = Some(socket.bind(&eq, &mut sessiond, 2).ok()?);
+        sessiond.session_manager = Some(socket.bind(&eq, &mut sessiond, 3).ok()?);
 
         Some(sessiond)
     }
@@ -80,12 +77,8 @@ impl super::Backend for Sessiond {
             }
         }
 
-        let Some(session_manager) = self.session_manager.as_ref() else {
-            return None;
-        };
-        let Some(session_object) = session_manager.send_get_session_by_pid::<Self>(pid) else {
-            return None;
-        };
+        let session_manager = self.session_manager.as_ref()?;
+        let session_object = session_manager.send_get_current_session::<Self>()?;
 
         self.sessions.push(Session {
             id: None,

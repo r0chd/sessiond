@@ -29,3 +29,9 @@ Initial public release of `sessiond`.
 
 ### Added
 - inhibit protocol
+
+## UNRELEASED
+
+### Added
+- `get_current_session` hyprwire method
+- generic session library `libsession`

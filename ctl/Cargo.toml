@@ -21,8 +21,8 @@ comfy-table = "7.2.2"
 owo-colors = "4.3.0"
 rustix = { version = "1.1.4", features = ["process"] }
 serde_json = "1.0.145"
-hyprwire = "0.5.1"
 termtree = "1.0.0"
+hyprwire = "0.5.1"
 
 [build-dependencies]
 hyprwire-scanner = "0.5.1"

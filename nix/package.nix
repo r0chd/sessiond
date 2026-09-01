@@ -5,6 +5,11 @@
   pkg-config,
   rustPlatform,
   withConsoleKit ? true,
+  libsessionBackends ? [
+    "sessiond"
+    "logind"
+    "consolekit"
+  ],
   installShellFiles,
 }:
 let
@@ -32,6 +37,7 @@ rustPlatform.buildRustPackage {
         "ctl"
         "pam"
         "daemon"
+        "libsession"
         "data"
         "protocols"
         "Cargo.toml"
@@ -48,9 +54,11 @@ rustPlatform.buildRustPackage {
     linux-pam
   ];
 
-  buildFeatures = lib.optionals withConsoleKit [
-    "consolekit"
-  ];
+  buildFeatures =
+    lib.optionals withConsoleKit [
+      "daemon/consolekit"
+    ]
+    ++ map (backend: "libsession/${backend}") libsessionBackends;
 
   postInstall = ''
     mkdir -p $out/lib/security

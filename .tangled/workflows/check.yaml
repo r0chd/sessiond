@@ -18,4 +18,21 @@ steps:
     command: |
       rustup toolchain install stable
       rustup default stable
+
+      cargo build -p libsession
+
+      mkdir -p target/pkgconfig
+      cat > target/pkgconfig/libsession.pc <<EOF
+      prefix=$(pwd)
+      libdir=\${prefix}/target/debug
+      includedir=\${prefix}/libsession/include
+
+      Name: libsession
+      Description: C ABI session management client library
+      Version: 0.1.0
+      Libs: -L\${libdir} -lsession
+      Cflags: -I\${includedir}
+      EOF
+      export PKG_CONFIG_PATH="$(pwd)/target/pkgconfig"
+
       cargo check --workspace --all-features

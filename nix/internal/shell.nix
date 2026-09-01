@@ -1,4 +1,8 @@
-{ pkgs, rustToolchain }:
+{
+  pkgs,
+  rustToolchain,
+  sessiond,
+}:
 pkgs.mkShell {
   name = "sessiond-devshell";
   packages = builtins.attrValues {
@@ -10,13 +14,12 @@ pkgs.mkShell {
       nixd
       npins
       linux-pam
-
       pkg-config
-      libabigail
       ;
   };
 
   nativeBuildInputs = [ pkgs.pkg-config ];
+  buildInputs = [ sessiond ];
 
   RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
 }

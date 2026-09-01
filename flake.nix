@@ -48,8 +48,9 @@
                 "rust-src"
               ];
             };
+            sessiond = self.packages.${pkgs.stdenv.hostPlatform.system}.sessiond;
           in
-          import ./nix/internal/shell.nix { inherit pkgs rustToolchain; };
+          import ./nix/internal/shell.nix { inherit pkgs rustToolchain sessiond; };
       });
 
       apps.x86_64-linux.finix-vm =

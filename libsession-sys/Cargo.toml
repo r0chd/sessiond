@@ -1,0 +1,18 @@
+[package]
+name = "libsession-sys"
+keywords.workspace = true
+categories.workspace = true
+edition.workspace = true
+license = "MIT"
+repository.workspace = true
+version = "0.1.0"
+description.workspace = true
+readme.workspace = true
+
+[dependencies]
+
+[build-dependencies]
+pkg-config = "0.3"
+
+[lints]
+workspace = true

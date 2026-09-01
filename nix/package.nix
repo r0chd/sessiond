@@ -14,6 +14,16 @@
 }:
 let
   cargoToml = fromTOML (builtins.readFile ../Cargo.toml);
+
+  # libsession-sys/libsession-rs link against libsession, which
+  # only exists once this derivation's own postInstall runs
+  cargoWorkspaceFlags = [
+    "--workspace"
+    "--exclude"
+    "libsession-sys"
+    "--exclude"
+    "libsession-rs"
+  ];
 in
 rustPlatform.buildRustPackage {
   pname = "sessiond";
@@ -44,6 +54,8 @@ rustPlatform.buildRustPackage {
         "pam"
         "daemon"
         "libsession"
+        "libsession-sys"
+        "libsession-rs"
         "data"
         "protocols"
         "Cargo.toml"
@@ -59,6 +71,9 @@ rustPlatform.buildRustPackage {
   buildInputs = [
     linux-pam
   ];
+
+  cargoBuildFlags = cargoWorkspaceFlags;
+  cargoTestFlags = cargoWorkspaceFlags;
 
   buildNoDefaultFeatures = true;
 
@@ -78,16 +93,16 @@ rustPlatform.buildRustPackage {
 
     mkdir -p $out/lib/pkgconfig
     cat > $out/lib/pkgconfig/libsession.pc <<EOF
-prefix=$lib
-libdir=''${prefix}/lib
-includedir=$dev/include
+    prefix=$lib
+    libdir=''${prefix}/lib
+    includedir=$dev/include
 
-Name: libsession
-Description: C ABI session management client library
-Version: ${cargoToml.workspace.package.version}
-Libs: -L''${libdir} -lsession
-Cflags: -I''${includedir}
-EOF
+    Name: libsession
+    Description: C ABI session management client library
+    Version: ${cargoToml.workspace.package.version}
+    Libs: -L''${libdir} -lsession
+    Cflags: -I''${includedir}
+    EOF
 
     moveToOutput lib/libsession.so $lib
     moveToOutput lib/libsession.a $lib

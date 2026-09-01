@@ -1,0 +1,16 @@
+[package]
+name = "libsession-rs"
+keywords.workspace = true
+categories.workspace = true
+edition.workspace = true
+license = "MIT"
+repository.workspace = true
+version = "0.1.0"
+description.workspace = true
+readme.workspace = true
+
+[dependencies]
+libsession-sys = { path = "../libsession-sys", version = "0.1.0" }
+
+[lints]
+workspace = true

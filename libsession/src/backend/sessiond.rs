@@ -5,26 +5,18 @@ mod session_core_v1 {
 
 use hyprwire::client;
 use session_core_v1::{session_core_manager, session_core_session};
+use std::process;
+
+pub struct Session {
+    id: Option<u32>,
+    pid: u32,
+    object: session_core_session::SessionCoreSession,
+}
 
 pub struct Sessiond {
     eq: hyprwire::EventQueue,
     session_manager: Option<session_core_manager::SessionCoreManager>,
-}
-
-impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for Sessiond {
-    fn event(
-        &mut self,
-        object: &session_core_manager::SessionCoreManager,
-        event: <session_core_manager::SessionCoreManager as hyprwire::Object>::Event<'_>,
-    ) {
-        match event {
-            session_core_manager::Event::SessionAdded { session_id } => {
-                object.send_get_session::<Self>(session_id);
-            }
-            session_core_manager::Event::UserAdded { uid } => {}
-            _ => {}
-        }
-    }
+    sessions: Vec<Session>,
 }
 
 impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for Sessiond {
@@ -33,7 +25,19 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for Sessiond {
         object: &session_core_session::SessionCoreSession,
         event: <session_core_session::SessionCoreSession as hyprwire::Object>::Event<'_>,
     ) {
-        match event {}
+        let Some(session) = self
+            .sessions
+            .iter_mut()
+            .find(|session| session.object == *object)
+        else {
+            return;
+        };
+        match event {
+            session_core_session::Event::SessionId { session_id } => {
+                session.id = Some(session_id);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -50,9 +54,10 @@ impl Sessiond {
         let mut sessiond = Self {
             eq: eq.clone(),
             session_manager: None,
+            sessions: Vec::new(),
         };
 
-        eq.wait_for_handshake(&mut sessiond);
+        eq.wait_for_handshake(&mut sessiond).ok()?;
 
         // if we fail to bind manager the connectionn is useless, try another backend
         sessiond.session_manager = Some(socket.bind(&eq, &mut sessiond, 2).ok()?);
@@ -61,4 +66,45 @@ impl Sessiond {
     }
 }
 
-impl super::Backend for Sessiond {}
+impl super::Backend for Sessiond {
+    fn get_session_id(&mut self) -> Option<String> {
+        let pid = process::id();
+        let eq = self.eq.clone();
+
+        if let Some(index) = self.sessions.iter().position(|session| session.pid == pid) {
+            loop {
+                if let Some(id) = self.sessions[index].id {
+                    return Some(id.to_string());
+                }
+                eq.dispatch_events(self, true).ok()?;
+            }
+        }
+
+        let Some(session_manager) = self.session_manager.as_ref() else {
+            return None;
+        };
+        let Some(session_object) = session_manager.send_get_session_by_pid::<Self>(pid) else {
+            return None;
+        };
+
+        self.sessions.push(Session {
+            id: None,
+            pid,
+            object: session_object.clone(),
+        });
+
+        loop {
+            eq.dispatch_events(self, true).ok()?;
+            if let Some(session) = self
+                .sessions
+                .iter()
+                .find(|session| session.object == session_object)
+                && let Some(id) = session.id
+            {
+                return Some(id.to_string());
+            }
+        }
+    }
+}
+
+hyprwire::delegate_noop!(Sessiond: ignore session_core_manager::SessionCoreManager);

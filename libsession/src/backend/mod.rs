@@ -5,4 +5,6 @@ pub mod logind;
 #[cfg(feature = "sessiond")]
 pub mod sessiond;
 
-pub trait Backend {}
+pub trait Backend {
+    fn get_session_id(&mut self) -> Option<String>;
+}

@@ -18,7 +18,7 @@ pub struct libsession_context {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn libsession_new() -> *const libsession_context {
+pub extern "C" fn libsession_new() -> *mut libsession_context {
     #[cfg(feature = "sessiond")]
     if let Some(sessiond) = sessiond::Sessiond::try_connect() {
         return Box::into_raw(Box::new(Libsession {
@@ -41,7 +41,7 @@ pub extern "C" fn libsession_new() -> *const libsession_context {
         .cast::<libsession_context>();
     }
 
-    ptr::null()
+    ptr::null_mut()
 }
 
 #[unsafe(no_mangle)]
@@ -53,11 +53,50 @@ pub extern "C" fn libsession_free(ctx: *mut libsession_context) {
     unsafe { drop(Box::from_raw(ctx.cast::<Libsession>())) }
 }
 
+#[repr(C)]
+pub struct libsession_session_id {
+    _private: [u8; 0],
+}
+
 #[unsafe(no_mangle)]
-pub extern "C" fn libsession_get_session_id(ctx: *mut libsession_context) -> ffi::c_int {
+pub extern "C" fn libsession_get_session_id(
+    ctx: *mut libsession_context,
+) -> *mut libsession_session_id {
     if ctx.is_null() {
-        return -1;
+        return ptr::null_mut();
     }
 
-    1
+    let libsession = unsafe { &mut *ctx.cast::<Libsession>() };
+
+    let Some(session_id) = libsession.backend.get_session_id() else {
+        return ptr::null_mut();
+    };
+
+    let Ok(session_id) = ffi::CString::new(session_id) else {
+        return ptr::null_mut();
+    };
+
+    Box::into_raw(Box::new(session_id)).cast::<libsession_session_id>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn libsession_session_id_str(
+    id: *const libsession_session_id,
+) -> *const ffi::c_char {
+    if id.is_null() {
+        return ptr::null();
+    }
+
+    unsafe { (*id.cast::<ffi::CString>()).as_ptr() }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn libsession_session_id_free(id: *mut libsession_session_id) {
+    if id.is_null() {
+        return;
+    }
+
+    unsafe {
+        drop(Box::from_raw(id.cast::<ffi::CString>()));
+    }
 }

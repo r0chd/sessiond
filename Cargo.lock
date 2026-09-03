@@ -882,6 +882,7 @@ checksum = "8b50723c9685352232486a20c8435544833926a2119a142868cf478f2642f266"
 dependencies = [
  "hyprwire-core",
  "hyprwire-scanner",
+ "log",
  "polling",
  "rustix",
 ]

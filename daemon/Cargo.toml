@@ -25,7 +25,7 @@ serde = { version = "1.0.228", features = ["derive", "rc"] }
 toml = "1.1.2"
 uzers = "0.12.2"
 syslog = "7.0.0"
-hyprwire = "0.5.1"
+hyprwire = { version = "0.5.1", features = ["log"] }
 
 [build-dependencies]
 hyprwire-scanner = "0.5.1"

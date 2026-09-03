@@ -1,8 +1,9 @@
 #[cfg(feature = "consolekit")]
 use crate::consolekit;
-use crate::{session, session_core_v1, user};
+use crate::{session, user};
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::ScheduleLabel;
+use hyprwire_protocols_sessiond::server::session_core::v1::session_core_v1;
 use std::mem;
 
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]

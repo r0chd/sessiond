@@ -16,13 +16,13 @@ crate-type = ["cdylib", "staticlib"]
 [dependencies]
 hyprwire = { version = "0.5.1", optional = true }
 zbus = { version = "5.16.0", optional = true }
+hyprwire-protocols-sessiond = { path = "../hyprwire-protocols-sessiond", version = "0.1.0", optional = true }
 
 [build-dependencies]
-hyprwire-scanner = { version = "0.5.1", optional = true }
 
 [features]
 default = ["sessiond", "logind", "consolekit"]
-sessiond = ["dep:hyprwire", "dep:hyprwire-scanner"]
+sessiond = ["dep:hyprwire", "dep:hyprwire-protocols-sessiond"]
 consolekit = ["dep:zbus"]
 logind = ["dep:zbus"]
 

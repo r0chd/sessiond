@@ -6,6 +6,7 @@ members = [
   "libsession-rs",
   "libsession-sys",
   "pam",
+  "hyprwire-protocols-sessiond",
 ]
 resolver = "3"
 

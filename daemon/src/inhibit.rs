@@ -1,14 +1,10 @@
-use crate::session_inhibit_v1;
-use crate::session_inhibit_v1::{session_inhibit_manager, session_inhibitor};
-use crate::{cgroup, session, session_core_v1};
-use bevy_ecs::component;
+use crate::{cgroup, session};
 use bevy_ecs::prelude::*;
+use hyprwire_protocols_sessiond::server::session_core::v1::session_core_v1;
+use hyprwire_protocols_sessiond::server::session_inhibit::v1::session_inhibit_v1;
+use hyprwire_protocols_sessiond::server::session_inhibit::v1::session_inhibit_v1::session_inhibit_manager;
+use hyprwire_protocols_sessiond::server::session_inhibit::v1::session_inhibit_v1::session_inhibitor;
 use std::fs;
-
-impl Component for session_inhibitor::SessionInhibitor {
-    const STORAGE_TYPE: component::StorageType = component::StorageType::Table;
-    type Mutability = component::Mutable;
-}
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Inhibitor;
@@ -226,6 +222,7 @@ impl hyprwire::Dispatch<session_inhibit_manager::SessionInhibitManager> for crat
                 session_inhibitor.send_active();
             }
             session_inhibit_manager::Event::Destroy => {}
+            _ => {}
         }
     }
 }
@@ -236,7 +233,9 @@ impl hyprwire::Dispatch<session_inhibitor::SessionInhibitor> for crate::Sessiond
         object: &session_inhibitor::SessionInhibitor,
         event: <session_inhibitor::SessionInhibitor as hyprwire::Object>::Event<'_>,
     ) {
-        let session_inhibitor::Event::Destroy = event;
+        if !matches!(event, session_inhibitor::Event::Destroy) {
+            return;
+        }
         let released = {
             let mut inhibitors = self.world.query_filtered::<(
                 Entity,
@@ -246,7 +245,7 @@ impl hyprwire::Dispatch<session_inhibitor::SessionInhibitor> for crate::Sessiond
             ), With<Inhibitor>>();
             inhibitors
                 .iter(&self.world)
-                .find(|(_, _, candidate, _)| *candidate == object)
+                .find(|(_, _, candidate, _)| **candidate == *object)
                 .map(|(entity, id, _, objects)| (entity, *id, objects.0.clone()))
         };
 
@@ -276,6 +275,7 @@ const fn core_mode(mode: session_inhibit_v1::Mode) -> session_core_v1::Inhibitor
         session_inhibit_v1::Mode::Block => session_core_v1::InhibitorMode::Block,
         session_inhibit_v1::Mode::BlockWeak => session_core_v1::InhibitorMode::BlockWeak,
         session_inhibit_v1::Mode::Delay => session_core_v1::InhibitorMode::Delay,
+        _ => session_core_v1::InhibitorMode::Block,
     }
 }
 
@@ -330,7 +330,12 @@ impl hyprwire::Dispatch<session_core_v1::session_core_inhibitor::SessionCoreInhi
         object: &session_core_v1::session_core_inhibitor::SessionCoreInhibitor,
         event: <session_core_v1::session_core_inhibitor::SessionCoreInhibitor as hyprwire::Object>::Event<'_>,
     ) {
-        let session_core_v1::session_core_inhibitor::Event::Destroy = event;
+        if !matches!(
+            event,
+            session_core_v1::session_core_inhibitor::Event::Destroy
+        ) {
+            return;
+        }
         let mut inhibitors = self.world.query::<&mut Objects>();
         for mut objects in inhibitors.iter_mut(&mut self.world) {
             objects.0.retain(|candidate| candidate != object);

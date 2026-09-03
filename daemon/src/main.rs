@@ -1,29 +1,8 @@
-mod session_management_v1 {
-    hyprwire::include_protocol!("session_management_v1");
-    pub use server::*;
-    pub use spec::*;
-}
-mod session_management_v2 {
-    hyprwire::include_protocol!("session_management_v2");
-    pub use server::*;
-    pub use spec::*;
-}
-mod session_core_v1 {
-    hyprwire::include_protocol!("session_core_v1");
-    pub use server::*;
-    pub use spec::*;
-}
 mod session_power_v1 {
     hyprwire::include_protocol!("session_power_v1");
     pub use server::*;
     pub use spec::*;
 }
-mod session_inhibit_v1 {
-    hyprwire::include_protocol!("session_inhibit_v1");
-    pub use server::*;
-    pub use spec::*;
-}
-
 mod cgroup;
 mod config;
 #[cfg(feature = "consolekit")]
@@ -39,13 +18,17 @@ mod vt;
 
 use bevy_ecs::message;
 use bevy_ecs::prelude::*;
+use bevy_ecs::schedule::IntoScheduleConfigs;
 #[cfg(feature = "consolekit")]
 use calloop::channel;
 use calloop::{generic, signals};
 use clap::{Parser, ValueEnum};
 use hyprwire::server;
+use hyprwire_protocols_sessiond::server::session_core::v1::session_core_v1;
+use hyprwire_protocols_sessiond::server::session_inhibit::v1::session_inhibit_v1;
+use hyprwire_protocols_sessiond::server::session_management::v1::session_management_v1;
+use hyprwire_protocols_sessiond::server::session_management::v2::session_management_v2;
 use rustix::net;
-use session_core_v1::session_core_user;
 use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;

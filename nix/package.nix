@@ -58,6 +58,7 @@ rustPlatform.buildRustPackage {
         "libsession-rs"
         "data"
         "protocols"
+        "hyprwire-protocols-sessiond"
         "Cargo.toml"
         "Cargo.lock"
       ];

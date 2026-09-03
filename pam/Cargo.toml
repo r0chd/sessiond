@@ -21,6 +21,7 @@ pamsm = { git = "https://github.com/r0chd/pam_sm_rust", rev = "fcb5a16c9655eb55a
 ] }
 uzers = "0.12.2"
 hyprwire = "0.5.1"
+hyprwire-protocols-sessiond = { path = "../hyprwire-protocols-sessiond", version = "0.1.0" }
 
 [build-dependencies]
 hyprwire-scanner = "0.5.1"

@@ -1,15 +1,5 @@
-mod session_core_v1 {
-    hyprwire::include_protocol!("session_core_v1");
-    pub use client::*;
-    pub use spec::*;
-}
 mod session_power_v1 {
     hyprwire::include_protocol!("session_power_v1");
-    pub use client::*;
-    pub use spec::*;
-}
-mod session_inhibit_v1 {
-    hyprwire::include_protocol!("session_inhibit_v1");
     pub use client::*;
     pub use spec::*;
 }
@@ -22,14 +12,19 @@ mod seat_core_v1 {
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use comfy_table::presets;
 use hyprwire::client;
-use seat_core_v1::{seat_core_client, seat_core_device, seat_core_manager, seat_core_seat};
-use serde_json::json;
-use session_core_v1::{
+use hyprwire_protocols_sessiond::client::session_core::v1::session_core_v1;
+use hyprwire_protocols_sessiond::client::session_core::v1::session_core_v1::{
     session_core_inhibitor, session_core_manager, session_core_session, session_core_user,
 };
-use session_inhibit_v1::{session_inhibit_manager, session_inhibitor};
+use hyprwire_protocols_sessiond::client::session_inhibit::v1::session_inhibit_v1;
+use hyprwire_protocols_sessiond::client::session_inhibit::v1::session_inhibit_v1::{
+    session_inhibit_manager, session_inhibitor,
+};
+use owo_colors::OwoColorize;
+use seat_core_v1::{seat_core_client, seat_core_device, seat_core_manager, seat_core_seat};
+use serde_json::json;
 use session_power_v1::session_power_manager;
-use std::{fs, io, time};
+use std::{collections::BTreeSet, env, ffi::OsString, fs, io, path, process, time};
 
 struct Session {
     object: Option<session_core_session::SessionCoreSession>,
@@ -93,6 +88,7 @@ impl hyprwire::Dispatch<session_inhibitor::SessionInhibitor> for InhibitState {
         match event {
             session_inhibitor::Event::Active => self.active = true,
             session_inhibitor::Event::Error { message, .. } => self.error = Some(message),
+            _ => {}
         }
     }
 }
@@ -509,6 +505,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for State {
                 self.error = Some(message);
                 self.done = true;
             }
+            _ => {}
         }
     }
 }
@@ -613,11 +610,11 @@ impl hyprwire::Dispatch<session_core_inhibitor::SessionCoreInhibitor> for State 
             session_core_inhibitor::Event::What { what } => self.inhibitors[index].what = what,
             session_core_inhibitor::Event::Why { why } => self.inhibitors[index].why = why,
             session_core_inhibitor::Event::Mode { mode } => self.inhibitors[index].mode = mode,
-            session_core_inhibitor::Event::Active { .. } => {}
             session_core_inhibitor::Event::Done => self.inhibitors[index].done = true,
             session_core_inhibitor::Event::Destroyed => {
                 self.inhibitors.remove(index);
             }
+            _ => {}
         }
     }
 }
@@ -755,6 +752,8 @@ enum Command {
     Completions {
         shell: CompletionShell,
     },
+    #[command(external_subcommand)]
+    External(Vec<OsString>),
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -827,6 +826,7 @@ const fn active_name(s: session_core_v1::ActiveState) -> &'static str {
         session_core_v1::ActiveState::Active => "active",
         session_core_v1::ActiveState::Closing => "closing",
         session_core_v1::ActiveState::Opening => "opening",
+        _ => "unknown",
     }
 }
 const fn class_name(s: session_core_v1::SessionClass) -> &'static str {
@@ -838,6 +838,7 @@ const fn class_name(s: session_core_v1::SessionClass) -> &'static str {
         session_core_v1::SessionClass::BackgroundLight => "background-light",
         session_core_v1::SessionClass::Manager => "manager",
         session_core_v1::SessionClass::ManagerEarly => "manager-early",
+        _ => "unknown",
     }
 }
 
@@ -848,6 +849,7 @@ const fn user_state_name(s: session_core_v1::UserState) -> &'static str {
         session_core_v1::UserState::Online => "online",
         session_core_v1::UserState::Active => "active",
         session_core_v1::UserState::Closing => "closing",
+        _ => "unknown",
     }
 }
 
@@ -875,6 +877,7 @@ const fn inhibitor_mode_name(mode: session_core_v1::InhibitorMode) -> &'static s
         session_core_v1::InhibitorMode::Block => "block",
         session_core_v1::InhibitorMode::BlockWeak => "block-weak",
         session_core_v1::InhibitorMode::Delay => "delay",
+        _ => "unknown",
     }
 }
 
@@ -886,7 +889,7 @@ fn print_power_inhibitors(inhibitors: &[Inhibitor], what: u32, requester_uid: u3
                 session_core_v1::InhibitorMode::BlockWeak => {
                     requester_uid != 0 && inhibitor.uid != requester_uid
                 }
-                session_core_v1::InhibitorMode::Delay => false,
+                _ => false,
             }
     }) {
         let username = if inhibitor.username.is_empty() {
@@ -990,12 +993,93 @@ fn json(v: &serde_json::Value) -> anyhow::Result<()> {
 }
 
 fn cli_command(seat_available: bool) -> clap::Command {
-    let command = Cli::command();
+    let mut command = Cli::command();
+    let external_commands = external_command_names();
+    if !external_commands.is_empty() {
+        let names = external_commands
+            .iter()
+            .map(|name| format!("  {}  external command", name.bold()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        command = command.after_help(format!(
+            "\n{}\n{names}",
+            "External commands".bold().underline()
+        ));
+    }
     if seat_available {
         command
     } else {
         command.mut_subcommand("seat", |command| command.hide(true))
     }
+}
+
+fn external_command_names() -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    for directory in env::var_os("PATH")
+        .into_iter()
+        .flat_map(|path| env::split_paths(&path).collect::<Vec<_>>())
+    {
+        let Ok(entries) = fs::read_dir(directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let file_name = entry.file_name();
+            let Some(file_name) = file_name.to_str() else {
+                continue;
+            };
+            let Some(name) = file_name
+                .strip_prefix("sessiond-")
+                .and_then(|name| name.strip_suffix("ctl"))
+                .filter(|name| !name.is_empty())
+            else {
+                continue;
+            };
+            if external_command_path(name).is_some() {
+                names.insert(name.to_owned());
+            }
+        }
+    }
+    names
+}
+
+fn external_command_path(name: &str) -> Option<path::PathBuf> {
+    if name.is_empty() || name.contains('/') || name.contains('\\') {
+        return None;
+    }
+    let executable = format!("sessiond-{name}ctl");
+    env::var_os("PATH")
+        .into_iter()
+        .flat_map(|path| env::split_paths(&path).collect::<Vec<_>>())
+        .map(|directory| directory.join(&executable))
+        .find(|path| {
+            path.is_file() && {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    path.metadata()
+                        .is_ok_and(|metadata| metadata.permissions().mode() & 0o111 != 0)
+                }
+                #[cfg(not(unix))]
+                {
+                    true
+                }
+            }
+        })
+}
+
+fn run_external_command(args: Vec<OsString>) -> anyhow::Result<()> {
+    let Some((name, forwarded_args)) = args.split_first() else {
+        anyhow::bail!("missing external subcommand name");
+    };
+    let name = name
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("external subcommand name is not valid UTF-8"))?;
+    let Some(path) = external_command_path(name) else {
+        anyhow::bail!("unknown subcommand: {name}");
+    };
+
+    let status = process::Command::new(path).args(forwarded_args).status()?;
+    process::exit(status.code().unwrap_or(1));
 }
 
 fn load_seat_state(mut socket: client::Client) -> anyhow::Result<SeatState> {
@@ -1241,6 +1325,9 @@ fn main() -> anyhow::Result<()> {
     let mut command = cli_command(seat_connection.is_some());
     let matches = command.clone().get_matches();
     let cli = Cli::from_arg_matches(&matches)?;
+    if let Command::External(args) = &cli.command {
+        return run_external_command(args.clone());
+    }
     if let Command::Completions { shell } = cli.command {
         shell.generate(&mut command);
         return Ok(());
@@ -1537,7 +1624,8 @@ fn main() -> anyhow::Result<()> {
             command: InhibitorCommand::Acquire { .. },
         }
         | Command::Completions { .. }
-        | Command::Seat { .. } => unreachable!(),
+        | Command::Seat { .. }
+        | Command::External(_) => unreachable!(),
     }
     Ok(())
 }

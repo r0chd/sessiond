@@ -540,6 +540,7 @@ dependencies = [
  "clap_complete_nushell",
  "comfy-table",
  "hyprwire",
+ "hyprwire-protocols-sessiond",
  "hyprwire-scanner",
  "owo-colors",
  "rustix",
@@ -557,6 +558,7 @@ dependencies = [
  "clap",
  "env_logger",
  "hyprwire",
+ "hyprwire-protocols-sessiond",
  "hyprwire-scanner",
  "log",
  "rustix",
@@ -894,6 +896,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cbed3858de0e63414aa82ba0049672b7f3edf23b40e9fa497929d8f4c749d62b"
 
 [[package]]
+name = "hyprwire-protocols-sessiond"
+version = "0.1.0"
+dependencies = [
+ "bevy_ecs",
+ "hyprwire",
+ "hyprwire-scanner",
+]
+
+[[package]]
 name = "hyprwire-scanner"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -976,7 +987,7 @@ name = "libsession"
 version = "0.2.1"
 dependencies = [
  "hyprwire",
- "hyprwire-scanner",
+ "hyprwire-protocols-sessiond",
  "zbus",
 ]
 
@@ -1102,6 +1113,7 @@ name = "pam"
 version = "0.2.1"
 dependencies = [
  "hyprwire",
+ "hyprwire-protocols-sessiond",
  "hyprwire-scanner",
  "pamsm",
  "uzers",

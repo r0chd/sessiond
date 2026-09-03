@@ -6,6 +6,11 @@
 pkgs.mkShell {
   name = "sessiond-devshell";
   packages = builtins.attrValues {
+    sessiond-testctl = pkgs.writeShellScriptBin "sessiond-testctl" ''
+      printf 'sessiond-testctl args:'
+      printf ' <%s>' "$@"
+      printf '\n'
+    '';
     inherit
       rustToolchain
       ;

@@ -1,0 +1,23 @@
+[package]
+name = "hyprwire-protocols-sessiond"
+keywords.workspace = true
+categories.workspace = true
+edition.workspace = true
+license = "MIT"
+repository.workspace = true
+version = "0.1.0"
+description = "Common Hyprwire protocols for sessiond"
+readme = "README.md"
+
+[dependencies]
+hyprwire = "0.5.1"
+bevy_ecs = { version = "0.19.0", default-features = false, optional = true }
+
+[features]
+bevy_ecs = ["dep:bevy_ecs"]
+
+[build-dependencies]
+hyprwire-scanner = "0.5.1"
+
+[lints]
+workspace = true

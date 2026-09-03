@@ -1,10 +1,8 @@
-mod session_core_v1 {
-    hyprwire::include_protocol!("session_core_v1");
-    pub use client::*;
-}
-
 use hyprwire::client;
-use session_core_v1::{session_core_manager, session_core_session};
+use hyprwire_protocols_sessiond::client::session_core::v1::session_core_v1;
+use hyprwire_protocols_sessiond::client::session_core::v1::session_core_v1::{
+    session_core_manager, session_core_session,
+};
 use std::process;
 
 pub struct Session {

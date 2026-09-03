@@ -1,6 +1,7 @@
-use crate::{power, session, session_core_v1};
+use crate::{power, session};
 use bevy_ecs::prelude::*;
 use calloop::channel;
+use hyprwire_protocols_sessiond::server::session_core::v1::session_core_v1;
 use rustix::process;
 use std::collections::HashMap;
 use std::fmt::Write as _;

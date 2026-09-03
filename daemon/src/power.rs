@@ -1,9 +1,10 @@
 #[cfg(feature = "consolekit")]
 use crate::consolekit;
 use crate::session_power_v1::session_power_manager;
-use crate::{config, inhibit, session, session_inhibit_v1, session_power_v1};
+use crate::{config, inhibit, session, session_power_v1};
 use bevy_ecs::component;
 use bevy_ecs::prelude::*;
+use hyprwire_protocols_sessiond::server::session_inhibit::v1::session_inhibit_v1;
 use std::process;
 
 impl Component for session_power_manager::SessionPowerManager {
@@ -236,6 +237,7 @@ pub fn handle_power_action(
                 !request.creds.uid.is_root() && owner.0 != request.creds.uid.as_raw()
             }
             session_inhibit_v1::Mode::Delay => false,
+            _ => false,
         };
         if match request.action {
             PowerAction::Reboot | PowerAction::Poweroff => shutdown_inhibitors.iter().any(blocks),

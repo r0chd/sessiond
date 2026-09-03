@@ -1,5 +1,6 @@
-use crate::{session, session_core_v1, terminal};
+use crate::{session, terminal};
 use bevy_ecs::prelude::*;
+use hyprwire_protocols_sessiond::server::session_core::v1::session_core_v1;
 use std::num;
 
 pub fn current_vt() -> anyhow::Result<num::NonZeroU32> {

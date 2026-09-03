@@ -1,6 +1,7 @@
-use crate::{cgroup, config, session, session_core_v1, user};
+use crate::{cgroup, config, session, user};
 use anyhow::Context;
 use bevy_ecs::prelude::*;
+use hyprwire_protocols_sessiond::server::session_core::v1::session_core_v1;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -130,6 +131,7 @@ pub fn write_state(
                     session_core_v1::ActiveState::Closing => "closing",
                     session_core_v1::ActiveState::Opening => "opening",
                     session_core_v1::ActiveState::Online => "online",
+                    _ => "online",
                 };
 
                 (

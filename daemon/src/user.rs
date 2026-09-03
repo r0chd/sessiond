@@ -1,5 +1,7 @@
-use crate::{cgroup, config, session, session_core_user, session_core_v1};
+use crate::{cgroup, config, session};
 use bevy_ecs::prelude::*;
+use hyprwire_protocols_sessiond::server::session_core::v1::session_core_v1;
+use hyprwire_protocols_sessiond::server::session_core::v1::session_core_v1::session_core_user;
 use std::collections::HashMap;
 use std::{fs, io, sync};
 
@@ -342,6 +344,7 @@ impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond 
                     },
                 });
             }
+            _ => {}
         }
     }
 }

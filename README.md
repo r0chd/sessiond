@@ -5,9 +5,9 @@ depend on `(e)logind`.
 
 It exposes session management over the Hyprwire protocol:
 
-- [protocols/session_management_v1.xml](protocols/session_management_v1.xml): unsafe session creation and destruction meant to be used with pam
-- [protocols/session_management_v2.xml](protocols/session_management_v2.xml): owned session creation and destruction
-- [protocols/session_core_v1.xml](protocols/session_core_v1.xml): querying session information
+- [session_management_v1.xml](hyprwire-protocols-sessiond/protocols/session_management_v1.xml): unsafe session creation and destruction meant to be used with pam
+- [session_management_v2.xml](hyprwire-protocols-sessiond/protocols/session_management_v2.xml): owned session creation and destruction
+- [session_core_v1.xml](hyprwire-protocols-sessiond/protocols/session_core_v1.xml): querying session information
 
 ## What is it?
 

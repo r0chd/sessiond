@@ -1,0 +1,42 @@
+macro_rules! define_protocol_modules {
+    ($side:ident => { $( $module:ident => { $( $version:ident => $protocol_mod:ident => $protocol_name:literal ),+ $(,)? } ),+ $(,)? }) => {
+        pub mod $side {
+            $(
+                pub mod $module {
+                    $(
+                        pub mod $version {
+                pub mod $protocol_mod {
+                                hyprwire::include_protocol!($protocol_name);
+                                pub use $side::*;
+                                pub use spec::*;
+                            }
+                        }
+                    )+
+                }
+            )+
+        }
+    };
+}
+
+define_protocol_modules!(server => {
+    session_core => { v1 => session_core_v1 => "session_core_v1" },
+    session_inhibit => { v1 => session_inhibit_v1 => "session_inhibit_v1" },
+    session_management => {
+        v1 => session_management_v1 => "session_management_v1",
+        v2 => session_management_v2 => "session_management_v2",
+    },
+});
+
+define_protocol_modules!(client => {
+    session_core => { v1 => session_core_v1 => "session_core_v1" },
+    session_inhibit => { v1 => session_inhibit_v1 => "session_inhibit_v1" },
+    session_management => { v1 => session_management_v1 => "session_management_v1" },
+});
+
+#[cfg(feature = "bevy_ecs")]
+impl bevy_ecs::component::Component
+    for server::session_inhibit::v1::session_inhibit_v1::session_inhibitor::SessionInhibitor
+{
+    const STORAGE_TYPE: bevy_ecs::component::StorageType = bevy_ecs::component::StorageType::Table;
+    type Mutability = bevy_ecs::component::Mutable;
+}

@@ -1,13 +1,15 @@
-use crate::session_core_v1::{session_core_manager, session_core_session};
-use crate::session_management_v1::session_manager as session_manager_v1;
-use crate::session_management_v2::{session_management_session, session_manager};
-use crate::{
-    cgroup, config, inhibit, session_core_v1, session_management_v1, session_management_v2, user,
-    vt,
-};
+use crate::{cgroup, config, inhibit, user, vt};
 use bevy_ecs::entity;
 use bevy_ecs::prelude::*;
 use hyprwire::server;
+use hyprwire_protocols_sessiond::server::session_core::v1::session_core_v1;
+use hyprwire_protocols_sessiond::server::session_core::v1::session_core_v1::session_core_manager;
+use hyprwire_protocols_sessiond::server::session_core::v1::session_core_v1::session_core_session;
+use hyprwire_protocols_sessiond::server::session_management::v1::session_management_v1;
+use hyprwire_protocols_sessiond::server::session_management::v1::session_management_v1::session_manager as session_manager_v1;
+use hyprwire_protocols_sessiond::server::session_management::v2::session_management_v2;
+use hyprwire_protocols_sessiond::server::session_management::v2::session_management_v2::session_management_session;
+use hyprwire_protocols_sessiond::server::session_management::v2::session_management_v2::session_manager;
 use std::collections::{BTreeMap, HashMap};
 use std::{num, sync, time};
 
@@ -201,6 +203,7 @@ macro_rules! class_from {
                     <$protocol>::BackgroundLight => Self::BackgroundLight,
                     <$protocol>::Manager => Self::Manager,
                     <$protocol>::ManagerEarly => Self::ManagerEarly,
+                    _ => Self::User,
                 }
             }
         }
@@ -495,6 +498,7 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
                     action: SessionControlAction::Destroy,
                 });
             }
+            _ => {}
         }
     }
 }
@@ -683,6 +687,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for crate::Sessiond {
                     object: Some(SessionManagementTarget::V2(session_management_session)),
                 });
             }
+            _ => {}
         }
     }
 }
@@ -1004,6 +1009,7 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                     object: Some(SessionManagementTarget::V1(object.clone())),
                 });
             }
+            _ => {}
         }
     }
 }
@@ -1034,6 +1040,7 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
             }
             session_management_session::Event::Done => SessionManagementAction::Done,
             session_management_session::Event::Destroy => SessionManagementAction::Destroy,
+            _ => return,
         };
         self.world.write_message(SessionManagementMessage {
             action,
@@ -1151,6 +1158,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                     action: SessionInfoManagerAction::Destroy,
                 });
             }
+            _ => {}
         }
     }
 }

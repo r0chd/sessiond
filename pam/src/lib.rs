@@ -1,12 +1,7 @@
-mod session_management_v1 {
-    hyprwire::include_protocol!("session_management_v1");
-    pub use client::*;
-    pub use spec::*;
-}
-
 use hyprwire::client;
+use hyprwire_protocols_sessiond::client::session_management::v1::session_management_v1;
+use hyprwire_protocols_sessiond::client::session_management::v1::session_management_v1::session_manager;
 use pamsm::{PamLibExt, PamServiceModule};
-use session_management_v1::session_manager;
 use std::env;
 
 struct Session {
@@ -35,6 +30,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Session {
                 self.id = None;
                 self.done = true;
             }
+            _ => {}
         }
     }
 }

@@ -7,6 +7,7 @@ mod session_management_v1 {
 use hyprwire::client;
 use pamsm::{PamLibExt, PamServiceModule};
 use session_management_v1::session_manager;
+use std::env;
 
 struct Session {
     id: Option<u32>,
@@ -80,6 +81,7 @@ impl PamServiceModule for Pam {
                         .and_then(|name| name.strip_prefix("tty"))
                         .and_then(|vt| vt.parse().ok())
                 })
+                .or_else(|| env::var("XDG_VTNR").ok().and_then(|vt| vt.parse().ok()))
                 .unwrap_or(0);
 
             let remote_host = pamh

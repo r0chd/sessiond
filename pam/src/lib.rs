@@ -72,6 +72,8 @@ impl PamServiceModule for Pam {
             let uid = uzers::get_user_by_name(&username)
                 .ok_or(pamsm::PamError::USER_UNKNOWN)?
                 .uid();
+            let envlist = pamh.getenvlist()?;
+
             let vt = pamh
                 .get_tty()?
                 .and_then(|tty| {
@@ -81,6 +83,13 @@ impl PamServiceModule for Pam {
                         .and_then(|name| name.strip_prefix("tty"))
                         .and_then(|vt| vt.parse().ok())
                 })
+                .or_else(|| {
+                    envlist.iter().find_map(|entry| {
+                        let entry = entry.to_string_lossy();
+                        let (name, value) = entry.split_once('=')?;
+                        (name == "XDG_VTNR").then(|| value.parse().ok()).flatten()
+                    })
+                })
                 .or_else(|| env::var("XDG_VTNR").ok().and_then(|vt| vt.parse().ok()))
                 .unwrap_or(0);
 
@@ -89,8 +98,6 @@ impl PamServiceModule for Pam {
                 .map(|rhost| rhost.to_string_lossy().to_string())
                 .unwrap_or_default();
             let is_local = u32::from(remote_host.is_empty());
-
-            let envlist = pamh.getenvlist()?;
 
             let mut class = session_management_v1::SessionClass::User;
             let mut env = Vec::new();

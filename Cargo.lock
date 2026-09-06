@@ -543,7 +543,6 @@ dependencies = [
  "hyprwire-protocols-sessiond",
  "hyprwire-scanner",
  "owo-colors",
- "rustix",
  "serde_json",
  "termtree",
 ]
@@ -897,7 +896,7 @@ checksum = "cbed3858de0e63414aa82ba0049672b7f3edf23b40e9fa497929d8f4c749d62b"
 
 [[package]]
 name = "hyprwire-protocols-sessiond"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bevy_ecs",
  "hyprwire",

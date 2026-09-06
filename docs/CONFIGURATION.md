@@ -12,21 +12,11 @@ runtime-dir = "/run/user/{uid}"
 
 [users.alice.env]
 DBUS_SESSION_BUS_ADDRESS = "unix:path=/run/user/{uid}/bus"
-
-[power]
-reboot = ["/run/current-system/sw/bin/reboot"]
-poweroff = ["/run/current-system/sw/bin/poweroff"]
-suspend = ["/run/current-system/sw/bin/zzz", "-z"]
-hibernate = ["/run/current-system/sw/bin/zzz", "-Z"]
 ```
 
 ## Top-level Fields
 
 - `users`: per-user session defaults, keyed by user name.
-- `power`: commands used by `sessionctl reboot`, `sessionctl poweroff`,
-  `sessionctl suspend`, and `sessionctl hibernate`.
-
-Unknown fields are rejected.
 
 ## Users
 
@@ -49,16 +39,3 @@ Supported fields:
 - `env`: extra environment variables sent to newly created sessions.
 
 Values in `runtime-dir` and `env` may use placeholder `{uid}`
-
-## Power Commands
-
-Power command fields are arrays where the first element is the program and the
-remaining elements are arguments:
-
-```toml
-[power]
-suspend = ["/run/current-system/sw/bin/zzz"]
-hibernate = ["/run/current-system/sw/bin/zzz", "-H"]
-reboot = ["/run/current-system/sw/bin/reboot" ]
-poweroff = ["/run/current-system/sw/bin/poweroff" ]
-```

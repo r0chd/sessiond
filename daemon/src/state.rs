@@ -130,7 +130,6 @@ pub fn write_state(
                     session_core_v1::ActiveState::Active => "active",
                     session_core_v1::ActiveState::Closing => "closing",
                     session_core_v1::ActiveState::Opening => "opening",
-                    session_core_v1::ActiveState::Online => "online",
                     _ => "online",
                 };
 

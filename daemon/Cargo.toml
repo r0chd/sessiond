@@ -26,7 +26,9 @@ toml = "1.1.2"
 uzers = "0.12.2"
 syslog = "7.0.0"
 hyprwire = { version = "0.5.1", features = ["log"] }
-hyprwire-protocols-sessiond = { path = "../hyprwire-protocols-sessiond", version = "0.1.0", features = ["bevy_ecs"] }
+hyprwire-protocols-sessiond = { path = "../hyprwire-protocols-sessiond", version = "0.1.1", features = [
+  "bevy_ecs",
+] }
 
 [build-dependencies]
 hyprwire-scanner = "0.5.1"

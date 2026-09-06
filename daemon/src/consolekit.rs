@@ -1,8 +1,6 @@
-use crate::{power, session};
+use crate::session;
 use bevy_ecs::prelude::*;
-use calloop::channel;
 use hyprwire_protocols_sessiond::server::session_core::v1::session_core_v1;
-use rustix::process;
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::io::Write as _;
@@ -35,11 +33,11 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn start(power_sender: channel::Sender<PowerRequest>) -> Self {
+    pub fn start() -> Self {
         let (sender, receiver) = mpsc::channel();
         if let Err(err) = thread::Builder::new()
             .name("sessiond-consolekit".to_string())
-            .spawn(move || run(&receiver, &power_sender))
+            .spawn(move || run(&receiver))
         {
             log::error!(error = err.to_string().as_str(); "failed to spawn ConsoleKit thread");
         }
@@ -65,22 +63,6 @@ enum Command {
     Remove(u32),
 }
 
-pub struct PowerRequest {
-    pub kind: PowerRequestKind,
-    pub creds: hyprwire::Creds,
-    pub reply: mpsc::Sender<PowerResponse>,
-}
-
-pub enum PowerRequestKind {
-    Execute(power::PowerAction),
-    Can(power::PowerAction),
-}
-
-pub enum PowerResponse {
-    Done(Result<(), power::PowerError>),
-    Can(bool),
-}
-
 #[derive(Default)]
 struct State {
     sessions: HashMap<u32, SessionInfo>,
@@ -90,59 +72,10 @@ type SharedState = sync::Arc<sync::RwLock<State>>;
 
 struct Manager {
     state: SharedState,
-    power_sender: channel::Sender<PowerRequest>,
 }
 
 #[interface(name = "org.freedesktop.ConsoleKit.Manager")]
 impl Manager {
-    #[zbus(name = "Restart")]
-    fn restart(&self, #[zbus(header)] header: message::Header<'_>) -> fdo::Result<()> {
-        self.execute_power(power::PowerAction::Reboot, &header)
-    }
-
-    #[zbus(name = "Stop")]
-    fn stop(&self, #[zbus(header)] header: message::Header<'_>) -> fdo::Result<()> {
-        self.execute_power(power::PowerAction::Poweroff, &header)
-    }
-
-    #[zbus(name = "Suspend")]
-    fn suspend(
-        &self,
-        #[allow(unused_variables)] policykit_interactivity: bool,
-        #[zbus(header)] header: message::Header<'_>,
-    ) -> fdo::Result<()> {
-        self.execute_power(power::PowerAction::Suspend, &header)
-    }
-
-    #[zbus(name = "Hibernate")]
-    fn hibernate(
-        &self,
-        #[allow(unused_variables)] policykit_interactivity: bool,
-        #[zbus(header)] header: message::Header<'_>,
-    ) -> fdo::Result<()> {
-        self.execute_power(power::PowerAction::Hibernate, &header)
-    }
-
-    #[zbus(name = "CanRestart")]
-    fn can_restart(&self, #[zbus(header)] header: message::Header<'_>) -> fdo::Result<bool> {
-        self.can_power(power::PowerAction::Reboot, &header)
-    }
-
-    #[zbus(name = "CanStop")]
-    fn can_stop(&self, #[zbus(header)] header: message::Header<'_>) -> fdo::Result<bool> {
-        self.can_power(power::PowerAction::Poweroff, &header)
-    }
-
-    #[zbus(name = "CanSuspend")]
-    fn can_suspend(&self, #[zbus(header)] header: message::Header<'_>) -> fdo::Result<String> {
-        self.can_power_string(power::PowerAction::Suspend, &header)
-    }
-
-    #[zbus(name = "CanHibernate")]
-    fn can_hibernate(&self, #[zbus(header)] header: message::Header<'_>) -> fdo::Result<String> {
-        self.can_power_string(power::PowerAction::Hibernate, &header)
-    }
-
     #[zbus(name = "GetSessionForUnixProcess")]
     fn get_session_for_unix_process(&self, pid: u32) -> fdo::Result<zvariant::OwnedObjectPath> {
         let session_id = session_id_for_pid(pid)?;
@@ -183,62 +116,6 @@ impl Manager {
 }
 
 impl Manager {
-    fn execute_power(
-        &self,
-        action: power::PowerAction,
-        header: &message::Header<'_>,
-    ) -> fdo::Result<()> {
-        match self.send_power_request(PowerRequestKind::Execute(action), header)? {
-            PowerResponse::Done(Ok(())) => Ok(()),
-            PowerResponse::Done(Err(power::PowerError::ActiveSessions(message))) => {
-                Err(fdo::Error::AccessDenied(message))
-            }
-            PowerResponse::Done(Err(power::PowerError::Io(message))) => {
-                Err(fdo::Error::Failed(message))
-            }
-            PowerResponse::Can(_) => Err(fdo::Error::Failed(
-                "unexpected ConsoleKit power response".to_string(),
-            )),
-        }
-    }
-
-    fn can_power(
-        &self,
-        action: power::PowerAction,
-        header: &message::Header<'_>,
-    ) -> fdo::Result<bool> {
-        match self.send_power_request(PowerRequestKind::Can(action), header)? {
-            PowerResponse::Can(can) => Ok(can),
-            PowerResponse::Done(_) => Err(fdo::Error::Failed(
-                "unexpected ConsoleKit power response".to_string(),
-            )),
-        }
-    }
-
-    fn can_power_string(
-        &self,
-        action: power::PowerAction,
-        header: &message::Header<'_>,
-    ) -> fdo::Result<String> {
-        self.can_power(action, header)
-            .map(|can| if can { "yes" } else { "no" }.to_string())
-    }
-
-    fn send_power_request(
-        &self,
-        kind: PowerRequestKind,
-        header: &message::Header<'_>,
-    ) -> fdo::Result<PowerResponse> {
-        let creds = caller_creds(header)?;
-        let (reply, receiver) = mpsc::channel();
-        self.power_sender
-            .send(PowerRequest { kind, creds, reply })
-            .map_err(|_| fdo::Error::Failed("ConsoleKit power handler unavailable".to_string()))?;
-        receiver
-            .recv()
-            .map_err(|_| fdo::Error::Failed("ConsoleKit power handler closed".to_string()))
-    }
-
     fn with_session<T>(
         &self,
         session_id: u32,
@@ -336,7 +213,7 @@ impl Session {
     }
 }
 
-fn run(receiver: &mpsc::Receiver<Command>, power_sender: &channel::Sender<PowerRequest>) {
+fn run(receiver: &mpsc::Receiver<Command>) {
     let state = SharedState::default();
     let mut connection = None;
     let mut warned_unavailable = false;
@@ -347,7 +224,7 @@ fn run(receiver: &mpsc::Receiver<Command>, power_sender: &channel::Sender<PowerR
 
     loop {
         if connection.is_none() {
-            match start_connection(&state, power_sender.clone()) {
+            match start_connection(&state) {
                 Ok(new_connection) => {
                     register_existing_sessions(&new_connection, &state);
                     connection = Some(new_connection);
@@ -371,16 +248,12 @@ fn run(receiver: &mpsc::Receiver<Command>, power_sender: &channel::Sender<PowerR
     }
 }
 
-fn start_connection(
-    state: &SharedState,
-    power_sender: channel::Sender<PowerRequest>,
-) -> zbus::Result<blocking::Connection> {
+fn start_connection(state: &SharedState) -> zbus::Result<blocking::Connection> {
     connection::Builder::system()?
         .serve_at(
             MANAGER_PATH,
             Manager {
                 state: state.clone(),
-                power_sender,
             },
         )?
         .name(BUS_NAME)?
@@ -465,55 +338,6 @@ fn object_path(path: &str) -> fdo::Result<zvariant::OwnedObjectPath> {
     zvariant::ObjectPath::try_from(path)
         .map(Into::into)
         .map_err(|err| fdo::Error::Failed(format!("invalid object path: {err}")))
-}
-
-fn caller_creds(header: &message::Header<'_>) -> fdo::Result<hyprwire::Creds> {
-    let sender = header
-        .sender()
-        .ok_or_else(|| fdo::Error::Failed("caller has no D-Bus sender".to_string()))?;
-    let connection = blocking::Connection::system()
-        .map_err(|err| fdo::Error::Failed(format!("failed to connect to system bus: {err}")))?;
-    let proxy = DBusProxy::new(&connection)
-        .map_err(|err| fdo::Error::Failed(format!("failed to create D-Bus proxy: {err}")))?;
-    let credentials = proxy
-        .get_connection_credentials(names::BusName::from(sender.clone()))
-        .map_err(|err| {
-            fdo::Error::Failed(format!("failed to resolve caller credentials: {err}"))
-        })?;
-
-    let raw_pid = credentials
-        .process_id()
-        .ok_or_else(|| fdo::Error::Failed("caller credentials have no pid".to_string()))?;
-    let raw_uid = credentials
-        .unix_user_id()
-        .ok_or_else(|| fdo::Error::Failed("caller credentials have no uid".to_string()))?;
-    let raw_gid = process_gid(raw_pid).or_else(|| {
-        credentials
-            .unix_group_ids()
-            .and_then(|groups| groups.first().copied())
-    });
-
-    let pid = i32::try_from(raw_pid)
-        .ok()
-        .and_then(process::Pid::from_raw)
-        .ok_or_else(|| fdo::Error::Failed(format!("invalid caller pid: {raw_pid}")))?;
-    let gid = raw_gid
-        .map(process::Gid::from_raw)
-        .ok_or_else(|| fdo::Error::Failed("caller credentials have no gid".to_string()))?;
-
-    Ok(hyprwire::Creds {
-        pid,
-        uid: process::Uid::from_raw(raw_uid),
-        gid,
-    })
-}
-
-fn process_gid(pid: u32) -> Option<u32> {
-    let status = fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
-    status.lines().find_map(|line| {
-        let gids = line.strip_prefix("Gid:")?;
-        gids.split_whitespace().nth(1)?.parse().ok()
-    })
 }
 
 fn session_id_for_pid(pid: u32) -> fdo::Result<u32> {

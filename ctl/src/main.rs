@@ -1,8 +1,3 @@
-mod session_power_v1 {
-    hyprwire::include_protocol!("session_power_v1");
-    pub use client::*;
-    pub use spec::*;
-}
 mod seat_core_v1 {
     hyprwire::include_protocol!("seat_core_v1");
     pub use client::*;
@@ -23,7 +18,6 @@ use hyprwire_protocols_sessiond::client::session_inhibit::v1::session_inhibit_v1
 use owo_colors::OwoColorize;
 use seat_core_v1::{seat_core_client, seat_core_device, seat_core_manager, seat_core_seat};
 use serde_json::json;
-use session_power_v1::session_power_manager;
 use std::{collections::BTreeSet, env, ffi::OsString, fs, io, path, process, time};
 
 struct Session {
@@ -149,9 +143,6 @@ struct State {
     users: Vec<User>,
     inhibitors: Vec<Inhibitor>,
     done: bool,
-    can_control_power: Option<bool>,
-    power_done: bool,
-    power_error: Option<(session_power_v1::ErrorCode, String)>,
     error: Option<String>,
 }
 
@@ -509,24 +500,6 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for State {
         }
     }
 }
-impl hyprwire::Dispatch<session_power_manager::SessionPowerManager> for State {
-    fn event(
-        &mut self,
-        _object: &session_power_manager::SessionPowerManager,
-        event: <session_power_manager::SessionPowerManager as hyprwire::Object>::Event<'_>,
-    ) {
-        match event {
-            session_power_manager::Event::CanControl { can_control } => {
-                self.can_control_power = Some(can_control != 0);
-            }
-            session_power_manager::Event::Error { code, message } => {
-                self.power_error = Some((code, message));
-                self.power_done = true;
-            }
-            session_power_manager::Event::Done => self.power_done = true,
-        }
-    }
-}
 impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for State {
     fn event(
         &mut self,
@@ -745,10 +718,6 @@ enum Command {
         #[command(subcommand)]
         command: SeatCommand,
     },
-    Reboot,
-    Poweroff,
-    Suspend,
-    Hibernate,
     Completions {
         shell: CompletionShell,
     },
@@ -878,29 +847,6 @@ const fn inhibitor_mode_name(mode: session_core_v1::InhibitorMode) -> &'static s
         session_core_v1::InhibitorMode::BlockWeak => "block-weak",
         session_core_v1::InhibitorMode::Delay => "delay",
         _ => "unknown",
-    }
-}
-
-fn print_power_inhibitors(inhibitors: &[Inhibitor], what: u32, requester_uid: u32) {
-    for inhibitor in inhibitors.iter().filter(|inhibitor| {
-        inhibitor.what & what != 0
-            && match inhibitor.mode {
-                session_core_v1::InhibitorMode::Block => true,
-                session_core_v1::InhibitorMode::BlockWeak => {
-                    requester_uid != 0 && inhibitor.uid != requester_uid
-                }
-                _ => false,
-            }
-    }) {
-        let username = if inhibitor.username.is_empty() {
-            inhibitor.uid.to_string()
-        } else {
-            inhibitor.username.clone()
-        };
-        eprintln!(
-            "Operation inhibited by \"{}\" (PID {} \"{}\", user {}), reason is \"{}\".",
-            inhibitor.who, inhibitor.pid, inhibitor.comm, username, inhibitor.why,
-        );
     }
 }
 
@@ -1356,14 +1302,11 @@ fn main() -> anyhow::Result<()> {
     let queue = socket.new_event_queue();
 
     socket.add_implementation::<session_core_v1::SessionCoreV1>();
-    socket.add_implementation::<session_power_v1::SessionPowerV1>();
 
     queue.wait_for_handshake(&mut state)?;
 
     let manager =
         socket.bind::<session_core_manager::SessionCoreManager, _>(&queue, &mut state, 2)?;
-    let power_manager =
-        socket.bind::<session_power_manager::SessionPowerManager, _>(&queue, &mut state, 1)?;
 
     queue.roundtrip(&mut state)?;
 
@@ -1388,14 +1331,7 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    if matches!(
-        &cli.command,
-        Command::Inhibitor { .. }
-            | Command::Reboot
-            | Command::Poweroff
-            | Command::Suspend
-            | Command::Hibernate
-    ) {
+    if matches!(&cli.command, Command::Inhibitor { .. }) {
         while state.inhibitors.iter().any(|inhibitor| !inhibitor.done) {
             queue.dispatch_events(&mut state, true)?;
         }
@@ -1585,40 +1521,6 @@ fn main() -> anyhow::Result<()> {
                 ]);
             }
             println!("{table}");
-        }
-        Command::Reboot | Command::Poweroff | Command::Suspend | Command::Hibernate => {
-            let inhibitor_what = match cli.command {
-                Command::Reboot | Command::Poweroff => session_inhibit_v1::What::Shutdown as u32,
-                Command::Suspend | Command::Hibernate => session_inhibit_v1::What::Sleep as u32,
-                _ => unreachable!(),
-            };
-            while state.can_control_power.is_none() {
-                queue.dispatch_events(&mut state, true)?;
-            }
-            anyhow::ensure!(
-                state.can_control_power == Some(true),
-                "power operation is not permitted while other users have active sessions"
-            );
-            match cli.command {
-                Command::Reboot => power_manager.send_reboot(),
-                Command::Poweroff => power_manager.send_poweroff(),
-                Command::Suspend => power_manager.send_suspend(),
-                Command::Hibernate => power_manager.send_hibernate(),
-                _ => unreachable!(),
-            }
-            while !state.power_done {
-                queue.dispatch_events(&mut state, true)?;
-            }
-            if let Some((code, message)) = state.power_error.take() {
-                if matches!(code, session_power_v1::ErrorCode::PermissionDenied) {
-                    print_power_inhibitors(
-                        &state.inhibitors,
-                        inhibitor_what,
-                        rustix::process::geteuid().as_raw(),
-                    );
-                }
-                anyhow::bail!("{message}");
-            }
         }
         Command::Inhibitor {
             command: InhibitorCommand::Acquire { .. },

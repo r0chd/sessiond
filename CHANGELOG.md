@@ -30,8 +30,21 @@ Initial public release of `sessiond`.
 ### Added
 - inhibit protocol
 
+## v0.2.2 - 2026-09-06
+
+### Fixed
+- Fall back to `XDG_VTNR` when `PAM_TTY` is unset
+
+## v0.2.3 - 2026-09-07
+
+### Fixed
+- `XDG_VTNR` env parsing in pam module
+
 ## UNRELEASED
 
 ### Added
 - `get_current_session` hyprwire method
 - generic session library `libsession`
+
+### Removed
+- power management in favor of power client

@@ -5,7 +5,7 @@ categories.workspace = true
 edition.workspace = true
 license = "MIT"
 repository.workspace = true
-version = "0.1.0"
+version = "0.1.1"
 description = "Common Hyprwire protocols for sessiond"
 readme = "README.md"
 

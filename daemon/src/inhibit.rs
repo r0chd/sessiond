@@ -140,90 +140,89 @@ impl hyprwire::Dispatch<session_inhibit_manager::SessionInhibitManager> for crat
         object: &session_inhibit_manager::SessionInhibitManager,
         event: <session_inhibit_manager::SessionInhibitManager as hyprwire::Object>::Event<'_>,
     ) {
-        match event {
-            session_inhibit_manager::Event::Inhibit {
-                session_inhibitor,
-                what,
-                who,
-                why,
-                mode,
-            } => {
-                const KNOWN_WHAT: u32 = session_inhibit_v1::What::Shutdown as u32
-                    | session_inhibit_v1::What::Sleep as u32
-                    | session_inhibit_v1::What::Idle as u32
-                    | session_inhibit_v1::What::HandlePowerKey as u32
-                    | session_inhibit_v1::What::HandleSuspendKey as u32
-                    | session_inhibit_v1::What::HandleHibernateKey as u32
-                    | session_inhibit_v1::What::HandleLidSwitch as u32
-                    | session_inhibit_v1::What::HandleRebootKey as u32;
+        const KNOWN_WHAT: u32 = session_inhibit_v1::What::Shutdown as u32
+            | session_inhibit_v1::What::Sleep as u32
+            | session_inhibit_v1::What::Idle as u32
+            | session_inhibit_v1::What::HandlePowerKey as u32
+            | session_inhibit_v1::What::HandleSuspendKey as u32
+            | session_inhibit_v1::What::HandleHibernateKey as u32
+            | session_inhibit_v1::What::HandleLidSwitch as u32
+            | session_inhibit_v1::What::HandleRebootKey as u32;
 
-                if what == 0 || what & !KNOWN_WHAT != 0 {
-                    session_inhibitor.send_error(
-                        session_inhibit_v1::ErrorCode::InvalidWhat,
-                        "what is zero or contains unknown bits",
-                    );
-                    return;
-                }
+        let session_inhibit_manager::Event::Inhibit {
+            session_inhibitor,
+            what,
+            who,
+            why,
+            mode,
+        } = event
+        else {
+            return;
+        };
 
-                let creds = *object.client().creds();
-                let uid = creds.uid.as_raw();
-                let pid = creds.pid.as_raw_pid().cast_unsigned();
-                let username = uzers::get_user_by_uid(uid)
-                    .map(|user| user.name().to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                let comm = fs::read_to_string(format!("/proc/{pid}/comm"))
-                    .map(|comm| comm.trim().to_owned())
-                    .unwrap_or_default();
-                let inhibitor_id = self.world.resource_mut::<NextInhibitorId>().take();
-                let protocol_object = session_inhibitor.clone();
-                let mut entity = self.world.spawn(InhibitorBundle {
-                    marker: Inhibitor,
-                    id: inhibitor_id,
-                    what: What(what),
-                    who: Who(who),
-                    why: Why(why),
-                    uid: Uid(uid),
-                    username: Username(username),
-                    pid: Pid(pid),
-                    comm: Comm(comm),
-                    mode,
-                    object: protocol_object,
-                    objects: Objects::default(),
-                });
-
-                if what & session_inhibit_v1::What::Shutdown as u32 != 0 {
-                    entity.insert(Shutdown);
-                }
-                if what & session_inhibit_v1::What::Sleep as u32 != 0 {
-                    entity.insert(Sleep);
-                }
-                if what & session_inhibit_v1::What::Idle as u32 != 0 {
-                    entity.insert(Idle);
-                }
-                if what & session_inhibit_v1::What::HandlePowerKey as u32 != 0 {
-                    entity.insert(HandlePowerKey);
-                }
-                if what & session_inhibit_v1::What::HandleSuspendKey as u32 != 0 {
-                    entity.insert(HandleSuspendKey);
-                }
-                if what & session_inhibit_v1::What::HandleHibernateKey as u32 != 0 {
-                    entity.insert(HandleHibernateKey);
-                }
-                if what & session_inhibit_v1::What::HandleLidSwitch as u32 != 0 {
-                    entity.insert(HandleLidKey);
-                }
-                if what & session_inhibit_v1::What::HandleRebootKey as u32 != 0 {
-                    entity.insert(HandleRebootKey);
-                }
-
-                for manager in &self.world.resource::<session::SessionInfoManagers>().0 {
-                    manager.send_inhibitor_added(inhibitor_id.as_raw());
-                }
-                session_inhibitor.send_active();
-            }
-            session_inhibit_manager::Event::Destroy => {}
-            _ => {}
+        if what == 0 || what & !KNOWN_WHAT != 0 {
+            session_inhibitor.send_error(
+                session_inhibit_v1::ErrorCode::InvalidWhat,
+                "what is zero or contains unknown bits",
+            );
+            return;
         }
+
+        let creds = *object.client().creds();
+        let uid = creds.uid.as_raw();
+        let pid = creds.pid.as_raw_pid().cast_unsigned();
+        let username = uzers::get_user_by_uid(uid)
+            .map(|user| user.name().to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let comm = fs::read_to_string(format!("/proc/{pid}/comm"))
+            .map(|comm| comm.trim().to_owned())
+            .unwrap_or_default();
+        let inhibitor_id = self.world.resource_mut::<NextInhibitorId>().take();
+        let protocol_object = session_inhibitor.clone();
+        let mut entity = self.world.spawn(InhibitorBundle {
+            marker: Inhibitor,
+            id: inhibitor_id,
+            what: What(what),
+            who: Who(who),
+            why: Why(why),
+            uid: Uid(uid),
+            username: Username(username),
+            pid: Pid(pid),
+            comm: Comm(comm),
+            mode,
+            object: protocol_object,
+            objects: Objects::default(),
+        });
+
+        if what & session_inhibit_v1::What::Shutdown as u32 != 0 {
+            entity.insert(Shutdown);
+        }
+        if what & session_inhibit_v1::What::Sleep as u32 != 0 {
+            entity.insert(Sleep);
+        }
+        if what & session_inhibit_v1::What::Idle as u32 != 0 {
+            entity.insert(Idle);
+        }
+        if what & session_inhibit_v1::What::HandlePowerKey as u32 != 0 {
+            entity.insert(HandlePowerKey);
+        }
+        if what & session_inhibit_v1::What::HandleSuspendKey as u32 != 0 {
+            entity.insert(HandleSuspendKey);
+        }
+        if what & session_inhibit_v1::What::HandleHibernateKey as u32 != 0 {
+            entity.insert(HandleHibernateKey);
+        }
+        if what & session_inhibit_v1::What::HandleLidSwitch as u32 != 0 {
+            entity.insert(HandleLidKey);
+        }
+        if what & session_inhibit_v1::What::HandleRebootKey as u32 != 0 {
+            entity.insert(HandleRebootKey);
+        }
+
+        for manager in &self.world.resource::<session::SessionInfoManagers>().0 {
+            manager.send_inhibitor_added(inhibitor_id.as_raw());
+        }
+        session_inhibitor.send_active();
     }
 }
 
@@ -272,7 +271,6 @@ pub struct AddObject {
 
 const fn core_mode(mode: session_inhibit_v1::Mode) -> session_core_v1::InhibitorMode {
     match mode {
-        session_inhibit_v1::Mode::Block => session_core_v1::InhibitorMode::Block,
         session_inhibit_v1::Mode::BlockWeak => session_core_v1::InhibitorMode::BlockWeak,
         session_inhibit_v1::Mode::Delay => session_core_v1::InhibitorMode::Delay,
         _ => session_core_v1::InhibitorMode::Block,

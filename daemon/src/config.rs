@@ -5,7 +5,7 @@ use std::{fs, io, path, sync};
 use uzers::os::unix::UserExt;
 
 #[derive(Clone, serde::Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case")]
 pub struct UserConfig {
     #[serde(default)]
     pub linger: bool,
@@ -82,27 +82,12 @@ fn default_runtime_dir() -> String {
     "/run/user/{uid}".to_string()
 }
 
-#[derive(serde::Deserialize, Default)]
-#[serde(deny_unknown_fields, rename_all = "kebab-case")]
-pub struct PowerConfig {
-    #[serde(default)]
-    pub reboot: Vec<String>,
-    #[serde(default)]
-    pub poweroff: Vec<String>,
-    #[serde(default)]
-    pub suspend: Vec<String>,
-    #[serde(default)]
-    pub hibernate: Vec<String>,
-}
-
 #[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case")]
 #[derive(Default)]
 pub struct Config {
     #[serde(default)]
     pub users: BTreeMap<sync::Arc<str>, UserConfig>,
-    #[serde(default)]
-    pub power: PowerConfig,
 }
 
 impl Config {

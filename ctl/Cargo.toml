@@ -19,11 +19,10 @@ clap_complete = "4.6.5"
 clap_complete_nushell = "4.6.0"
 comfy-table = "7.2.2"
 owo-colors = "4.3.0"
-rustix = { version = "1.1.4", features = ["process"] }
 serde_json = "1.0.145"
 termtree = "1.0.0"
 hyprwire = "0.5.1"
-hyprwire-protocols-sessiond = { path = "../hyprwire-protocols-sessiond", version = "0.1.0" }
+hyprwire-protocols-sessiond = { path = "../hyprwire-protocols-sessiond", version = "0.1.1" }
 
 [build-dependencies]
 hyprwire-scanner = "0.5.1"

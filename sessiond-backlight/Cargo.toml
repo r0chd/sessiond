@@ -1,0 +1,23 @@
+[package]
+name = "sessiond-backlight"
+keywords = []
+categories = []
+edition = "2024"
+license = "GPL-3.0-only"
+repository = "https://tangled.org/r0chd.pl/sessiond"
+version = "0.0.0"
+publish = false
+description = "Backlight and LED brightness daemon for sessiond"
+
+
+[dependencies]
+clap = { version = "4.5.51", features = ["derive"] }
+env_logger = "0.11.8"
+log = "0.4.28"
+syslog = "7.0.0"
+anyhow = "1.0.104"
+hyprwire = "0.5.1"
+hyprwire-protocols-sessiond = { path = "../hyprwire-protocols-sessiond", version = "0.2.0" }
+calloop = "0.14.4"
+
+[workspace]

@@ -3,6 +3,9 @@
   pkgs,
   config,
   sessiond,
+  sessiond-hooks,
+  sessiond-uaccess,
+  sessiond-backlight,
   ...
 }:
 let
@@ -55,11 +58,33 @@ in
       debug = true;
       settings = {
         users.user_3.linger = true;
-        power = {
-          suspend = [ "${pkgs.zzz}/bin/zzz" ];
-          hibernate = [ "${pkgs.zzz}/bin/ZZZ" ];
-          reboot = [ "${pkgs.finit}/bin/reboot" ];
-          poweroff = [ "${pkgs.finit}/bin/poweroff" ];
+      };
+    };
+    sessiond-uaccess = {
+      enable = true;
+      package = sessiond-uaccess;
+      logLevel = "debug";
+    };
+    sessiond-backlight = {
+      enable = true;
+      package = sessiond-backlight;
+      logLevel = "debug";
+    };
+    sessiond-hooks = {
+      package = sessiond-hooks;
+      logLevel = "debug";
+      hooks.dinit.settings = {
+        on_start = {
+          exec = lib.getExe' pkgs.dinit "dinit";
+          args = [
+            "--user"
+            "--services-dir"
+            "~/.config/dinit.d"
+          ];
+        };
+        restart = {
+          on = "Failure";
+          delay = 5;
         };
       };
     };

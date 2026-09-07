@@ -22,10 +22,19 @@ let
       };
     in
     rec {
-      default = pkgs.callPackage ./nix/package.nix {
+      default = pkgs.callPackage ./nix/sessiond/package.nix {
         inherit rustPlatform;
       };
       sessiond = default;
+      sessiond-backlight = pkgs.callPackage ./nix/sessiond-backlight/package.nix {
+        inherit rustPlatform;
+      };
+      sessiond-hooks = pkgs.callPackage ./nix/sessiond-hooks/package.nix {
+        inherit rustPlatform;
+      };
+      sessiond-uaccess = pkgs.callPackage ./nix/sessiond-uaccess/package.nix {
+        inherit rustPlatform;
+      };
     };
 in
 {
@@ -37,13 +46,16 @@ in
   };
 
   nixosModules = rec {
-    default = import ./nix/nixos.nix;
+    default = import ./nix/sessiond/nixos.nix;
     sessiond = default;
   };
 
   finixModules = rec {
-    default = import ./nix/finix.nix;
+    default = import ./nix/sessiond/finix.nix;
     sessiond = default;
+    sessiond-backlight = import ./nix/sessiond-backlight/finix.nix;
+    sessiond-hooks = import ./nix/sessiond-hooks/finix.nix;
+    sessiond-uaccess = import ./nix/sessiond-uaccess/finix.nix;
   };
 
   formatter = import ./nix/internal/formatter.nix { inherit pkgs rustToolchain; };

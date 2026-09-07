@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="session_backlight_v1" version="1">
+ <copyright>
+  Copyright (c) 2026 Oskar Rochowiak
+
+  Permission is hereby granted, free of charge, to any person obtaining a
+  copy of this software and associated documentation files (the "Software"),
+  to deal in the Software without restriction, including without limitation
+  the rights to use, copy, modify, merge, publish, distribute, sublicense,
+  and/or sell copies of the Software, and to permit persons to whom the
+  Software is furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in
+  all copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+ </copyright>
+
+ <object name="session_backlight_manager" version="1">
+  <description summary="backlight control">
+   Interface for creating objects for backlight and LED devices. A client may
+   only create or modify an object while it owns an active local session.
+   </description>
+  <s2c name="error">
+   <description summary="device object creation failed"/>
+   <arg name="code" type="enum" interface="error_code" summary="error kind"/>
+   <arg name="message" type="varchar" summary="human-readable error detail"/>
+  </s2c>
+  <c2s name="get_device">
+   <description summary="create a device object">
+    Creates a `session_backlight_device` object for the device identified by
+    subsystem and name. The subsystem must be `backlight` or `leds`.
+   </description>
+   <arg name="subsystem" type="varchar" summary="backlight or leds"/>
+   <arg name="name" type="varchar" summary="device name"/>
+   <returns iface="session_backlight_device"/>
+  </c2s>
+  <c2s name="destroy" destructor="true">
+   <description summary="destroy this object"/>
+  </c2s>
+ </object>
+
+ <object name="session_backlight_device" version="1">
+  <description summary="backlight or LED device">
+   Interface for changing the brightness of one device selected by the
+   subsystem and name passed to `get_device`. A client may only perform an
+   operation while it owns an active local session. The result of each
+   operation is reported with done or error.
+  </description>
+  <s2c name="done">
+   <description summary="last operation completed successfully"/>
+  </s2c>
+  <s2c name="error">
+   <description summary="last operation failed"/>
+   <arg name="code" type="enum" interface="error_code" summary="error kind"/>
+   <arg name="message" type="varchar" summary="human-readable error detail"/>
+  </s2c>
+  <c2s name="set_brightness">
+   <description summary="set this device brightness">
+    Sets brightness for this device in /sys/class/backlight or
+    /sys/class/leds.
+   </description>
+   <arg name="brightness" type="uint" summary="new brightness value"/>
+  </c2s>
+  <c2s name="destroy" destructor="true">
+   <description summary="destroy this object"/>
+  </c2s>
+ </object>
+
+ <enum name="error_code">
+  <value idx="0" name="permission_denied" summary="client has no active local session"/>
+  <value idx="1" name="invalid_args" summary="unsupported subsystem or brightness value"/>
+  <value idx="2" name="io" summary="device could not be opened or written"/>
+ </enum>
+</protocol>

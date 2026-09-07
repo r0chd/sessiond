@@ -1,7 +1,7 @@
 [workspace]
 members = [
-  "ctl",
-  "daemon",
+  "sessionctl",
+  "sessiond",
   "libsession",
   "libsession-rs",
   "libsession-sys",
@@ -27,7 +27,6 @@ categories = []
 edition = "2024"
 license = "GPL-3.0-only"
 repository = "https://tangled.org/r0chd.pl/sessiond"
-version = "0.2.1"
 description = "session management daemon"
 readme = "README.md"
 

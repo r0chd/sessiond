@@ -14,7 +14,7 @@ let
 
   testArgs = {
     inherit sessiondTest;
-    sessiondModule = import (self + "/nix/finix.nix");
+    sessiondModule = import (self + "/nix/sessiond/finix.nix");
     sessiondPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.sessiond;
   };
 

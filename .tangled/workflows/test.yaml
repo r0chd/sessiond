@@ -13,14 +13,19 @@ dependencies:
     - linux-pam
     - pkg-config
     - nix
+    - udev
+    - acl
 
 steps:
   - name: cargo test
     command: |
       rustup toolchain install stable
       rustup default stable
-      cargo build --package daemon
-      cargo test --package daemon
+      cargo build --package sessiond
+      cargo test --package sessiond
+      cargo test --manifest-path sessiond-backlight/Cargo.toml
+      cargo test --manifest-path sessiond-hooks/Cargo.toml
+      cargo test --manifest-path sessiond-uaccess/Cargo.toml
 
   - name: finix vm tests
     command: |

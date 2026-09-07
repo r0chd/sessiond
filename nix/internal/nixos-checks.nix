@@ -10,7 +10,7 @@ let
 
   testArgs = {
     inherit sessiondTest;
-    sessiondModule = import (self + "/nix/nixos.nix");
+    sessiondModule = import (self + "/nix/sessiond/nixos.nix");
     sessiondPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.sessiond;
   };
 

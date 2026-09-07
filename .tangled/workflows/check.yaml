@@ -12,6 +12,8 @@ dependencies:
     - gcc
     - linux-pam
     - pkg-config
+    - udev
+    - acl
 
 steps:
   - name: cargo check
@@ -33,6 +35,9 @@ steps:
       Libs: -L\${libdir} -lsession
       Cflags: -I\${includedir}
       EOF
-      export PKG_CONFIG_PATH="$(pwd)/target/pkgconfig"
+      export PKG_CONFIG_PATH="$(pwd)/target/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 
       cargo check --workspace --all-features
+      cargo check --manifest-path sessiond-backlight/Cargo.toml
+      cargo check --manifest-path sessiond-hooks/Cargo.toml
+      cargo check --manifest-path sessiond-uaccess/Cargo.toml

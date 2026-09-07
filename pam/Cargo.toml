@@ -5,7 +5,8 @@ categories.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-version.workspace = true
+version = "0.0.0"
+publish = false
 description.workspace = true
 readme.workspace = true
 
@@ -21,7 +22,7 @@ pamsm = { git = "https://github.com/r0chd/pam_sm_rust", rev = "fcb5a16c9655eb55a
 ] }
 uzers = "0.12.2"
 hyprwire = "0.5.1"
-hyprwire-protocols-sessiond = { path = "../hyprwire-protocols-sessiond", version = "0.1.1" }
+hyprwire-protocols-sessiond = { path = "../hyprwire-protocols-sessiond", version = "0.2.0" }
 
 [build-dependencies]
 hyprwire-scanner = "0.5.1"

@@ -1,0 +1,26 @@
+[package]
+name = "sessiond-hooks"
+keywords = []
+categories = []
+edition = "2024"
+license = "GPL-3.0-only"
+repository = "https://tangled.org/r0chd.pl/sessiond"
+version = "0.0.0"
+publish = false
+description = "Launch and supervise per-user session hooks with sessiond"
+readme = "README.md"
+
+[dependencies]
+anyhow = "1.0.103"
+calloop = "0.14.4"
+clap = { version = "4.5.51", features = ["derive"] }
+env_logger = "0.11.8"
+hyprwire = "0.5.1"
+hyprwire-protocols-sessiond = { path = "../hyprwire-protocols-sessiond", version = "0.2.0" }
+log = { version = "0.4.28", features = ["kv"] }
+rustix = "1.1.4"
+syslog = "7.0.0"
+uzers = "0.12.2"
+serde = { version = "1.0.228", features = ["derive", "rc"] }
+toml = "1.1.2"
+[workspace]

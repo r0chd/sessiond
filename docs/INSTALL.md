@@ -102,8 +102,8 @@ cargo build --workspace --release --features consolekit
 
 Build outputs can be found in `target/release`:
 
-- `daemon`: the session daemon
-- `ctl`: the control client
+- `sessiond`: the session daemon
+- `sessionctl`: the control client
 - `libpam.so`: the PAM module
 
 ## Other distributions

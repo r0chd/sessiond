@@ -3,6 +3,9 @@
   pkgs,
   modulesPath,
   sessiond,
+  sessiond-backlight,
+  sessiond-hooks,
+  sessiond-uaccess,
   ...
 }:
 let
@@ -17,6 +20,13 @@ in
     enable = true;
     package = sessiond;
   };
+
+  environment.systemPackages = [
+    sessiond
+    sessiond-backlight
+    sessiond-hooks
+    sessiond-uaccess
+  ];
 
   boot.kernelParams = [
     "console=ttyS0"

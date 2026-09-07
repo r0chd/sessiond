@@ -6,11 +6,6 @@
 pkgs.mkShell {
   name = "sessiond-devshell";
   packages = builtins.attrValues {
-    sessiond-testctl = pkgs.writeShellScriptBin "sessiond-testctl" ''
-      printf 'sessiond-testctl args:'
-      printf ' <%s>' "$@"
-      printf '\n'
-    '';
     inherit
       rustToolchain
       ;
@@ -20,6 +15,8 @@ pkgs.mkShell {
       npins
       linux-pam
       pkg-config
+      udev
+      acl
       ;
   };
 
@@ -27,11 +24,4 @@ pkgs.mkShell {
   buildInputs = [ sessiond ];
 
   RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
-
-  shellHook = ''
-    if [[ $- == *i* ]] && [ -z "''${IN_NIX_SHELL_NU:-}" ]; then
-      export IN_NIX_SHELL_NU=1
-      exec ${pkgs.nushell}/bin/nu
-    fi
-  '';
 }

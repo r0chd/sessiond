@@ -65,34 +65,48 @@
           program = "${script}";
         };
 
-      packages = forAllSystems (pkgs: {
-        sessiond =
-          let
-            rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-              extensions = [
-                "rust-analyzer"
-                "rust-src"
-                "llvm-tools"
-              ];
-            };
-            rustPlatform = pkgs.makeRustPlatform {
-              cargo = rustToolchain;
-              rustc = rustToolchain;
-            };
-          in
-          pkgs.callPackage ./nix/package.nix {
+      packages = forAllSystems (
+        pkgs:
+        let
+          rustToolchain = pkgs.rust-bin.stable.latest.default.override {
+            extensions = [
+              "rust-analyzer"
+              "rust-src"
+              "llvm-tools"
+            ];
+          };
+          rustPlatform = pkgs.makeRustPlatform {
+            cargo = rustToolchain;
+            rustc = rustToolchain;
+          };
+        in
+        {
+          sessiond = pkgs.callPackage ./nix/sessiond/package.nix {
             inherit rustPlatform;
           };
-        default = self.packages.${pkgs.stdenv.hostPlatform.system}.sessiond;
-      });
+          sessiond-backlight = pkgs.callPackage ./nix/sessiond-backlight/package.nix {
+            inherit rustPlatform;
+          };
+          sessiond-hooks = pkgs.callPackage ./nix/sessiond-hooks/package.nix {
+            inherit rustPlatform;
+          };
+          sessiond-uaccess = pkgs.callPackage ./nix/sessiond-uaccess/package.nix {
+            inherit rustPlatform;
+          };
+          default = self.packages.${pkgs.stdenv.hostPlatform.system}.sessiond;
+        }
+      );
 
       nixosModules = {
-        sessiond = import ./nix/nixos.nix;
+        sessiond = import ./nix/sessiond/nixos.nix;
         default = self.nixosModules.sessiond;
       };
 
       finixModules = {
-        sessiond = import ./nix/finix.nix;
+        sessiond = import ./nix/sessiond/finix.nix;
+        sessiond-backlight = import ./nix/sessiond-backlight/finix.nix;
+        sessiond-hooks = import ./nix/sessiond-hooks/finix.nix;
+        sessiond-uaccess = import ./nix/sessiond-uaccess/finix.nix;
         default = self.finixModules.sessiond;
       };
 
@@ -117,10 +131,15 @@
           nixos-vm = nixpkgs.lib.nixosSystem {
             inherit system;
             specialArgs = {
-              inherit (self.packages.${system}) sessiond;
+              inherit (self.packages.${system})
+                sessiond
+                sessiond-backlight
+                sessiond-hooks
+                sessiond-uaccess
+                ;
             };
             modules = [
-              ./nix/nixos.nix
+              ./nix/sessiond/nixos.nix
               ./nix/internal/nixos-vm.nix
             ];
           };
@@ -135,11 +154,19 @@
           finix-vm = finix.lib.finixSystem {
             inherit (pkgs) lib;
             specialArgs = {
-              inherit (self.packages.${system}) sessiond;
+              inherit (self.packages.${system})
+                sessiond
+                sessiond-backlight
+                sessiond-hooks
+                sessiond-uaccess
+                ;
             };
             modules = [
               { nixpkgs = { inherit pkgs; }; }
-              ./nix/finix.nix
+              ./nix/sessiond/finix.nix
+              ./nix/sessiond-backlight/finix.nix
+              ./nix/sessiond-hooks/finix.nix
+              ./nix/sessiond-uaccess/finix.nix
               ./nix/internal/finix-vm.nix
               "${finix.outPath}/modules/virtualisation/qemu.nix"
             ]

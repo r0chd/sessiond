@@ -25,3 +25,6 @@ steps:
       rustup default stable
       rustup component add rustfmt
       cargo fmt --check
+      cargo fmt --manifest-path sessiond-backlight/Cargo.toml --check
+      cargo fmt --manifest-path sessiond-hooks/Cargo.toml --check
+      cargo fmt --manifest-path sessiond-uaccess/Cargo.toml --check

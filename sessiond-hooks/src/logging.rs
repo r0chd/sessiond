@@ -68,7 +68,7 @@ impl<'kvs> kv::VisitSource<'kvs> for FieldVisitor {
     }
 }
 
-pub(crate) fn format_message(record: &log::Record<'_>) -> String {
+pub fn format_message(record: &log::Record<'_>) -> String {
     let mut message = record.args().to_string();
     let mut visitor = FieldVisitor {
         fields: String::new(),

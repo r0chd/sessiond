@@ -217,10 +217,11 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for SessiondBa
         event: <session_core_manager::SessionCoreManager as hyprwire::Object>::Event<'_>,
     ) {
         if let session_core_manager::Event::SessionAdded { session_id } = event {
-            self.sessions.push(Session::new(
-                session_id,
-                object.send_get_session::<Self>(session_id).unwrap(),
-            ));
+            if let Some(session) = object.send_get_session::<Self>(session_id) {
+                self.sessions.push(Session::new(session_id, session));
+            } else {
+                log::error!("failed to request session {session_id}");
+            }
         }
     }
 }
@@ -265,13 +266,13 @@ impl hyprwire::Dispatch<session_backlight_manager::SessionBacklightManager> for 
         object: &session_backlight_manager::SessionBacklightManager,
         event: <session_backlight_manager::SessionBacklightManager as hyprwire::Object>::Event<'_>,
     ) {
-        match event {
-            session_backlight_manager::Event::Destroy => {}
-            session_backlight_manager::Event::GetDevice {
-                session_backlight_device,
-                subsystem,
-                name,
-            } => match Device::open(session_backlight_device, subsystem, name) {
+        if let session_backlight_manager::Event::GetDevice {
+            session_backlight_device,
+            subsystem,
+            name,
+        } = event
+        {
+            match Device::open(session_backlight_device, subsystem, name) {
                 Ok(device) => self.devices.push(device),
                 Err(error) => {
                     let (code, message) = match error {
@@ -284,8 +285,7 @@ impl hyprwire::Dispatch<session_backlight_manager::SessionBacklightManager> for 
                     };
                     object.send_error(code, message);
                 }
-            },
-            _ => {}
+            }
         }
     }
 }

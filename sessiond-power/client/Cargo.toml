@@ -1,0 +1,18 @@
+[package]
+name = "sessiond-power-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish = false
+description = "Client library for sessiond power management"
+
+[dependencies]
+hyprwire-protocols-sessiond = { path = "../../hyprwire-protocols-sessiond", version = "0.2.0" }
+anyhow = "1.0.104"
+hyprwire = "0.5.1"
+
+[lints]
+workspace = true

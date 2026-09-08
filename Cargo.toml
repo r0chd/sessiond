@@ -7,6 +7,9 @@ members = [
   "libsession-sys",
   "pam",
   "hyprwire-protocols-sessiond",
+  "sessiond-power/daemon",
+  "sessiond-power/client",
+  "sessiond-power/actions/*",
 ]
 resolver = "3"
 
@@ -22,6 +25,7 @@ codegen-units = 1
 panic = "abort"
 
 [workspace.package]
+version = "0.1.0"
 keywords = []
 categories = []
 edition = "2024"

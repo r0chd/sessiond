@@ -93,6 +93,9 @@
           sessiond-uaccess = pkgs.callPackage ./nix/sessiond-uaccess/package.nix {
             inherit rustPlatform;
           };
+          sessiond-power = pkgs.callPackage ./nix/sessiond-power/package.nix {
+            inherit rustPlatform;
+          };
           default = self.packages.${pkgs.stdenv.hostPlatform.system}.sessiond;
         }
       );
@@ -102,11 +105,12 @@
         default = self.nixosModules.sessiond;
       };
 
-      finixModules = {
+        finixModules = {
         sessiond = import ./nix/sessiond/finix.nix;
         sessiond-backlight = import ./nix/sessiond-backlight/finix.nix;
         sessiond-hooks = import ./nix/sessiond-hooks/finix.nix;
         sessiond-uaccess = import ./nix/sessiond-uaccess/finix.nix;
+        sessiond-power = import ./nix/sessiond-power/finix.nix;
         default = self.finixModules.sessiond;
       };
 
@@ -136,6 +140,7 @@
                 sessiond-backlight
                 sessiond-hooks
                 sessiond-uaccess
+                sessiond-power
                 ;
             };
             modules = [
@@ -159,6 +164,7 @@
                 sessiond-backlight
                 sessiond-hooks
                 sessiond-uaccess
+                sessiond-power
                 ;
             };
             modules = [
@@ -167,6 +173,7 @@
               ./nix/sessiond-backlight/finix.nix
               ./nix/sessiond-hooks/finix.nix
               ./nix/sessiond-uaccess/finix.nix
+              ./nix/sessiond-power/finix.nix
               ./nix/internal/finix-vm.nix
               "${finix.outPath}/modules/virtualisation/qemu.nix"
             ]

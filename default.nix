@@ -35,6 +35,9 @@ let
       sessiond-uaccess = pkgs.callPackage ./nix/sessiond-uaccess/package.nix {
         inherit rustPlatform;
       };
+      sessiond-power = pkgs.callPackage ./nix/sessiond-power/package.nix {
+        inherit rustPlatform;
+      };
     };
 in
 {
@@ -56,6 +59,7 @@ in
     sessiond-backlight = import ./nix/sessiond-backlight/finix.nix;
     sessiond-hooks = import ./nix/sessiond-hooks/finix.nix;
     sessiond-uaccess = import ./nix/sessiond-uaccess/finix.nix;
+    sessiond-power = import ./nix/sessiond-power/finix.nix;
   };
 
   formatter = import ./nix/internal/formatter.nix { inherit pkgs rustToolchain; };

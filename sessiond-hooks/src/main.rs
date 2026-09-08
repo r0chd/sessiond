@@ -83,7 +83,7 @@ impl ManagedSession {
                 "#,
             )
             .arg("sessiond-hook");
-        for (key, value) in self.envs.iter() {
+        for (key, value) in &self.envs {
             cmd.arg(format!("{key}={value}"));
         }
         cmd.arg(&command.exec);
@@ -91,7 +91,7 @@ impl ManagedSession {
             cmd.arg(arg);
         }
         cmd.uid(self.uid).gid(user.primary_group_id());
-        for (key, value) in self.envs.iter() {
+        for (key, value) in &self.envs {
             cmd.env(key, value);
         }
 
@@ -118,7 +118,10 @@ impl ManagedSession {
         log::info!(exec:? = command.exec, pid = child.id(),
             session_id = self.id, uid = self.uid; "spawned hook");
 
-        let Some(pid) = rustix::process::Pid::from_raw(child.id() as i32) else {
+        let Some(pid) = i32::try_from(child.id())
+            .ok()
+            .and_then(rustix::process::Pid::from_raw)
+        else {
             log::error!(pid = child.id(); "cannot supervise hook with invalid pid");
             let _ = child.kill();
             let _ = child.wait();
@@ -177,7 +180,7 @@ impl ManagedSession {
                         if let Err(error) =
                             state
                                 .loop_handle
-                                .insert_source(restart, move |_, _, state| {
+                                .insert_source(restart, move |_, (), state| {
                                     if let Some(session) = state
                                         .managed_sessions
                                         .iter_mut()
@@ -370,9 +373,8 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for SessiondHo
 
                 self.create_managed_session(uid);
             }
-            session_core_manager::Event::Done => {}
             session_core_manager::Event::Error { code, message } => {
-                log::error!(code:? = code, message:% = message; "session_core_manager error")
+                log::error!(code:? = code, message:% = message; "session_core_manager error");
             }
             _ => {}
         }
@@ -400,7 +402,7 @@ impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for SessiondHooks {
                     timer::Timer::from_duration(time::Duration::from_secs(5)),
                     {
                         let object = object.clone();
-                        move |_, _, state| {
+                        move |_, (), state| {
                             let Some(user) = state.users.iter().find(|user| user.object == object)
                             else {
                                 return timer::TimeoutAction::Drop;

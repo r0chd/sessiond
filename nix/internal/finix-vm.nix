@@ -2,10 +2,12 @@
   lib,
   pkgs,
   config,
+  modules,
   sessiond,
   sessiond-hooks,
   sessiond-uaccess,
   sessiond-backlight,
+  sessiond-power,
   ...
 }:
 let
@@ -34,6 +36,7 @@ let
   };
 in
 {
+  imports = [ modules.zzz ];
   services = {
     polkit = {
       enable = true;
@@ -63,16 +66,33 @@ in
     sessiond-uaccess = {
       enable = true;
       package = sessiond-uaccess;
-      logLevel = "debug";
+      debug = true;
     };
     sessiond-backlight = {
       enable = true;
       package = sessiond-backlight;
-      logLevel = "debug";
+      debug = true;
+    };
+    sessiond-power = {
+      enable = true;
+      package = sessiond-power;
+      debug = true;
+      settings = {
+        reboot = [ "/run/current-system/sw/bin/reboot" ];
+        poweroff = [ "/run/current-system/sw/bin/poweroff" ];
+        hibernate = [
+          "${config.programs.zzz.package}/bin/zzz"
+          "-Z"
+        ];
+        suspend = [
+          "${config.programs.zzz.package}/bin/zzz"
+          "-z"
+        ];
+      };
     };
     sessiond-hooks = {
       package = sessiond-hooks;
-      logLevel = "debug";
+      debug = true;
       hooks.dinit.settings = {
         on_start = {
           exec = lib.getExe' pkgs.dinit "dinit";

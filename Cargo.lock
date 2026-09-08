@@ -1417,6 +1417,63 @@ dependencies = [
 ]
 
 [[package]]
+name = "sessiond-hibernatectl"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "sessiond-power-client",
+]
+
+[[package]]
+name = "sessiond-power"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "calloop",
+ "clap",
+ "env_logger",
+ "hyprwire",
+ "hyprwire-protocols-sessiond",
+ "log",
+ "serde",
+ "syslog",
+ "toml",
+]
+
+[[package]]
+name = "sessiond-power-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "hyprwire",
+ "hyprwire-protocols-sessiond",
+]
+
+[[package]]
+name = "sessiond-poweroffctl"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "sessiond-power-client",
+]
+
+[[package]]
+name = "sessiond-rebootctl"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "sessiond-power-client",
+]
+
+[[package]]
+name = "sessiond-suspendctl"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "sessiond-power-client",
+]
+
+[[package]]
 name = "signal-hook-registry"
 version = "1.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"

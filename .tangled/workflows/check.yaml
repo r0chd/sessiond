@@ -13,6 +13,7 @@ dependencies:
     - linux-pam
     - pkg-config
     - udev
+    - libudev-zero
     - acl
 
 steps:

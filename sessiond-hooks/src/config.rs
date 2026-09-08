@@ -44,10 +44,10 @@ impl Command {
                 return home.to_owned();
             }
 
-            match value.strip_prefix("~/") {
-                Some(relative) => format!("{}/{relative}", home.trim_end_matches('/')),
-                None => value.to_owned(),
-            }
+            value.strip_prefix("~/").map_or_else(
+                || value.to_owned(),
+                |relative| format!("{}/{relative}", home.trim_end_matches('/')),
+            )
         }
 
         Self {

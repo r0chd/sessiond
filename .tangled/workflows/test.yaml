@@ -14,6 +14,7 @@ dependencies:
     - pkg-config
     - nix
     - udev
+    - libudev-zero
     - acl
 
 steps:
@@ -26,6 +27,12 @@ steps:
       cargo test --manifest-path sessiond-backlight/Cargo.toml
       cargo test --manifest-path sessiond-hooks/Cargo.toml
       cargo test --manifest-path sessiond-uaccess/Cargo.toml
+      cargo test --package sessiond-power
+      cargo test --package sessiond-power-client
+      cargo test --package sessiond-rebootctl
+      cargo test --package sessiond-poweroffctl
+      cargo test --package sessiond-suspendctl
+      cargo test --package sessiond-hibernatectl
 
   - name: finix vm tests
     command: |

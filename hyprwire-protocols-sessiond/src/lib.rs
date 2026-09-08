@@ -25,6 +25,7 @@ macro_rules! define_protocol_modules {
 }
 
 define_protocol_modules!(server => {
+    session_power => { v1 => session_power_v1 => "session_power_v1" },
     session_core => { v1 => session_core_v1 => "session_core_v1" },
     session_inhibit => { v1 => session_inhibit_v1 => "session_inhibit_v1" },
     session_management => {
@@ -35,6 +36,7 @@ define_protocol_modules!(server => {
 });
 
 define_protocol_modules!(client => {
+    session_power => { v1 => session_power_v1 => "session_power_v1" },
     session_core => { v1 => session_core_v1 => "session_core_v1" },
     session_inhibit => { v1 => session_inhibit_v1 => "session_inhibit_v1" },
     session_management => {

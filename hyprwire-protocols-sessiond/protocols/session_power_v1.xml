@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="session_power_v1" version="1">
+ <copyright>
+  Copyright (c) 2026 Oskar Rochowiak
+
+  Permission is hereby granted, free of charge, to any person obtaining a
+  copy of this software and associated documentation files (the "Software"),
+  to deal in the Software without restriction, including without limitation
+  the rights to use, copy, modify, merge, publish, distribute, sublicense,
+  and/or sell copies of the Software, and to permit persons to whom the
+  Software is furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in
+  all copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+ </copyright>
+
+ <object name="session_power_manager" version="1">
+  <description summary="system power control">
+   Interface for querying and requesting system power operations. A client
+   may use the per-operation capability events to present the operations that
+   are currently available. These events are advisory: the server validates
+   every request again when it is received. The result of each operation is
+   reported on this object with done or error.
+  </description>
+  <s2c name="can_reboot">
+   <description summary="client may reboot the system">
+    Non-zero if reboot is configured, this client may request it without
+    first closing other users' sessions, and no shutdown inhibitor blocks the
+    request. Sent when the object is created and whenever availability changes.
+   </description>
+   <arg name="can_reboot" type="uint" summary="non-zero if reboot is currently allowed"/>
+  </s2c>
+  <s2c name="can_poweroff">
+   <description summary="client may power off the system">
+    Non-zero if poweroff is configured, this client may request it without
+    first closing other users' sessions, and no shutdown inhibitor blocks the
+    request. Sent when the object is created and whenever availability changes.
+   </description>
+   <arg name="can_poweroff" type="uint" summary="non-zero if poweroff is currently allowed"/>
+  </s2c>
+  <s2c name="can_suspend">
+   <description summary="client may suspend the system">
+    Non-zero if suspend is configured, this client may request it without first
+    closing other users' sessions, and no sleep inhibitor blocks the request.
+    Sent when the object is created and whenever availability changes.
+   </description>
+   <arg name="can_suspend" type="uint" summary="non-zero if suspend is currently allowed"/>
+  </s2c>
+  <s2c name="can_hibernate">
+   <description summary="client may hibernate the system">
+    Non-zero if hibernate is configured, this client may request it without
+    first closing other users' sessions, and no sleep inhibitor blocks the
+    request. Sent when the object is created and whenever availability changes.
+   </description>
+   <arg name="can_hibernate" type="uint" summary="non-zero if hibernate is currently allowed"/>
+  </s2c>
+  <s2c name="done">
+   <description summary="last operation completed successfully"/>
+  </s2c>
+  <s2c name="error">
+   <description summary="last operation failed"/>
+   <arg name="code" type="enum" interface="error_code" summary="error kind"/>
+   <arg name="message" type="varchar" summary="human-readable error detail"/>
+  </s2c>
+  <c2s name="reboot">
+   <description summary="reboot the system"/>
+  </c2s>
+  <c2s name="poweroff">
+   <description summary="power off the system"/>
+  </c2s>
+  <c2s name="suspend">
+   <description summary="suspend the system"/>
+  </c2s>
+  <c2s name="hibernate">
+   <description summary="hibernate the system"/>
+  </c2s>
+  <c2s name="destroy" destructor="true"></c2s>
+ </object>
+
+ <enum name="error_code">
+  <value idx="0" name="permission_denied" summary="power operation is not currently allowed"/>
+  <value idx="1" name="io" summary="power command failed or is not configured"/>
+ </enum>
+</protocol>

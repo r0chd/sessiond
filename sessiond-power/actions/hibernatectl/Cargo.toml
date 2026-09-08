@@ -1,0 +1,17 @@
+[package]
+name = "sessiond-hibernatectl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish = false
+description = "Request hibernate through sessiond-power"
+
+[dependencies]
+anyhow = "1.0.104"
+sessiond-power-client = { path = "../../client" }
+
+[lints]
+workspace = true

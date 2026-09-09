@@ -105,7 +105,7 @@
         default = self.nixosModules.sessiond;
       };
 
-        finixModules = {
+      finixModules = {
         sessiond = import ./nix/sessiond/finix.nix;
         sessiond-backlight = import ./nix/sessiond-backlight/finix.nix;
         sessiond-hooks = import ./nix/sessiond-hooks/finix.nix;

@@ -9,6 +9,36 @@ use zbus::zvariant::OwnedObjectPath;
 trait ConsoleKitManager {
     #[zbus(name = "GetCurrentSession")]
     fn get_current_session(&self) -> zbus::Result<OwnedObjectPath>;
+
+    #[zbus(name = "PowerOff")]
+    fn power_off(&self, policykit_interactivity: bool) -> zbus::Result<()>;
+
+    #[zbus(name = "Reboot")]
+    fn reboot(&self, policykit_interactivity: bool) -> zbus::Result<()>;
+
+    #[zbus(name = "Suspend")]
+    fn suspend(&self, policykit_interactivity: bool) -> zbus::Result<()>;
+
+    #[zbus(name = "Hibernate")]
+    fn hibernate(&self, policykit_interactivity: bool) -> zbus::Result<()>;
+
+    #[zbus(name = "HybridSleep")]
+    fn hybrid_sleep(&self, policykit_interactivity: bool) -> zbus::Result<()>;
+
+    #[zbus(name = "CanPowerOff")]
+    fn can_power_off(&self) -> zbus::Result<String>;
+
+    #[zbus(name = "CanReboot")]
+    fn can_reboot(&self) -> zbus::Result<String>;
+
+    #[zbus(name = "CanSuspend")]
+    fn can_suspend(&self) -> zbus::Result<String>;
+
+    #[zbus(name = "CanHibernate")]
+    fn can_hibernate(&self) -> zbus::Result<String>;
+
+    #[zbus(name = "CanHybridSleep")]
+    fn can_hybrid_sleep(&self) -> zbus::Result<String>;
 }
 
 #[zbus::proxy(
@@ -49,5 +79,66 @@ impl super::Backend for ConsoleKit {
             .ok()?;
 
         session.get_id().ok()
+    }
+
+    fn power_off(&mut self) -> Result<(), super::Error> {
+        self.manager
+            .power_off(true)
+            .map_err(|_| super::Error::Failed)
+    }
+
+    fn can_power_off(&mut self) -> Result<bool, super::Error> {
+        self.manager
+            .can_power_off()
+            .map(|result| result == "yes" || result == "challenge")
+            .map_err(|_| super::Error::Failed)
+    }
+
+    fn reboot(&mut self) -> Result<(), super::Error> {
+        self.manager.reboot(true).map_err(|_| super::Error::Failed)
+    }
+
+    fn can_reboot(&mut self) -> Result<bool, super::Error> {
+        self.manager
+            .can_reboot()
+            .map(|result| result == "yes" || result == "challenge")
+            .map_err(|_| super::Error::Failed)
+    }
+
+    fn suspend(&mut self) -> Result<(), super::Error> {
+        self.manager.suspend(true).map_err(|_| super::Error::Failed)
+    }
+
+    fn can_suspend(&mut self) -> Result<bool, super::Error> {
+        self.manager
+            .can_suspend()
+            .map(|result| result == "yes" || result == "challenge")
+            .map_err(|_| super::Error::Failed)
+    }
+
+    fn hibernate(&mut self) -> Result<(), super::Error> {
+        self.manager
+            .hibernate(true)
+            .map_err(|_| super::Error::Failed)
+    }
+
+    fn can_hibernate(&mut self) -> Result<bool, super::Error> {
+        self.manager
+            .can_hibernate()
+            .map(|result| result == "yes" || result == "challenge")
+            .map_err(|_| super::Error::Failed)
+    }
+
+    fn hybrid_sleep(&mut self) -> Result<(), super::Error> {
+        self.manager
+            .hybrid_sleep(true)
+            .map_err(|_| super::Error::Failed)
+    }
+
+    fn can_hybrid_sleep(&mut self) -> Result<bool, super::Error> {
+        self.manager
+            .can_hybrid_sleep()
+            .map(|result| result == "yes" || result == "challenge")
+            .map_err(|_| super::Error::Failed)
     }
 }

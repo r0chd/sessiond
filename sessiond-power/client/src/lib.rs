@@ -12,6 +12,7 @@ pub enum Action {
     Poweroff,
     Suspend,
     Hibernate,
+    HybridSleep,
 }
 
 #[derive(Default)]
@@ -60,6 +61,7 @@ pub fn run(action: Action) -> anyhow::Result<()> {
         Action::Poweroff => manager.send_poweroff(),
         Action::Suspend => manager.send_suspend(),
         Action::Hibernate => manager.send_hibernate(),
+        Action::HybridSleep => manager.send_hybrid_sleep(),
     }
 
     while !state.done {

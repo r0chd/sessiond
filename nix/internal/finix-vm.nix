@@ -88,6 +88,10 @@ in
           "${config.programs.zzz.package}/bin/zzz"
           "-z"
         ];
+        hybrid-sleep = [
+          "${config.programs.zzz.package}/bin/zzz"
+          "-H"
+        ];
       };
     };
     sessiond-hooks = {

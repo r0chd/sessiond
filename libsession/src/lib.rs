@@ -22,6 +22,38 @@ pub struct libsession_context {
     _private: [u8; 0],
 }
 
+#[repr(C)]
+pub enum LibsessionStatus {
+    Ok = 0,
+    Unsupported = 1,
+    Failed = 2,
+}
+
+#[repr(C)]
+pub enum LibsessionCapability {
+    Unavailable = 0,
+    Available = 1,
+    Unsupported = 2,
+    Failed = 3,
+}
+
+fn status(result: Result<(), backend::Error>) -> LibsessionStatus {
+    match result {
+        Ok(()) => LibsessionStatus::Ok,
+        Err(backend::Error::Unsupported) => LibsessionStatus::Unsupported,
+        Err(backend::Error::Failed) => LibsessionStatus::Failed,
+    }
+}
+
+fn capability(result: Result<bool, backend::Error>) -> LibsessionCapability {
+    match result {
+        Ok(true) => LibsessionCapability::Available,
+        Ok(false) => LibsessionCapability::Unavailable,
+        Err(backend::Error::Unsupported) => LibsessionCapability::Unsupported,
+        Err(backend::Error::Failed) => LibsessionCapability::Failed,
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn libsession_new() -> *mut libsession_context {
     #[cfg(feature = "sessiond")]
@@ -104,4 +136,116 @@ pub extern "C" fn libsession_session_id_free(id: *mut libsession_session_id) {
     unsafe {
         drop(Box::from_raw(id.cast::<ffi::CString>()));
     }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn libsession_power_off(ctx: *mut libsession_context) -> LibsessionStatus {
+    if ctx.is_null() {
+        return LibsessionStatus::Failed;
+    }
+
+    let libsession = unsafe { &mut *ctx.cast::<Libsession>() };
+
+    status(libsession.backend.power_off())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn libsession_can_power_off(ctx: *mut libsession_context) -> LibsessionCapability {
+    if ctx.is_null() {
+        return LibsessionCapability::Failed;
+    }
+
+    let libsession = unsafe { &mut *ctx.cast::<Libsession>() };
+
+    capability(libsession.backend.can_power_off())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn libsession_reboot(ctx: *mut libsession_context) -> LibsessionStatus {
+    if ctx.is_null() {
+        return LibsessionStatus::Failed;
+    }
+
+    let libsession = unsafe { &mut *ctx.cast::<Libsession>() };
+
+    status(libsession.backend.reboot())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn libsession_can_reboot(ctx: *mut libsession_context) -> LibsessionCapability {
+    if ctx.is_null() {
+        return LibsessionCapability::Failed;
+    }
+
+    let libsession = unsafe { &mut *ctx.cast::<Libsession>() };
+
+    capability(libsession.backend.can_reboot())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn libsession_suspend(ctx: *mut libsession_context) -> LibsessionStatus {
+    if ctx.is_null() {
+        return LibsessionStatus::Failed;
+    }
+
+    let libsession = unsafe { &mut *ctx.cast::<Libsession>() };
+
+    status(libsession.backend.suspend())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn libsession_can_suspend(ctx: *mut libsession_context) -> LibsessionCapability {
+    if ctx.is_null() {
+        return LibsessionCapability::Failed;
+    }
+
+    let libsession = unsafe { &mut *ctx.cast::<Libsession>() };
+
+    capability(libsession.backend.can_suspend())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn libsession_hibernate(ctx: *mut libsession_context) -> LibsessionStatus {
+    if ctx.is_null() {
+        return LibsessionStatus::Failed;
+    }
+
+    let libsession = unsafe { &mut *ctx.cast::<Libsession>() };
+
+    status(libsession.backend.hibernate())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn libsession_can_hibernate(ctx: *mut libsession_context) -> LibsessionCapability {
+    if ctx.is_null() {
+        return LibsessionCapability::Failed;
+    }
+
+    let libsession = unsafe { &mut *ctx.cast::<Libsession>() };
+
+    capability(libsession.backend.can_hibernate())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn libsession_hybrid_sleep(ctx: *mut libsession_context) -> LibsessionStatus {
+    if ctx.is_null() {
+        return LibsessionStatus::Failed;
+    }
+
+    let libsession = unsafe { &mut *ctx.cast::<Libsession>() };
+
+    status(libsession.backend.hybrid_sleep())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn libsession_can_hybrid_sleep(
+    ctx: *mut libsession_context,
+) -> LibsessionCapability {
+    if ctx.is_null() {
+        return LibsessionCapability::Failed;
+    }
+
+    let libsession = unsafe { &mut *ctx.cast::<Libsession>() };
+
+    capability(libsession.backend.can_hybrid_sleep())
 }

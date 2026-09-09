@@ -62,6 +62,14 @@
    </description>
    <arg name="can_hibernate" type="uint" summary="non-zero if hibernate is currently allowed"/>
   </s2c>
+  <s2c name="can_hybrid_sleep">
+   <description summary="client may hybrid sleep the system">
+    Non-zero if hybrid sleep is configured, this client may request it without
+    first closing other users' sessions, and no sleep inhibitor blocks the
+    request. Sent when the object is created and whenever availability changes.
+   </description>
+   <arg name="can_hybrid_sleep" type="uint" summary="non-zero if hybrid sleep is currently allowed"/>
+  </s2c>
   <s2c name="done">
    <description summary="last operation completed successfully"/>
   </s2c>
@@ -81,6 +89,9 @@
   </c2s>
   <c2s name="hibernate">
    <description summary="hibernate the system"/>
+  </c2s>
+  <c2s name="hybrid_sleep">
+   <description summary="hybrid sleep the system"/>
   </c2s>
   <c2s name="destroy" destructor="true"></c2s>
  </object>

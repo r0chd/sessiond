@@ -1425,6 +1425,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sessiond-hybrid-sleepctl"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "sessiond-power-client",
+]
+
+[[package]]
 name = "sessiond-power"
 version = "0.1.0"
 dependencies = [

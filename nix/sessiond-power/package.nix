@@ -11,8 +11,14 @@ let
     "sessiond-poweroffctl"
     "sessiond-suspendctl"
     "sessiond-hibernatectl"
+    "sessiond-hybrid-sleepctl"
   ];
-  cargoPackageFlags = builtins.concatLists (map (package: [ "--package" package ]) cargoPackages);
+  cargoPackageFlags = builtins.concatLists (
+    map (package: [
+      "--package"
+      package
+    ]) cargoPackages
+  );
 in
 rustPlatform.buildRustPackage {
   pname = cargoToml.package.name;

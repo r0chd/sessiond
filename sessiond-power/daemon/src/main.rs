@@ -56,6 +56,7 @@ enum PowerAction {
     Poweroff,
     Suspend,
     Hibernate,
+    HybridSleep,
 }
 
 impl PowerAction {
@@ -65,6 +66,7 @@ impl PowerAction {
             Self::Poweroff => "poweroff",
             Self::Suspend => "suspend",
             Self::Hibernate => "hibernate",
+            Self::HybridSleep => "hybrid sleep",
         }
     }
 }
@@ -146,6 +148,7 @@ impl SessiondPower {
             PowerAction::Poweroff => &self.config.poweroff,
             PowerAction::Suspend => &self.config.suspend,
             PowerAction::Hibernate => &self.config.hibernate,
+            PowerAction::HybridSleep => &self.config.hybrid_sleep,
         }
     }
 
@@ -163,6 +166,7 @@ impl SessiondPower {
         manager.send_can_poweroff(u32::from(allowed(PowerAction::Poweroff)));
         manager.send_can_suspend(u32::from(allowed(PowerAction::Suspend)));
         manager.send_can_hibernate(u32::from(allowed(PowerAction::Hibernate)));
+        manager.send_can_hybrid_sleep(u32::from(allowed(PowerAction::HybridSleep)));
     }
 
     fn notify_capabilities(&mut self) {
@@ -203,7 +207,9 @@ const fn inhibitor_blocks(
 ) -> bool {
     let action_bit = match action {
         PowerAction::Reboot | PowerAction::Poweroff => session_inhibit_v1::What::Shutdown as u32,
-        PowerAction::Suspend | PowerAction::Hibernate => session_inhibit_v1::What::Sleep as u32,
+        PowerAction::Suspend | PowerAction::Hibernate | PowerAction::HybridSleep => {
+            session_inhibit_v1::What::Sleep as u32
+        }
     };
     if !active || what & action_bit == 0 {
         return false;
@@ -236,6 +242,7 @@ impl hyprwire::Dispatch<session_power_manager::SessionPowerManager> for Sessiond
             session_power_manager::Event::Poweroff => Some(PowerAction::Poweroff),
             session_power_manager::Event::Suspend => Some(PowerAction::Suspend),
             session_power_manager::Event::Hibernate => Some(PowerAction::Hibernate),
+            session_power_manager::Event::HybridSleep => Some(PowerAction::HybridSleep),
             session_power_manager::Event::Destroy => {
                 self.managers.retain(|candidate| candidate != object);
                 None

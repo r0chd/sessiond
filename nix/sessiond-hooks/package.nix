@@ -9,11 +9,21 @@ rustPlatform.buildRustPackage {
   pname = cargoToml.package.name;
   inherit (cargoToml.package) version;
 
-  cargoLock.lockFile = ../../sessiond-hooks/Cargo.lock;
+  cargoLock = {
+    lockFile = ../../Cargo.lock;
+    outputHashes = {
+      "pamsm-0.5.5" = "sha256-wmSKEVSgd36kwa9ky4H9+ubnqUUwyUPw/OjK8v3wGbk=";
+    };
+  };
 
-  buildAndTestSubdir = "sessiond-hooks";
-
-  postUnpack = "cp source/sessiond-hooks/Cargo.lock source/Cargo.lock";
+  cargoBuildFlags = [
+    "--package"
+    cargoToml.package.name
+  ];
+  cargoTestFlags = [
+    "--package"
+    cargoToml.package.name
+  ];
 
   src = lib.cleanSourceWith {
     src = ../..;

@@ -23,23 +23,5 @@ syslog = "7.0.0"
 uzers = "0.12.2"
 serde = { version = "1.0.228", features = ["derive", "rc"] }
 toml = "1.1.2"
-[workspace]
-
 [lints]
 workspace = true
-
-[workspace.lints.clippy]
-all = { level = "warn", priority = -1 }
-pedantic = { level = "warn", priority = -1 }
-nursery = { level = "warn", priority = -1 }
-dbg_macro = "warn"
-expect_used = "warn"
-panic = "warn"
-todo = "warn"
-unimplemented = "warn"
-unwrap_used = "warn"
-too_many_lines = "allow"
-similar_names = "allow"
-needless_pass_by_value = "allow"
-type_complexity = "allow"
-too_many_arguments = "allow"

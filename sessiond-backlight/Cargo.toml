@@ -20,23 +20,5 @@ hyprwire = "0.5.1"
 hyprwire-protocols-sessiond = { path = "../hyprwire-protocols-sessiond", version = "0.2.0" }
 calloop = "0.14.4"
 
-[workspace]
-
 [lints]
 workspace = true
-
-[workspace.lints.clippy]
-all = { level = "warn", priority = -1 }
-pedantic = { level = "warn", priority = -1 }
-nursery = { level = "warn", priority = -1 }
-dbg_macro = "warn"
-expect_used = "warn"
-panic = "warn"
-todo = "warn"
-unimplemented = "warn"
-unwrap_used = "warn"
-too_many_lines = "allow"
-similar_names = "allow"
-needless_pass_by_value = "allow"
-type_complexity = "allow"
-too_many_arguments = "allow"

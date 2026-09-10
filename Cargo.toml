@@ -7,9 +7,12 @@ members = [
   "libsession-sys",
   "pam",
   "hyprwire-protocols-sessiond",
+  "sessiond-backlight",
+  "sessiond-hooks",
   "sessiond-power/daemon",
   "sessiond-power/client",
   "sessiond-power/actions/*",
+  "sessiond-uaccess",
 ]
 resolver = "3"
 

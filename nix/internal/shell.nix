@@ -17,6 +17,8 @@ pkgs.mkShell {
       pkg-config
       udev
       acl
+      mdbook
+      mdbook-plugins
       ;
   };
 

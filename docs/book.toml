@@ -1,0 +1,12 @@
+[book]
+authors = ["Oskar Rochowiak"]
+language = "en"
+src = "src"
+title = "sessiond"
+
+[preprocessor.tabs]
+optional = true
+
+[output.html]
+additional-css = ["theme/tabs.css"]
+additional-js = ["theme/tabs.js"]

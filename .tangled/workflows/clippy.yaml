@@ -6,13 +6,15 @@ when:
 
 engine: nixery
 
+environment:
+  PKG_CONFIG_PATH: /lib/pkgconfig:/share/pkgconfig
+
 dependencies:
   nixpkgs:
     - rustup
     - gcc
     - linux-pam
     - pkg-config
-    - udev
     - libudev-zero
     - acl
 
@@ -26,18 +28,14 @@ steps:
       cargo build -p libsession
 
       mkdir -p target/pkgconfig
-      cat > target/pkgconfig/libsession.pc <<EOF
-      prefix=$(pwd)
-      libdir=\${prefix}/target/debug
-      includedir=\${prefix}/libsession/include
-
-      Name: libsession
-      Description: C ABI session management client library
-      Version: 0.1.0
-      Libs: -L\${libdir} -lsession
-      Cflags: -I\${includedir}
-      EOF
+      sed \
+        -e "s|@PREFIX@|$(pwd)|" \
+        -e "s|@INCLUDE@|$(pwd)/libsession/include|" \
+        -e "s|@LIBDIR@|$(pwd)/target/debug|" \
+        -e 's|@LIBSESSION_VERSION@|0.0.0|' \
+        libsession/libsession.pc.in > target/pkgconfig/libsession.pc
       export PKG_CONFIG_PATH="$(pwd)/target/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+      pkg-config --libs --cflags libudev
 
       cargo clippy --workspace --all-features -- -D warnings
       cargo clippy --manifest-path sessiond-backlight/Cargo.toml -- -D warnings

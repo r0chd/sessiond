@@ -10,9 +10,6 @@ use zbus::blocking::connection;
 use zbus::blocking::fdo::DBusProxy;
 use zbus::{blocking, fdo, interface, message, names, zvariant};
 
-#[derive(Resource)]
-pub struct ConsoleKit(pub Server);
-
 const BUS_NAME: &str = "org.freedesktop.ConsoleKit";
 const MANAGER_PATH: &str = "/org/freedesktop/ConsoleKit/Manager";
 const DATABASE_DIR: &str = "/var/run/ConsoleKit";
@@ -28,11 +25,12 @@ pub struct SessionInfo {
     pub active: session_core_v1::ActiveState,
 }
 
-pub struct Server {
+#[derive(Resource)]
+pub struct ConsoleKit {
     sender: mpsc::Sender<Command>,
 }
 
-impl Server {
+impl ConsoleKit {
     pub fn start() -> Self {
         let (sender, receiver) = mpsc::channel();
         if let Err(err) = thread::Builder::new()

@@ -31,11 +31,5 @@ in
         RuntimeDirectoryPreserve = "restart";
       };
     };
-
-    security.pam.services.login.rules.session.sessiond = {
-      control = "optional";
-      modulePath = "${cfg.package}/lib/security/pam_sessiond.so";
-      order = 900;
-    };
   };
 }

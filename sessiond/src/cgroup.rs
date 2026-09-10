@@ -295,7 +295,7 @@ pub fn handle_cgroup_empty(
         session_registry.remove_entity(entity);
         commands.entity(entity).despawn();
         #[cfg(feature = "consolekit")]
-        console_kit.0.remove_session(*session_id);
+        console_kit.remove_session(*session_id);
 
         let Some(user) = uzers::get_user_by_uid(uid.0) else {
             return;

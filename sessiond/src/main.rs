@@ -125,7 +125,7 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
     world.insert_resource(state::StateWriter(state_path));
     world.insert_non_send(event_loop.handle());
     #[cfg(feature = "consolekit")]
-    world.insert_resource(consolekit::ConsoleKit(consolekit::Server::start()));
+    world.insert_resource(consolekit::ConsoleKit::start());
     world.add_observer(cgroup::handle_cgroup_empty);
 
     let mut schedule = Schedule::new(reconcile::Notify);

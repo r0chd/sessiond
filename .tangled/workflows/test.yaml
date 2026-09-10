@@ -6,6 +6,9 @@ when:
 
 engine: nixery
 
+environment:
+  PKG_CONFIG_PATH: /lib/pkgconfig:/share/pkgconfig
+
 dependencies:
   nixpkgs:
     - rustup
@@ -13,7 +16,6 @@ dependencies:
     - linux-pam
     - pkg-config
     - nix
-    - udev
     - libudev-zero
     - acl
 
@@ -22,6 +24,7 @@ steps:
     command: |
       rustup toolchain install stable
       rustup default stable
+      pkg-config --libs --cflags libudev
       cargo build --package sessiond
       cargo test --package sessiond
       cargo test --manifest-path sessiond-backlight/Cargo.toml

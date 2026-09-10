@@ -1,0 +1,40 @@
+.mdbook-tabs {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.25rem;
+    border-bottom: 1px solid var(--theme-popup-border);
+}
+
+.mdbook-tab {
+    background-color: var(--theme-hover);
+    color: var(--fg);
+    padding: 0.45rem 0.8rem;
+    cursor: pointer;
+    border: 1px solid var(--theme-popup-border);
+    border-bottom: none;
+    border-radius: 0.35rem 0.35rem 0 0;
+    font-size: var(--code-font-size);
+    line-height: 1.45;
+}
+
+.mdbook-tab.active {
+    background-color: var(--table-header-bg);
+    font-weight: bold;
+}
+
+.mdbook-tab-content {
+    padding: 0;
+}
+
+.mdbook-tab-content > pre {
+    margin-top: 0;
+    border-top-left-radius: 0;
+}
+
+.mdbook-tabs-container {
+    margin: 1.25rem 0;
+}
+
+.mdbook-tab-content table {
+    margin: unset;
+}

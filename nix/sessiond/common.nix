@@ -38,7 +38,7 @@ in
       type = format.type;
       default = { };
       description = ''
-        `sessiond` configuration. See [upstream documentation](https://tangled.org/r0chd.pl/sessiond/blob/master/docs/CONFIGURATION.md)
+        `sessiond` configuration. See [upstream documentation](https://tangled.org/r0chd.pl/sessiond/blob/master/docs/src/README.md)
         for additional details.
       '';
     };

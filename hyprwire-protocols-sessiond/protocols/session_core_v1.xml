@@ -80,10 +80,13 @@
    </description>
    <returns iface="session_core_session"/>
   </c2s>
-  <c2s name="get_session_by_uid">
-   <description summary="create a per-session info object by user ID">
-    Selects a session belonging to the user. Initial fields are followed by
-    done. If no matching session exists, destroyed is sent instead.
+  <c2s name="get_display_session_by_uid">
+   <description summary="create an info object for a user's preferred active session">
+    Selects the oldest active session of class user belonging to the given UID.
+    Age is determined by the session start timestamp, with the lowest session
+    ID breaking ties. The selected session may be graphical or a TTY session.
+    Initial fields are followed by done. If no matching session exists,
+    destroyed is sent instead.
    </description>
    <arg name="uid" type="uint" summary="user ID of the session to query"/>
    <returns iface="session_core_session"/>

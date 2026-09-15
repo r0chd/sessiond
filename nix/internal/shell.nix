@@ -2,6 +2,7 @@
   pkgs,
   rustToolchain,
   sessiond,
+  libsession,
 }:
 pkgs.mkShell {
   name = "sessiond-devshell";
@@ -19,11 +20,15 @@ pkgs.mkShell {
       acl
       mdbook
       mdbook-plugins
+      systemdLibs
       ;
   };
 
   nativeBuildInputs = [ pkgs.pkg-config ];
-  buildInputs = [ sessiond ];
+  buildInputs = [
+    sessiond
+    libsession
+  ];
 
   RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
 }

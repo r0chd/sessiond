@@ -2,9 +2,8 @@
 members = [
   "sessionctl",
   "sessiond",
-  "libsession",
-  "libsession-rs",
   "libsession-sys",
+  "libsession-rs",
   "pam",
   "hyprwire-protocols-sessiond",
   "sessiond-backlight",

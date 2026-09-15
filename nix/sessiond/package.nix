@@ -4,26 +4,15 @@
   linux-pam,
   pkg-config,
   rustPlatform,
-  withConsoleKit ? true,
-  libsessionBackends ? [
-    "sessiond"
-    "logind"
-    "consolekit"
-  ],
+  consolekitSupport ? true,
   installShellFiles,
 }:
 let
   cargoToml = fromTOML (builtins.readFile ../../sessiond/Cargo.toml);
 in
-rustPlatform.buildRustPackage (finalAttrs: {
+rustPlatform.buildRustPackage {
   pname = "sessiond";
   inherit (cargoToml.package) version;
-
-  outputs = [
-    "out"
-    "dev"
-    "lib"
-  ];
 
   cargoLock = {
     lockFile = ../../Cargo.lock;
@@ -43,7 +32,6 @@ rustPlatform.buildRustPackage (finalAttrs: {
         "sessionctl"
         "pam"
         "sessiond"
-        "libsession"
         "libsession-sys"
         "libsession-rs"
         "data"
@@ -71,36 +59,17 @@ rustPlatform.buildRustPackage (finalAttrs: {
     "-p"
     "pam"
     "-p"
-    "libsession"
-    "-p"
     "hyprwire-protocols-sessiond"
   ];
 
   buildNoDefaultFeatures = true;
   doCheck = false;
 
-  buildFeatures =
-    lib.optionals withConsoleKit [
-      "sessiond/consolekit"
-    ]
-    ++ map (backend: "libsession/${backend}") libsessionBackends;
+  buildFeatures = lib.optional consolekitSupport "sessiond/consolekit";
 
   postInstall = ''
     mkdir -p $out/lib/security
     mv $out/lib/libpam.so $out/lib/security/pam_sessiond.so
-    install -Dm644 libsession/include/libsession.h $out/include/libsession.h
-
-    mkdir -p $out/lib/pkgconfig
-    substitute libsession/libsession.pc.in $out/lib/pkgconfig/libsession.pc \
-      --replace-fail @PREFIX@ "$lib" \
-      --replace-fail @INCLUDE@ "$dev/include" \
-      --replace-fail @LIBDIR@ "$lib/lib" \
-      --replace-fail @LIBSESSION_VERSION@ "${finalAttrs.version}"
-
-    moveToOutput lib/libsession.so $lib
-    moveToOutput lib/libsession.a $lib
-    moveToOutput include $dev
-    moveToOutput lib/pkgconfig $dev
   ''
   + lib.optionalString (stdenv.buildPlatform.canExecute stdenv.hostPlatform) ''
     installShellCompletion --cmd sessionctl \
@@ -109,7 +78,7 @@ rustPlatform.buildRustPackage (finalAttrs: {
       --fish <($out/bin/sessionctl completions fish) \
       --nushell <($out/bin/sessionctl completions nushell)
   ''
-  + lib.optionalString withConsoleKit ''
+  + lib.optionalString consolekitSupport ''
     install -Dm644 data/dbus-1/system.d/org.freedesktop.ConsoleKit.conf \
       $out/share/dbus-1/system.d/org.freedesktop.ConsoleKit.conf
   '';
@@ -122,4 +91,4 @@ rustPlatform.buildRustPackage (finalAttrs: {
     maintainers = builtins.attrValues { inherit (lib.maintainers) r0chd; };
     platforms = lib.platforms.linux;
   };
-})
+}

@@ -26,6 +26,9 @@ let
         inherit rustPlatform;
       };
       sessiond = default;
+      libsession = pkgs.callPackage ./nix/libsession/package.nix {
+        inherit rustPlatform;
+      };
       sessiond-backlight = pkgs.callPackage ./nix/sessiond-backlight/package.nix {
         inherit rustPlatform;
       };
@@ -45,7 +48,7 @@ in
 
   shell = import ./nix/internal/shell.nix {
     inherit pkgs rustToolchain;
-    inherit (packages) sessiond;
+    inherit (packages) sessiond libsession;
   };
 
   nixosModules = rec {

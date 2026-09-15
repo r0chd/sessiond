@@ -49,8 +49,16 @@
               ];
             };
             sessiond = self.packages.${pkgs.stdenv.hostPlatform.system}.sessiond;
+            libsession = self.packages.${pkgs.stdenv.hostPlatform.system}.libsession;
           in
-          import ./nix/internal/shell.nix { inherit pkgs rustToolchain sessiond; };
+          import ./nix/internal/shell.nix {
+            inherit
+              pkgs
+              rustToolchain
+              sessiond
+              libsession
+              ;
+          };
       });
 
       apps.x86_64-linux.finix-vm =
@@ -82,6 +90,9 @@
         in
         {
           sessiond = pkgs.callPackage ./nix/sessiond/package.nix {
+            inherit rustPlatform;
+          };
+          libsession = pkgs.callPackage ./nix/libsession/package.nix {
             inherit rustPlatform;
           };
           sessiond-backlight = pkgs.callPackage ./nix/sessiond-backlight/package.nix {

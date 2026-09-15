@@ -10,7 +10,13 @@ description.workspace = true
 readme.workspace = true
 
 [dependencies]
-libsession-sys = { path = "../libsession-sys", version = "0.1.0" }
+libsession_sys = { package = "libsession-sys", path = "../libsession-sys", version = "0.0.0", default-features = false }
+
+[features]
+default = ["sessiond", "logind", "consolekit"]
+sessiond = ["libsession_sys/sessiond"]
+logind = ["libsession_sys/logind"]
+consolekit = ["libsession_sys/consolekit"]
 
 [lints]
 workspace = true

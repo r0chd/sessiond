@@ -1135,21 +1135,30 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                     creds: *object.client().creds(),
                 });
             }
-            session_core_manager::Event::GetSessionByUid {
+            session_core_manager::Event::GetDisplaySessionByUid {
                 session_core_session,
                 uid,
             } => {
-                if let Some(entity) = self
+                if let Some((_, session_id)) = self
                     .world
                     .resource::<SessionRegistry>()
                     .entities_by_uid(uid)
                     .into_iter()
-                    .find(|entity| {
+                    .filter(|entity| {
                         self.world
                             .get::<SessionClass>(*entity)
                             .is_some_and(|class| *class == SessionClass::User)
+                            && self
+                                .world
+                                .get::<ActiveState>(*entity)
+                                .is_some_and(|state| *state == ActiveState::ACTIVE)
                     })
-                    && let Some(session_id) = self.world.get::<SessionId>(entity).copied()
+                    .filter_map(|entity| {
+                        let timestamp = self.world.get::<Timestamp>(entity)?.0;
+                        let session_id = *self.world.get::<SessionId>(entity)?;
+                        Some((timestamp, session_id))
+                    })
+                    .min_by_key(|(timestamp, session_id)| (*timestamp, session_id.as_raw()))
                 {
                     self.world.write_message(AddObject {
                         session_id,
@@ -1159,7 +1168,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                     return;
                 }
 
-                log::warn!(uid; "get_session_by_uid requested for unknown session");
+                log::warn!(uid; "get_display_session_by_uid requested without an active user session");
                 session_core_session.send_destroyed();
             }
             session_core_manager::Event::GetUser {

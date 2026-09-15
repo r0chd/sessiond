@@ -364,8 +364,10 @@ pub fn initialize_lingering_users(
         .filter(|(_, config)| config.linger)
         .filter_map(|(name, config)| {
             let user = uzers::get_user_by_name(name.as_ref())?;
-            let uid = user.uid();
-            Some((uid, config.runtime_dir(uid)))
+            Some((
+                user.uid(),
+                config.runtime_dir(user.uid(), user.primary_group_id()),
+            ))
         })
         .collect::<Vec<_>>();
     for (uid, runtime_dir) in lingering_users {

@@ -255,6 +255,7 @@ pub fn handle_cgroup_empty(
             Entity,
             &session::SessionId,
             &session::Uid,
+            &session::Gid,
             &session::Username,
             &session::Objects,
         ),
@@ -277,9 +278,9 @@ pub fn handle_cgroup_empty(
         .get(&empty.uid.0)
         .is_some_and(|&entity| lingering_users.contains(entity));
 
-    if let Some((entity, session_id, uid, username, objects)) = sessions
+    if let Some((entity, session_id, uid, gid, username, objects)) = sessions
         .iter()
-        .find(|(_, id, _, _, _)| **id == empty.session_id)
+        .find(|(_, id, _, _, _, _)| **id == empty.session_id)
     {
         log::info!(
             session_id = session_id.as_raw(),
@@ -310,7 +311,7 @@ pub fn handle_cgroup_empty(
                     .users
                     .get(&sync::Arc::from(user.name().to_string_lossy()))
                     .unwrap_or(&default_config)
-                    .runtime_dir(uid.0),
+                    .runtime_dir(uid.0, gid.0),
             )
         {
             log::error!(uid = uid.0, error = e.to_string().as_str(); "failed to remove runtime dir");

@@ -86,7 +86,6 @@ impl PamServiceModule for Pam {
                         (name == "XDG_VTNR").then(|| value.parse().ok()).flatten()
                     })
                 })
-                .or_else(|| env::var("XDG_VTNR").ok().and_then(|vt| vt.parse().ok()))
                 .unwrap_or(0);
 
             let remote_host = pamh

@@ -20,6 +20,7 @@ pub struct State {
 #[serde(rename_all = "kebab-case")]
 pub struct Session {
     pub uid: u32,
+    pub gid: u32,
     pub username: sync::Arc<str>,
     #[serde(default)]
     pub class: String,
@@ -72,6 +73,7 @@ pub fn write_state(
         (
             &session::SessionId,
             &session::Uid,
+            &session::Gid,
             &session::Username,
             &session::SessionClass,
             Option<&session::Vt>,
@@ -90,6 +92,7 @@ pub fn write_state(
             Or<(
                 Added<session::Session>,
                 Changed<session::Uid>,
+                Changed<session::Gid>,
                 Changed<session::Username>,
                 Changed<session::SessionClass>,
                 Changed<session::Vt>,
@@ -111,7 +114,19 @@ pub fn write_state(
     let sessions = sessions
         .iter()
         .map(
-            |(id, uid, username, class, vt, leader, remote_host, timestamp, env, active_state)| {
+            |(
+                id,
+                uid,
+                gid,
+                username,
+                class,
+                vt,
+                leader,
+                remote_host,
+                timestamp,
+                env,
+                active_state,
+            )| {
                 let timestamp = timestamp
                     .0
                     .duration_since(time::UNIX_EPOCH)
@@ -137,6 +152,7 @@ pub fn write_state(
                     id.as_raw().to_string(),
                     Session {
                         uid: uid.0,
+                        gid: gid.0,
                         username: sync::Arc::clone(&username.0),
                         class: class.to_owned(),
                         vt: vt.map(|vt| vt.0.get()),
@@ -233,7 +249,7 @@ pub fn load_state(
                         .get(&saved_session.username)
                         .cloned()
                         .unwrap_or_default()
-                        .runtime_dir(saved_session.uid);
+                        .runtime_dir(saved_session.uid, saved_session.gid);
                     user::create_runtime_dir(saved_session.uid, &runtime_dir);
 
                     let active_state = saved_session.active_state();
@@ -243,6 +259,7 @@ pub fn load_state(
                         session_id,
                         saved_session.class(),
                         saved_session.uid,
+                        saved_session.gid,
                         sync::Arc::clone(&saved_session.username),
                         saved_session.vt,
                         saved_session.leader,

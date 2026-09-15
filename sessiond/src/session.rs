@@ -92,6 +92,7 @@ impl SessionManagementTarget {
 pub struct PendingSession {
     pub manager: Option<session_manager::SessionManager>,
     pub uid: u32,
+    pub gid: u32,
     pub class: Option<SessionClass>,
     pub vt: Option<num::NonZeroU32>,
     pub remote_host: Option<sync::Arc<str>>,
@@ -152,6 +153,7 @@ pub struct SessionBundle {
     pub id: SessionId,
     pub class: SessionClass,
     pub uid: Uid,
+    pub gid: Gid,
     pub username: Username,
     pub timestamp: Timestamp,
     pub leader_id: LeaderId,
@@ -174,6 +176,9 @@ pub struct IsLocal;
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Uid(pub u32);
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Gid(pub u32);
 
 #[derive(Component, Debug, Clone, PartialEq, Eq)]
 pub struct Username(pub sync::Arc<str>);
@@ -266,6 +271,7 @@ pub fn spawn(
     session_id: SessionId,
     class: SessionClass,
     uid: u32,
+    gid: u32,
     username: sync::Arc<str>,
     vt: Option<u32>,
     leader_id: i32,
@@ -282,6 +288,7 @@ pub fn spawn(
         id: session_id,
         class,
         uid: Uid(uid),
+        gid: Gid(gid),
         username: Username(username),
         timestamp: Timestamp(time::SystemTime::now()),
         leader_id: LeaderId(leader_id),
@@ -795,18 +802,21 @@ pub fn handle_session_management_action(
                 uid,
                 leader_id,
             } => {
-                pending_sessions.by_management_object.insert(
-                    object.clone(),
-                    PendingSession {
-                        manager: management_object.clone(),
-                        uid: *uid,
-                        class: None,
-                        vt: None,
-                        remote_host: None,
-                        env: BTreeMap::new(),
-                        leader_id: *leader_id,
-                    },
-                );
+                if let Some(user) = uzers::get_user_by_uid(*uid) {
+                    pending_sessions.by_management_object.insert(
+                        object.clone(),
+                        PendingSession {
+                            manager: management_object.clone(),
+                            uid: *uid,
+                            gid: user.primary_group_id(),
+                            class: None,
+                            vt: None,
+                            remote_host: None,
+                            env: BTreeMap::new(),
+                            leader_id: *leader_id,
+                        },
+                    );
+                }
                 continue;
             }
             SessionManagementAction::Env { key, value } => {
@@ -872,7 +882,7 @@ pub fn handle_session_management_action(
                     let user_config = config.users.get(&username).cloned().unwrap_or_default();
                     user::create_runtime_dir(
                         pending_session.uid,
-                        &user_config.runtime_dir(pending_session.uid),
+                        &user_config.runtime_dir(pending_session.uid, pending_session.gid),
                     );
 
                     let is_local = pending_session.remote_host.is_none();
@@ -886,8 +896,12 @@ pub fn handle_session_management_action(
                         session_core_v1::ActiveState::Online
                     };
                     let term = pending_session.env.get("TERM").cloned();
-                    let mut env =
-                        user_config.environment(pending_session.uid, session_id.as_raw(), term);
+                    let mut env = user_config.environment(
+                        pending_session.uid,
+                        pending_session.gid,
+                        session_id.as_raw(),
+                        term,
+                    );
                     for (session_env, _) in sessions
                         .iter()
                         .filter(|(_, uid)| uid.0 == pending_session.uid)
@@ -902,6 +916,7 @@ pub fn handle_session_management_action(
                         session_id,
                         pending_session.class.unwrap_or_default(),
                         pending_session.uid,
+                        pending_session.gid,
                         username,
                         pending_session.vt.map(num::NonZeroU32::get),
                         pending_session.leader_id,

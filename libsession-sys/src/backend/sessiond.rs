@@ -13,6 +13,7 @@ pub struct Session {
     state: session_core_v1::ActiveState,
     timestamp: u32,
     done: bool,
+    is_local: bool,
     object: session_core_session::SessionCoreSession,
 }
 
@@ -31,6 +32,7 @@ impl Session {
             state: session_core_v1::ActiveState::Online,
             timestamp: 0,
             done: false,
+            is_local: false,
             object,
         }
     }
@@ -82,6 +84,9 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for Sessiond {
             }
             session_core_session::Event::Done => {
                 self.sessions[index].done = true;
+            }
+            session_core_session::Event::IsLocal { is_local } => {
+                self.sessions[index].is_local = is_local != 0;
             }
             session_core_session::Event::Destroyed => {
                 self.sessions.remove(index);
@@ -309,6 +314,30 @@ impl super::Backend for Sessiond {
                 session_core_v1::ActiveState::Opening => crate::LibsessionSessionState::Opening,
                 _ => crate::LibsessionSessionState::Unkown,
             })
+    }
+
+    fn is_local_session(&mut self, session_id: &ffi::CStr) -> Option<bool> {
+        let Ok(session_id) = session_id.to_string_lossy().parse::<u32>() else {
+            return None;
+        };
+
+        if let Some(object) = self
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .map(|session| session.object.clone())
+        {
+            let index = self.wait_session(&object)?;
+            return Some(self.sessions[index].is_local);
+        }
+        let object = self
+            .session_manager
+            .as_ref()?
+            .send_get_session::<Self>(session_id)?;
+        self.sessions
+            .push(Session::new(object.clone(), session_id, 0, 0));
+        self.wait_session(&object)
+            .map(|index| self.sessions[index].is_local)
     }
 }
 

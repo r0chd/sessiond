@@ -27,6 +27,9 @@ trait ConsoleKitSession {
 
     #[zbus(name = "IsActive")]
     fn is_active(&self) -> zbus::Result<bool>;
+
+    #[zbus(name = "IsLocal")]
+    fn is_local(&self) -> zbus::Result<bool>;
 }
 
 pub struct ConsoleKit {
@@ -130,6 +133,21 @@ impl super::Backend for ConsoleKit {
                 } else {
                     crate::LibsessionSessionState::Online
                 });
+            }
+        }
+        None
+    }
+
+    fn is_local_session(&mut self, session_id: &ffi::CStr) -> Option<bool> {
+        let session_id = session_id.to_string_lossy();
+        for path in self.manager.get_sessions().ok()? {
+            let session = ConsoleKitSessionProxyBlocking::builder(&self.connection)
+                .path(path)
+                .ok()?
+                .build()
+                .ok()?;
+            if session.get_id().ok()?.as_str() == session_id {
+                return session.is_local().ok();
             }
         }
         None

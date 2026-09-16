@@ -31,6 +31,11 @@ impl Logind {
 }
 
 impl super::Backend for Logind {
+    fn is_local_session(&mut self, session_id: &ffi::CStr) -> Option<bool> {
+        let result = unsafe { login::sd_session_is_remote(session_id.as_ptr()) };
+        (result >= 0).then_some(result == 0)
+    }
+
     fn get_owner_uid(&mut self, pid: u32) -> Option<u32> {
         let mut uid = 0;
         let result = unsafe { login::sd_pid_get_owner_uid(pid.cast_signed(), &raw mut uid) };

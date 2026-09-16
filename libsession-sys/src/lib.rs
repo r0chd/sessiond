@@ -326,3 +326,25 @@ pub unsafe extern "C" fn libsession_session_is_active(
 
     LibsessionStatus::Ok
 }
+
+#[unsafe(no_mangle)]
+pub extern "C" fn libsession_session_is_local(
+    ctx: *mut libsession_context,
+    session: *const ffi::c_char,
+    ret_local: *mut bool,
+) -> LibsessionStatus {
+    if ctx.is_null() || session.is_null() || ret_local.is_null() {
+        return LibsessionStatus::Failed;
+    }
+
+    let libsession = unsafe { &mut *ctx.cast::<Libsession>() };
+    let Some(local) = libsession
+        .backend
+        .is_local_session(unsafe { ffi::CStr::from_ptr(session) })
+    else {
+        return LibsessionStatus::Failed;
+    };
+    unsafe { ret_local.write(local) };
+
+    LibsessionStatus::Ok
+}

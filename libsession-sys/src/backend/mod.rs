@@ -22,4 +22,6 @@ pub trait Backend {
         &mut self,
         session_id: &ffi::CStr,
     ) -> Option<crate::LibsessionSessionState>;
+
+    fn is_local_session(&mut self, session_id: &ffi::CStr) -> Option<bool>;
 }

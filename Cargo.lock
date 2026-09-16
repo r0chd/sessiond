@@ -1026,7 +1026,7 @@ dependencies = [
 
 [[package]]
 name = "libsession-sys"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "hyprwire",
  "hyprwire-protocols-sessiond",

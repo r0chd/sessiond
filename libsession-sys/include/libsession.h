@@ -45,6 +45,7 @@ enum libsession_status libsession_uid_get_state(struct libsession_context *ctx, 
 enum libsession_status libsession_session_get_uid(struct libsession_context *ctx, const char *session, uid_t *ret_uid);
 enum libsession_status libsession_session_get_state(struct libsession_context *ctx, const char *session, enum libsession_session_state *ret_state);
 enum libsession_status libsession_session_is_active(struct libsession_context *ctx, const char *session, bool *ret_active);
+enum libsession_status libsession_session_is_local(struct libsession_context *ctx, const char *session, bool *ret_local);
 
 #ifdef __cplusplus
 }

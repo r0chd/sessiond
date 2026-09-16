@@ -1,3 +1,4 @@
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
 use std::{ffi, ptr, result};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,7 +19,7 @@ impl Session {
 
     pub fn id(&self) -> Result<String> {
         let mut id = ptr::null_mut();
-        result(unsafe { libsession_sys::libsession_get_session(self.0.as_ptr(), &mut id) })?;
+        result(unsafe { libsession_sys::libsession_get_session(self.0.as_ptr(), &raw mut id) })?;
         unsafe { take_session_id(id) }
     }
 
@@ -26,9 +27,41 @@ impl Session {
         let pid = pid.try_into().map_err(|_| Error::Failed)?;
         let mut id = ptr::null_mut();
         result(unsafe {
-            libsession_sys::libsession_pid_get_session(self.0.as_ptr(), pid, &mut id)
+            libsession_sys::libsession_pid_get_session(self.0.as_ptr(), pid, &raw mut id)
         })?;
         unsafe { take_session_id(id) }
+    }
+
+    pub fn monitor(&mut self) -> Result<Monitor> {
+        ptr::NonNull::new(libsession_sys::libsession_monitor_new(self.0.as_ptr()))
+            .map(Monitor)
+            .ok_or(Error::Failed)
+    }
+}
+
+pub struct Monitor(ptr::NonNull<libsession_sys::libsession_monitor>);
+
+impl Monitor {
+    pub fn flush(&mut self) {
+        libsession_sys::libsession_monitor_flush(self.0.as_ptr());
+    }
+}
+
+impl AsRawFd for Monitor {
+    fn as_raw_fd(&self) -> RawFd {
+        libsession_sys::libsession_monitor_fd(self.0.as_ptr())
+    }
+}
+
+impl AsFd for Monitor {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        unsafe { BorrowedFd::borrow_raw(self.as_raw_fd()) }
+    }
+}
+
+impl Drop for Monitor {
+    fn drop(&mut self) {
+        libsession_sys::libsession_monitor_free(self.0.as_ptr());
     }
 }
 

@@ -1,11 +1,14 @@
 #[cfg(feature = "consolekit")]
 pub mod consolekit;
+#[cfg(any(feature = "sessiond", feature = "consolekit"))]
+mod inotify;
 #[cfg(feature = "logind")]
 pub mod logind;
 #[cfg(feature = "sessiond")]
 pub mod sessiond;
 
 use std::ffi;
+use std::os::fd;
 
 pub trait Backend {
     fn get_owner_uid(&mut self, pid: u32) -> Option<u32>;
@@ -24,4 +27,12 @@ pub trait Backend {
     ) -> Option<crate::LibsessionSessionState>;
 
     fn is_local_session(&mut self, session_id: &ffi::CStr) -> Option<bool>;
+
+    fn get_monitor(&mut self) -> Option<Box<dyn BackendMonitor>>;
+}
+
+pub trait BackendMonitor {
+    fn fd(&self) -> fd::RawFd;
+
+    fn flush(&mut self);
 }

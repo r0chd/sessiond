@@ -158,7 +158,6 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
     );
     schedule.add_systems(
         (
-            state::write_state,
             reconcile::notify_session_active_states,
             #[cfg(feature = "consolekit")]
             reconcile::sync_consolekit_sessions,
@@ -166,6 +165,7 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
             .before(reconcile::send_done),
     );
     schedule.add_systems(reconcile::send_done);
+    schedule.add_systems(state::write_state.after(reconcile::send_done));
     schedule.add_systems(message::message_update_system.after(reconcile::send_done));
 
     let mut sessiond = Sessiond {

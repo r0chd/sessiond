@@ -47,6 +47,13 @@ enum libsession_status libsession_session_get_state(struct libsession_context *c
 enum libsession_status libsession_session_is_active(struct libsession_context *ctx, const char *session, bool *ret_active);
 enum libsession_status libsession_session_is_local(struct libsession_context *ctx, const char *session, bool *ret_local);
 
+struct libsession_monitor;
+
+struct libsession_monitor *libsession_monitor_new(struct libsession_context *ctx);
+void libsession_monitor_free(struct libsession_monitor *monitor);
+void libsession_monitor_flush(struct libsession_monitor *monitor);
+int libsession_monitor_fd(struct libsession_monitor *monitor);
+
 #ifdef __cplusplus
 }
 #endif

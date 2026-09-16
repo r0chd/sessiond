@@ -4,7 +4,7 @@
   linux-pam,
   pkg-config,
   rustPlatform,
-  consolekitSupport ? true,
+  withConsoleKit ? true,
   installShellFiles,
 }:
 let
@@ -65,7 +65,7 @@ rustPlatform.buildRustPackage {
   buildNoDefaultFeatures = true;
   doCheck = false;
 
-  buildFeatures = lib.optional consolekitSupport "sessiond/consolekit";
+  buildFeatures = lib.optional withConsoleKit "sessiond/consolekit";
 
   postInstall = ''
     mkdir -p $out/lib/security
@@ -78,7 +78,7 @@ rustPlatform.buildRustPackage {
       --fish <($out/bin/sessionctl completions fish) \
       --nushell <($out/bin/sessionctl completions nushell)
   ''
-  + lib.optionalString consolekitSupport ''
+  + lib.optionalString withConsoleKit ''
     install -Dm644 data/dbus-1/system.d/org.freedesktop.ConsoleKit.conf \
       $out/share/dbus-1/system.d/org.freedesktop.ConsoleKit.conf
   '';

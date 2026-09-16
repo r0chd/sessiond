@@ -328,7 +328,7 @@ pub unsafe extern "C" fn libsession_session_is_active(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn libsession_session_is_local(
+pub unsafe extern "C" fn libsession_session_is_local(
     ctx: *mut libsession_context,
     session: *const ffi::c_char,
     ret_local: *mut bool,
@@ -347,4 +347,51 @@ pub extern "C" fn libsession_session_is_local(
     unsafe { ret_local.write(local) };
 
     LibsessionStatus::Ok
+}
+
+#[repr(C)]
+pub struct libsession_monitor {
+    _private: [u8; 0],
+}
+
+struct Monitor(Box<dyn backend::BackendMonitor>);
+
+#[unsafe(no_mangle)]
+pub extern "C" fn libsession_monitor_new(ctx: *mut libsession_context) -> *mut libsession_monitor {
+    if ctx.is_null() {
+        return ptr::null_mut();
+    }
+    let libsession = unsafe { &mut *ctx.cast::<Libsession>() };
+    if let Some(monitor) = libsession.backend.get_monitor() {
+        return Box::into_raw(Box::new(Monitor(monitor))).cast::<libsession_monitor>();
+    }
+
+    ptr::null_mut()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn libsession_monitor_free(monitor: *mut libsession_monitor) {
+    if monitor.is_null() {
+        return;
+    }
+
+    unsafe { drop(Box::from_raw(monitor.cast::<Monitor>())) }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn libsession_monitor_flush(monitor: *mut libsession_monitor) {
+    if monitor.is_null() {
+        return;
+    }
+    let monitor = unsafe { &mut *monitor.cast::<Monitor>() };
+    monitor.0.flush();
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn libsession_monitor_fd(monitor: *mut libsession_monitor) -> ffi::c_int {
+    if monitor.is_null() {
+        return -1;
+    }
+    let monitor = unsafe { &*monitor.cast::<Monitor>() };
+    monitor.0.fd()
 }

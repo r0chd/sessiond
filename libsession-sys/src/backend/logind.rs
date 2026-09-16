@@ -1,4 +1,5 @@
 use libsystemd_sys::login;
+use std::os::fd;
 use std::{ffi, ptr};
 
 fn sd_string(value: *mut ffi::c_char) -> Option<String> {
@@ -88,5 +89,36 @@ impl super::Backend for Logind {
             "opening" => crate::LibsessionSessionState::Opening,
             _ => crate::LibsessionSessionState::Unkown,
         })
+    }
+
+    fn get_monitor(&mut self) -> Option<Box<dyn super::BackendMonitor>> {
+        let mut monitor = ptr::null_mut();
+        let result = unsafe { login::sd_login_monitor_new(c"session".as_ptr(), &raw mut monitor) };
+
+        if result < 0 {
+            return None;
+        }
+
+        Some(Box::new(LogindMonitor(monitor)))
+    }
+}
+
+pub struct LogindMonitor(*mut login::sd_login_monitor);
+
+impl Drop for LogindMonitor {
+    fn drop(&mut self) {
+        unsafe { login::sd_login_monitor_unref(self.0) };
+    }
+}
+
+impl super::BackendMonitor for LogindMonitor {
+    fn fd(&self) -> fd::RawFd {
+        unsafe { login::sd_login_monitor_get_fd(self.0) }
+    }
+
+    fn flush(&mut self) {
+        if !self.0.is_null() {
+            unsafe { login::sd_login_monitor_flush(self.0) };
+        }
     }
 }

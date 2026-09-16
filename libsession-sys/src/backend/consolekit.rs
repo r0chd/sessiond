@@ -51,6 +51,12 @@ impl ConsoleKit {
 }
 
 impl super::Backend for ConsoleKit {
+    fn get_monitor(&mut self) -> Option<Box<dyn super::BackendMonitor>> {
+        Some(Box::new(super::inotify::InotifyMonitor::new(
+            c"/var/run/ConsoleKit",
+        )?))
+    }
+
     fn get_owner_uid(&mut self, pid: u32) -> Option<u32> {
         let path = self.manager.get_session_for_unix_process(pid).ok()?;
         let session = ConsoleKitSessionProxyBlocking::builder(&self.connection)

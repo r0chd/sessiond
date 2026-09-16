@@ -339,6 +339,10 @@ impl super::Backend for Sessiond {
         self.wait_session(&object)
             .map(|index| self.sessions[index].is_local)
     }
+
+    fn get_monitor(&mut self) -> Option<Box<dyn super::BackendMonitor>> {
+        Some(Box::new(super::inotify::InotifyMonitor::new(c"/run/sessiond")?))
+    }
 }
 
 hyprwire::delegate_noop!(Sessiond: ignore session_core_manager::SessionCoreManager);

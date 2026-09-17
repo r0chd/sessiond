@@ -221,6 +221,7 @@ pub fn load_state(
     cgroup_manager: Res<cgroup::CgroupManager>,
     config: Res<config::Config>,
     mut session_registry: ResMut<session::SessionRegistry>,
+    loop_handle: NonSend<'_, calloop::LoopHandle<'static, crate::Sessiond>>,
 ) {
     if state_writer.0.exists() {
         match State::load(&state_writer.0) {
@@ -243,6 +244,15 @@ pub fn load_state(
                             continue;
                         }
                     };
+                    if let Err(error) = cgroup::watch_empty(
+                        &cgroup.path,
+                        session_id,
+                        session::Uid(saved_session.uid),
+                        &loop_handle,
+                    ) {
+                        log::warn!(session_id = raw_id, error = error.to_string().as_str(); "failed to watch recovered session cgroup");
+                        continue;
+                    }
 
                     let runtime_dir = config
                         .users

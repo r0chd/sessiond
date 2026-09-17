@@ -373,11 +373,11 @@ pub fn handle_session_control(
                 log::info!(session_id = session_id.as_raw(); "terminate requested");
                 *active_state = ActiveState::CLOSING;
                 log::info!(session_id = session_id.0, vt = vt.map_or(0, |vt| vt.0.get()); "session state changed");
-                let Ok((cgroup_session_id, cgroup_path)) = cgroups.get(action.entity) else {
+                let Ok((_, cgroup_path)) = cgroups.get(action.entity) else {
                     continue;
                 };
                 if let Err(err) =
-                    cgroup::terminate(cgroup_path, *cgroup_session_id, *uid, &loop_handle)
+                    cgroup::terminate(cgroup_path, *session_id, &loop_handle)
                 {
                     log::error!(session_id = session_id.as_raw(), err = err.to_string().as_str(); "terminate failed");
                 }
@@ -400,11 +400,10 @@ pub fn handle_session_control(
                 log::info!(session_id = session_id.as_raw(); "kill requested");
                 *active_state = ActiveState::CLOSING;
                 log::info!(session_id = session_id.0, vt = vt.map_or(0, |vt| vt.0.get()); "session state changed");
-                let Ok((cgroup_session_id, cgroup_path)) = cgroups.get(action.entity) else {
+                let Ok((_, cgroup_path)) = cgroups.get(action.entity) else {
                     continue;
                 };
-                if let Err(err) = cgroup::kill(cgroup_path, *cgroup_session_id, *uid, &loop_handle)
-                {
+                if let Err(err) = cgroup::kill(cgroup_path) {
                     log::error!(session_id = session_id.as_raw(), err = err.to_string().as_str(); "kill failed");
                 }
             }
@@ -756,6 +755,7 @@ pub fn handle_session_management_action(
     mut session_registry: ResMut<SessionRegistry>,
     sessions: Query<(&SessionEnv, &Uid), With<Session>>,
     config: Res<config::Config>,
+    loop_handle: NonSend<'_, calloop::LoopHandle<'static, crate::Sessiond>>,
 ) {
     for action in actions.read() {
         if let SessionManagementAction::ManagerDestroy { management_object } = &action.action {
@@ -878,6 +878,19 @@ pub fn handle_session_management_action(
                             return;
                         }
                     };
+                    if let Err(error) = cgroup::watch_empty(
+                        &cgroup.path,
+                        session_id,
+                        Uid(pending_session.uid),
+                        &loop_handle,
+                    ) {
+                        log::error!(session_id = session_id.as_raw(), error = error.to_string().as_str(); "failed to watch session cgroup");
+                        object.send_error(
+                            SessionManagementError::Io,
+                            "failed to watch session cgroup",
+                        );
+                        return;
+                    }
 
                     let user_config = config.users.get(&username).cloned().unwrap_or_default();
                     user::create_runtime_dir(

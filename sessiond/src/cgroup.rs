@@ -193,21 +193,14 @@ pub struct Cgroup;
 #[derive(Component)]
 pub struct CgroupPath(pub path::PathBuf);
 
-pub fn kill(
-    path: &CgroupPath,
-    session_id: session::SessionId,
-    uid: session::Uid,
-    loop_handle: &calloop::LoopHandle<'static, crate::Sessiond>,
-) -> anyhow::Result<()> {
+pub fn kill(path: &CgroupPath) -> anyhow::Result<()> {
     fs::write(path.0.join("cgroup.kill"), b"1")?;
-    poll_destroy(path, session_id, uid, loop_handle)?;
     Ok(())
 }
 
 pub fn terminate(
     path: &CgroupPath,
     session_id: session::SessionId,
-    uid: session::Uid,
     loop_handle: &calloop::LoopHandle<'static, crate::Sessiond>,
 ) -> anyhow::Result<()> {
     let procs = fs::read_to_string(path.0.join("cgroup.procs"))?;
@@ -217,8 +210,6 @@ pub fn terminate(
         let pid = process::Pid::from_raw(pid).context("invalid pid in cgroup.procs")?;
         process::kill_process(pid, process::Signal::TERM)?;
     }
-
-    poll_destroy(path, session_id, uid, loop_handle)?;
 
     let path = path.0.clone();
     loop_handle
@@ -334,7 +325,7 @@ pub fn handle_cgroup_empty(
     }
 }
 
-fn poll_destroy(
+pub fn watch_empty(
     path: &CgroupPath,
     session_id: session::SessionId,
     uid: session::Uid,

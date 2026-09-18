@@ -376,9 +376,7 @@ pub fn handle_session_control(
                 let Ok((_, cgroup_path)) = cgroups.get(action.entity) else {
                     continue;
                 };
-                if let Err(err) =
-                    cgroup::terminate(cgroup_path, *session_id, &loop_handle)
-                {
+                if let Err(err) = cgroup::terminate(cgroup_path, *session_id, &loop_handle) {
                     log::error!(session_id = session_id.as_raw(), err = err.to_string().as_str(); "terminate failed");
                 }
             }

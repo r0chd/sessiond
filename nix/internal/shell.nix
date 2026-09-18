@@ -1,15 +1,12 @@
 {
   pkgs,
-  rustToolchain,
+  craneLib,
   sessiond,
   libsession,
 }:
-pkgs.mkShell {
+craneLib.devShell {
   name = "sessiond-devshell";
   packages = builtins.attrValues {
-    inherit
-      rustToolchain
-      ;
     inherit (pkgs)
       rust-analyzer-unwrapped
       nixd
@@ -30,5 +27,5 @@ pkgs.mkShell {
     libsession
   ];
 
-  RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
+  RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
 }

@@ -1,17 +1,14 @@
 {
   inputs = {
     nixpkgs.url = "https://channels.nixos.org/nixos-unstable/nixexprs.tar.xz";
-    rust-overlay = {
-      url = "github:oxalica/rust-overlay";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    crane.url = "github:ipetkov/crane";
   };
 
   outputs =
     {
       self,
+      crane,
       nixpkgs,
-      rust-overlay,
       ...
     }:
     let
@@ -29,7 +26,6 @@
             inherit system;
             linux-kernel.target = "bzImage";
           };
-          overlays = [ rust-overlay.overlays.default ];
         };
 
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f (pkgsFor system));
@@ -41,24 +37,10 @@
     {
       devShells = forAllSystems (pkgs: {
         default =
-          let
-            rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-              extensions = [
-                "rust-analyzer"
-                "rust-src"
-              ];
-            };
-            sessiond = self.packages.${pkgs.stdenv.hostPlatform.system}.sessiond;
-            libsession = self.packages.${pkgs.stdenv.hostPlatform.system}.libsession;
-          in
-          import ./nix/internal/shell.nix {
-            inherit
-              pkgs
-              rustToolchain
-              sessiond
-              libsession
-              ;
-          };
+          (import ./default.nix {
+            inherit pkgs;
+            craneLib = crane.mkLib pkgs;
+          }).shell;
       });
 
       apps.x86_64-linux.finix-vm =
@@ -75,40 +57,10 @@
 
       packages = forAllSystems (
         pkgs:
-        let
-          rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-            extensions = [
-              "rust-analyzer"
-              "rust-src"
-              "llvm-tools"
-            ];
-          };
-          rustPlatform = pkgs.makeRustPlatform {
-            cargo = rustToolchain;
-            rustc = rustToolchain;
-          };
-        in
-        {
-          sessiond = pkgs.callPackage ./nix/sessiond/package.nix {
-            inherit rustPlatform;
-          };
-          libsession = pkgs.callPackage ./nix/libsession/package.nix {
-            inherit rustPlatform;
-          };
-          sessiond-backlight = pkgs.callPackage ./nix/sessiond-backlight/package.nix {
-            inherit rustPlatform;
-          };
-          sessiond-hooks = pkgs.callPackage ./nix/sessiond-hooks/package.nix {
-            inherit rustPlatform;
-          };
-          sessiond-uaccess = pkgs.callPackage ./nix/sessiond-uaccess/package.nix {
-            inherit rustPlatform;
-          };
-          sessiond-power = pkgs.callPackage ./nix/sessiond-power/package.nix {
-            inherit rustPlatform;
-          };
-          default = self.packages.${pkgs.stdenv.hostPlatform.system}.sessiond;
-        }
+        (import ./default.nix {
+          inherit pkgs;
+          craneLib = crane.mkLib pkgs;
+        }).packages
       );
 
       nixosModules = {
@@ -125,18 +77,7 @@
         default = self.finixModules.sessiond;
       };
 
-      formatter = forAllSystems (
-        pkgs:
-        let
-          rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-            extensions = [
-              "rust-analyzer"
-              "rust-src"
-            ];
-          };
-        in
-        import ./nix/internal/formatter.nix { inherit pkgs rustToolchain; }
-      );
+      formatter = forAllSystems (pkgs: import ./nix/internal/formatter.nix { inherit pkgs; });
 
       nixosConfigurations =
         let

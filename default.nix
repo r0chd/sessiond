@@ -1,53 +1,59 @@
 {
-  rust-overlay ? import (import ./nix/internal/flake-parse.nix "rust-overlay"),
   pkgs ? import (import ./nix/internal/flake-parse.nix "nixpkgs") {
     system = builtins.currentSystem;
-    overlays = [ rust-overlay ];
   },
+  craneLib ? import (import ./nix/internal/flake-parse.nix "crane") { inherit pkgs; },
   finix ? (import ./npins).finix,
 }:
 let
-  rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-    extensions = [
-      "rust-analyzer"
-      "rust-src"
-      "llvm-tools"
-    ];
+  src = pkgs.lib.cleanSourceWith {
+    src = pkgs.lib.cleanSource ./.;
+    name = "sessiond-source";
+    filter =
+      path: type:
+      !(
+        type == "directory"
+        && builtins.elem (baseNameOf path) [
+          "target"
+          ".direnv"
+        ]
+      )
+      && (
+        craneLib.filterCargoSources path type
+        || pkgs.lib.any (suffix: pkgs.lib.hasSuffix suffix path) [
+          ".xml"
+          ".lua"
+          ".h"
+          ".pc.in"
+          ".conf"
+          ".md"
+        ]
+        || baseNameOf path == "LICENSE"
+      );
   };
-  packages =
-    let
-      rustPlatform = pkgs.makeRustPlatform {
-        cargo = rustToolchain;
-        rustc = rustToolchain;
-      };
-    in
-    rec {
-      default = pkgs.callPackage ./nix/sessiond/package.nix {
-        inherit rustPlatform;
-      };
-      sessiond = default;
-      libsession = pkgs.callPackage ./nix/libsession/package.nix {
-        inherit rustPlatform;
-      };
-      sessiond-backlight = pkgs.callPackage ./nix/sessiond-backlight/package.nix {
-        inherit rustPlatform;
-      };
-      sessiond-hooks = pkgs.callPackage ./nix/sessiond-hooks/package.nix {
-        inherit rustPlatform;
-      };
-      sessiond-uaccess = pkgs.callPackage ./nix/sessiond-uaccess/package.nix {
-        inherit rustPlatform;
-      };
-      sessiond-power = pkgs.callPackage ./nix/sessiond-power/package.nix {
-        inherit rustPlatform;
-      };
+  callPackage = path: pkgs.callPackage path { inherit craneLib src; };
+  packages = rec {
+    default = sessiond;
+    sessiond = callPackage ./nix/sessiond/package.nix;
+    libsession = callPackage ./nix/libsession/package.nix;
+    sessiond-backlight = callPackage ./nix/sessiond-backlight/package.nix;
+    sessiond-hooks = callPackage ./nix/sessiond-hooks/package.nix;
+    sessiond-uaccess = callPackage ./nix/sessiond-uaccess/package.nix;
+    sessiond-power = callPackage ./nix/sessiond-power/package.nix;
+  };
+  checkArgs = {
+    inherit finix pkgs;
+    self = {
+      outPath = ./.;
+      packages.${pkgs.stdenv.hostPlatform.system} = packages;
     };
+  };
 in
 {
   inherit packages;
 
   shell = import ./nix/internal/shell.nix {
-    inherit pkgs rustToolchain;
+    inherit pkgs craneLib;
     inherit (packages) sessiond libsession;
   };
 
@@ -65,9 +71,9 @@ in
     sessiond-power = import ./nix/sessiond-power/finix.nix;
   };
 
-  formatter = import ./nix/internal/formatter.nix { inherit pkgs rustToolchain; };
+  formatter = import ./nix/internal/formatter.nix { inherit pkgs; };
 
   checks =
-    (import ./nix/finix-checks.nix { inherit finix pkgs; })
-    // (import ./nix/nixos-checks.nix { inherit finix pkgs; });
+    (import ./nix/internal/finix-checks.nix checkArgs)
+    // (import ./nix/internal/nixos-checks.nix checkArgs);
 }

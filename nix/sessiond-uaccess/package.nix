@@ -1,6 +1,7 @@
 {
   lib,
-  rustPlatform,
+  craneLib,
+  src,
   pkg-config,
   udev,
   acl,
@@ -8,30 +9,14 @@
 let
   cargoToml = fromTOML (builtins.readFile ../../sessiond-uaccess/Cargo.toml);
 in
-rustPlatform.buildRustPackage (finalAttrs: {
+craneLib.buildPackage {
   pname = cargoToml.package.name;
   inherit (cargoToml.package) version;
 
-  cargoLock = {
-    lockFile = ../../Cargo.lock;
-    outputHashes = {
-      "pamsm-0.5.5" = "sha256-wmSKEVSgd36kwa9ky4H9+ubnqUUwyUPw/OjK8v3wGbk=";
-    };
-  };
+  cargoExtraArgs = "--locked --package ${cargoToml.package.name}";
 
-  cargoBuildFlags = [
-    "--package"
-    cargoToml.package.name
-  ];
-  cargoTestFlags = [
-    "--package"
-    cargoToml.package.name
-  ];
-
-  src = lib.cleanSourceWith {
-    src = ../..;
-    filter = path: type: lib.cleanSourceFilter path type || lib.hasSuffix "/Cargo.lock" (toString path);
-  };
+  inherit src;
+  strictDeps = true;
 
   nativeBuildInputs = [ pkg-config ];
   buildInputs = [
@@ -40,8 +25,7 @@ rustPlatform.buildRustPackage (finalAttrs: {
   ];
 
   postInstall = ''
-    install -d $out/share/sessiond-uaccess
-    cp -r ${finalAttrs.src}/sessiond-uaccess/rules $out/share/sessiond-uaccess/
+    install -Dm644 -t $out/share/sessiond-uaccess/rules sessiond-uaccess/rules/*.lua
   '';
 
   meta = {
@@ -52,4 +36,4 @@ rustPlatform.buildRustPackage (finalAttrs: {
     platforms = lib.platforms.linux;
     mainProgram = "sessiond-uaccess";
   };
-})
+}

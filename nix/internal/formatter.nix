@@ -1,13 +1,14 @@
-{ pkgs, rustToolchain }:
+{ pkgs }:
 pkgs.writeShellApplication {
   name = "nix3-fmt-wrapper";
   runtimeInputs = builtins.attrValues {
     inherit (pkgs)
+      cargo
+      rustfmt
       nixfmt
       taplo
       fd
       ;
-    inherit rustToolchain;
   };
   text = ''
     fd "$@" -t f -e nix -x nixfmt -q '{}'

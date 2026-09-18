@@ -3,44 +3,20 @@
   stdenv,
   linux-pam,
   pkg-config,
-  rustPlatform,
+  craneLib,
+  src,
   withConsoleKit ? true,
   installShellFiles,
 }:
 let
   cargoToml = fromTOML (builtins.readFile ../../sessiond/Cargo.toml);
 in
-rustPlatform.buildRustPackage {
+craneLib.buildPackage {
   pname = "sessiond";
   inherit (cargoToml.package) version;
 
-  cargoLock = {
-    lockFile = ../../Cargo.lock;
-    outputHashes = {
-      "pamsm-0.5.5" = "sha256-wmSKEVSgd36kwa9ky4H9+ubnqUUwyUPw/OjK8v3wGbk=";
-    };
-  };
-
-  src = lib.cleanSourceWith {
-    src = ../..;
-    filter =
-      path: type:
-      let
-        relPath = lib.removePrefix (toString ../.. + "/") (toString path);
-      in
-      lib.any (p: lib.hasPrefix p relPath) [
-        "sessionctl"
-        "pam"
-        "sessiond"
-        "libsession-sys"
-        "libsession-rs"
-        "data"
-        "protocols"
-        "hyprwire-protocols-sessiond"
-        "Cargo.toml"
-        "Cargo.lock"
-      ];
-  };
+  inherit src;
+  strictDeps = true;
 
   nativeBuildInputs = [
     pkg-config
@@ -51,21 +27,10 @@ rustPlatform.buildRustPackage {
     linux-pam
   ];
 
-  cargoBuildFlags = [
-    "-p"
-    "sessiond"
-    "-p"
-    "sessionctl"
-    "-p"
-    "pam"
-    "-p"
-    "hyprwire-protocols-sessiond"
-  ];
-
-  buildNoDefaultFeatures = true;
+  cargoExtraArgs =
+    "--locked -p sessiond -p sessionctl -p pam -p hyprwire-protocols-sessiond --no-default-features"
+    + lib.optionalString withConsoleKit " --features sessiond/consolekit";
   doCheck = false;
-
-  buildFeatures = lib.optional withConsoleKit "sessiond/consolekit";
 
   postInstall = ''
     mkdir -p $out/lib/security

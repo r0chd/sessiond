@@ -1,6 +1,7 @@
 {
   lib,
-  rustPlatform,
+  craneLib,
+  src,
 }:
 let
   workspaceToml = fromTOML (builtins.readFile ../../Cargo.toml);
@@ -20,21 +21,14 @@ let
     ]) cargoPackages
   );
 in
-rustPlatform.buildRustPackage {
+craneLib.buildPackage {
   pname = cargoToml.package.name;
   inherit (workspaceToml.workspace.package) version;
 
-  cargoLock = {
-    lockFile = ../../Cargo.lock;
-    outputHashes = {
-      "pamsm-0.5.5" = "sha256-wmSKEVSgd36kwa9ky4H9+ubnqUUwyUPw/OjK8v3wGbk=";
-    };
-  };
+  cargoExtraArgs = lib.escapeShellArgs ([ "--locked" ] ++ cargoPackageFlags);
 
-  cargoBuildFlags = cargoPackageFlags;
-  cargoTestFlags = cargoPackageFlags;
-
-  src = lib.cleanSource ../..;
+  inherit src;
+  strictDeps = true;
 
   meta = {
     description = cargoToml.package.description;

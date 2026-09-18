@@ -341,7 +341,9 @@ impl super::Backend for Sessiond {
     }
 
     fn get_monitor(&mut self) -> Option<Box<dyn super::BackendMonitor>> {
-        Some(Box::new(super::inotify::InotifyMonitor::new(c"/run/sessiond")?))
+        Some(Box::new(super::inotify::InotifyMonitor::new(
+            c"/run/sessiond",
+        )?))
     }
 }
 

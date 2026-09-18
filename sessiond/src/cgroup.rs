@@ -334,14 +334,7 @@ pub fn watch_empty(
     let cgroup_path = path.0.clone();
     let mut file = fs::File::open(path.0.join("cgroup.events"))?;
     let fd_wrapper = unsafe { generic::FdWrapper::new(file.as_raw_fd()) };
-    let source = generic::Generic::new(
-        fd_wrapper,
-        calloop::Interest {
-            readable: true,
-            writable: false,
-        },
-        calloop::Mode::Level,
-    );
+    let source = generic::Generic::new(fd_wrapper, calloop::Interest::EMPTY, calloop::Mode::Level);
 
     loop_handle.insert_source(source, move |_, _, state| {
         let result = (|| -> anyhow::Result<calloop::PostAction> {

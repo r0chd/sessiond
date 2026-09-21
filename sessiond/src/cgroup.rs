@@ -63,9 +63,18 @@ impl CgroupManager {
     pub(crate) fn ensure_user_cgroup(&self, uid: u32) -> anyhow::Result<path::PathBuf> {
         let user_cgroup_path = self.user_cgroup_path(uid);
         if !user_cgroup_path.exists() {
-            fs::create_dir(&user_cgroup_path)?;
+            fs::create_dir(&user_cgroup_path).with_context(|| {
+                format!("failed to create cgroup {}", user_cgroup_path.display())
+            })?;
         }
-        fs::set_permissions(&user_cgroup_path, fs::Permissions::from_mode(0o755))?;
+        fs::set_permissions(&user_cgroup_path, fs::Permissions::from_mode(0o755)).with_context(
+            || {
+                format!(
+                    "failed to set permissions on {}",
+                    user_cgroup_path.display()
+                )
+            },
+        )?;
 
         Ok(user_cgroup_path)
     }
@@ -89,13 +98,28 @@ impl CgroupManager {
                 user_cgroup_path.display()
             )
         })?;
+
         let session_cgroup_path = user_cgroup_path.join(format!("session-{}", session_id.as_raw()));
-        fs::create_dir(&session_cgroup_path)?;
-        fs::set_permissions(&session_cgroup_path, fs::Permissions::from_mode(0o755))?;
-        fs::write(
-            session_cgroup_path.join("cgroup.procs"),
-            leader_pid.to_string(),
+        fs::create_dir(&session_cgroup_path).with_context(|| {
+            format!("failed to create cgroup {}", session_cgroup_path.display())
+        })?;
+        fs::set_permissions(&session_cgroup_path, fs::Permissions::from_mode(0o755)).with_context(
+            || {
+                format!(
+                    "failed to set permissions on {}",
+                    session_cgroup_path.display()
+                )
+            },
         )?;
+
+        let procs_path = session_cgroup_path.join("cgroup.procs");
+        fs::write(&procs_path, leader_pid.to_string()).with_context(|| {
+            format!(
+                "failed to move PID {} into {}",
+                leader_pid,
+                procs_path.display()
+            )
+        })?;
 
         log::info!(session_id = session_id.as_raw(), leader_pid = leader_pid, path = session_cgroup_path.to_str(); "cgroup created");
 

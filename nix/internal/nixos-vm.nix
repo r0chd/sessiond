@@ -21,6 +21,12 @@ in
     package = sessiond;
   };
 
+  security.pam.services.login.rules.session.sessiond = {
+    control = "optional";
+    modulePath = "${sessiond}/lib/security/pam_sessiond.so";
+    order = 900;
+  };
+
   environment.systemPackages = [
     sessiond
     sessiond-backlight

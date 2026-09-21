@@ -33,7 +33,9 @@ impl Terminal {
     }
 
     pub fn open(tty: u32) -> anyhow::Result<Self> {
-        let file = fs::File::open(Self::tty_path(tty))?;
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .open(Self::tty_path(tty))?;
         Ok(Self(file))
     }
 

@@ -26,9 +26,6 @@ in
         Type = "notify";
         Delegate = true;
         DelegateSubgroup = "supervisor";
-        RuntimeDirectory = "sessiond";
-        RuntimeDirectoryMode = "0755";
-        RuntimeDirectoryPreserve = "restart";
       };
     };
   };

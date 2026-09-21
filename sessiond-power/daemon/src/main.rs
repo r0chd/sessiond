@@ -482,13 +482,13 @@ fn main() -> anyhow::Result<()> {
         },
     )?;
 
-    let session_fd = session_socket
-        .extract_loop_fd()
-        .try_clone_to_owned()
-        .context("failed to duplicate sessiond event fd")?;
     let session_signal = event_loop.get_signal();
     loop_handle.insert_source(
-        generic::Generic::new(session_fd, calloop::Interest::READ, calloop::Mode::Level),
+        generic::Generic::new(
+            session_socket.extract_loop_fd().try_clone_to_owned()?,
+            calloop::Interest::READ,
+            calloop::Mode::Level,
+        ),
         move |_, _, state| {
             if let Err(error) = session_queue.dispatch_events(state, false) {
                 state.error = Some(format!("sessiond connection failed: {error}"));

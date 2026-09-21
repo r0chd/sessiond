@@ -10,6 +10,7 @@ mod terminal;
 mod user;
 mod vt;
 
+use anyhow::Context;
 use bevy_ecs::message;
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::IntoScheduleConfigs;
@@ -260,7 +261,10 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
             _ => unreachable!(),
         })?;
 
-    terminal::Terminal::open(0)?.set_process_switching(true)?;
+    terminal::Terminal::open(0)
+        .context("Failed to open VT 0")?
+        .set_process_switching(true)
+        .context("Failed to enable VT process switching")?;
 
     if let Err(e) = notify(b"READY=1\n") {
         log::warn!("Failed to send readiness notification: {e}");
@@ -270,7 +274,10 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
         state.notify_schedule.run(&mut state.world);
     })?;
 
-    terminal::Terminal::open(0)?.set_process_switching(false)?;
+    terminal::Terminal::open(0)
+        .context("Failed to open VT 0")?
+        .set_process_switching(true)
+        .context("Failed to enable VT process switching")?;
 
     Ok(())
 }

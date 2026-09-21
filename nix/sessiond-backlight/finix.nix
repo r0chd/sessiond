@@ -1,29 +1,15 @@
 {
   lib,
-  pkgs,
   config,
   ...
 }:
 let
-  inherit (lib) types;
   cfg = config.services.sessiond-backlight;
 in
 {
-  options.services.sessiond-backlight = {
-    enable = lib.mkEnableOption "sessiond-backlight";
-    package = lib.mkPackageOption pkgs "sessiond-backlight" { };
-    debug = lib.mkOption {
-      type = types.bool;
-      default = false;
-      description = ''
-        Whether to enable debug logging.
-      '';
-    };
-  };
+  imports = [ ./common.nix ];
 
   config = lib.mkIf cfg.enable {
-    services.dbus.packages = [ cfg.package ];
-
     finit.services.sessiond-backlight = {
       description = "";
       conditions = [

@@ -60,6 +60,10 @@ in
   nixosModules = rec {
     default = import ./nix/sessiond/nixos.nix;
     sessiond = default;
+    sessiond-backlight = import ./nix/sessiond-backlight/nixos.nix;
+    sessiond-hooks = import ./nix/sessiond-hooks/nixos.nix;
+    sessiond-uaccess = import ./nix/sessiond-uaccess/nixos.nix;
+    sessiond-power = import ./nix/sessiond-power/nixos.nix;
   };
 
   finixModules = rec {

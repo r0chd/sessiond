@@ -6,6 +6,7 @@
   sessiond-backlight,
   sessiond-hooks,
   sessiond-uaccess,
+  sessiond-power,
   ...
 }:
 let
@@ -16,9 +17,63 @@ in
 
   systemd.package = pkgs.systemd.override { withLogind = false; };
 
-  services.sessiond = {
-    enable = true;
-    package = sessiond;
+  environment.systemPackages = [ pkgs.dinit ];
+
+  services = {
+    sessiond = {
+      enable = true;
+      package = sessiond;
+      debug = true;
+    };
+    sessiond-uaccess = {
+      enable = true;
+      package = sessiond-uaccess;
+      debug = true;
+    };
+    sessiond-backlight = {
+      enable = true;
+      package = sessiond-backlight;
+      debug = true;
+    };
+    sessiond-power = {
+      enable = true;
+      package = sessiond-power;
+      debug = true;
+      settings = {
+        reboot = [ "/run/current-system/sw/bin/reboot" ];
+        poweroff = [ "/run/current-system/sw/bin/poweroff" ];
+        hibernate = [
+          "${pkgs.zzz}/bin/zzz"
+          "-Z"
+        ];
+        suspend = [
+          "${pkgs.zzz}/bin/zzz"
+          "-z"
+        ];
+        hybrid-sleep = [
+          "${pkgs.zzz}/bin/zzz"
+          "-H"
+        ];
+      };
+    };
+    sessiond-hooks = {
+      package = sessiond-hooks;
+      debug = true;
+      hooks.dinit.settings = {
+        on_start = {
+          exec = lib.getExe' pkgs.dinit "dinit";
+          args = [
+            "--user"
+            "--services-dir"
+            "~/.config/dinit.d"
+          ];
+        };
+        restart = {
+          on = "Failure";
+          delay = 5;
+        };
+      };
+    };
   };
 
   security.pam.services.login.rules.session.sessiond = {
@@ -26,13 +81,6 @@ in
     modulePath = "${sessiond}/lib/security/pam_sessiond.so";
     order = 900;
   };
-
-  environment.systemPackages = [
-    sessiond
-    sessiond-backlight
-    sessiond-hooks
-    sessiond-uaccess
-  ];
 
   boot.kernelParams = [
     "console=ttyS0"

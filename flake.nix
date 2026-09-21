@@ -66,15 +66,19 @@
       nixosModules = {
         sessiond = import ./nix/sessiond/nixos.nix;
         default = self.nixosModules.sessiond;
+        sessiond-backlight = import ./nix/sessiond-backlight/nixos.nix;
+        sessiond-hooks = import ./nix/sessiond-hooks/nixos.nix;
+        sessiond-uaccess = import ./nix/sessiond-uaccess/nixos.nix;
+        sessiond-power = import ./nix/sessiond-power/nixos.nix;
       };
 
       finixModules = {
         sessiond = import ./nix/sessiond/finix.nix;
+        default = self.finixModules.sessiond;
         sessiond-backlight = import ./nix/sessiond-backlight/finix.nix;
         sessiond-hooks = import ./nix/sessiond-hooks/finix.nix;
         sessiond-uaccess = import ./nix/sessiond-uaccess/finix.nix;
         sessiond-power = import ./nix/sessiond-power/finix.nix;
-        default = self.finixModules.sessiond;
       };
 
       formatter = forAllSystems (pkgs: import ./nix/internal/formatter.nix { inherit pkgs; });
@@ -97,6 +101,10 @@
             };
             modules = [
               ./nix/sessiond/nixos.nix
+              ./nix/sessiond-backlight/nixos.nix
+              ./nix/sessiond-hooks/nixos.nix
+              ./nix/sessiond-uaccess/nixos.nix
+              ./nix/sessiond-power/nixos.nix
               ./nix/internal/nixos-vm.nix
             ];
           };

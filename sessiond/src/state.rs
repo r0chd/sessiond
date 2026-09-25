@@ -34,6 +34,7 @@ pub struct Session {
     pub env: BTreeMap<sync::Arc<str>, sync::Arc<str>>,
     #[serde(default)]
     pub active: String,
+    pub recoverable: bool,
 }
 
 impl Session {
@@ -82,8 +83,9 @@ pub fn write_state(
             &session::Timestamp,
             &session::SessionEnv,
             &session::ActiveState,
+            Option<&session::Recoverable>,
         ),
-        (With<session::Session>, With<session::Recoverable>),
+        With<session::Session>,
     >,
     changed: Query<
         Entity,
@@ -126,6 +128,7 @@ pub fn write_state(
                 timestamp,
                 env,
                 active_state,
+                recoverable,
             )| {
                 let timestamp = timestamp
                     .0
@@ -165,6 +168,7 @@ pub fn write_state(
                             .map(|(name, value)| (sync::Arc::clone(name), sync::Arc::clone(value)))
                             .collect(),
                         active: active.to_owned(),
+                        recoverable: recoverable.is_some(),
                     },
                 )
             },
@@ -202,7 +206,7 @@ impl State {
         temp_path.push("~");
 
         let mut file = fs::File::create(&temp_path)?;
-        fs::set_permissions(&temp_path, fs::Permissions::from_mode(0o600))?;
+        fs::set_permissions(&temp_path, fs::Permissions::from_mode(0o644))?;
 
         let toml = toml::to_string_pretty(self)?;
         file.write_all(toml.as_bytes())?;
@@ -229,6 +233,10 @@ pub fn load_state(
                 next_session_id.0 = session::SessionId::from_raw(saved_state.next_session_id);
 
                 for (raw_id, saved_session) in saved_state.sessions {
+                    if !saved_session.recoverable {
+                        continue;
+                    }
+
                     let Ok(raw_id) = raw_id.parse::<u32>() else {
                         log::warn!(session_id = raw_id.as_str(); "ignoring invalid session ID in state");
                         continue;

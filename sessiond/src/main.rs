@@ -123,6 +123,9 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
     world.insert_resource(config);
     world.insert_resource(LoopSignal(event_loop.get_signal()));
     let state_path = runtime_dir.join("state.toml");
+    if let Err(e) = rustix::fs::chmod(&state_path, rustix::fs::Mode::from_bits_truncate(0o644)) {
+        log::error!(path = state_path.to_str(), error = e.to_string().as_str(); "failed to chmod state path");
+    }
     world.insert_resource(state::StateWriter(state_path));
     world.insert_non_send(event_loop.handle());
     #[cfg(feature = "consolekit")]

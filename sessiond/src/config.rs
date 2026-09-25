@@ -23,24 +23,22 @@ impl Default for UserConfig {
 }
 
 impl UserConfig {
-    pub fn runtime_dir(&self, uid: u32, gid: u32) -> sync::Arc<str> {
+    pub fn runtime_dir(&self, uid: u32) -> sync::Arc<str> {
         self.runtime_dir
             .replace(concat!("{", "uid", "}"), &uid.to_string())
-            .replace(concat!("{", "gid", "}"), &gid.to_string())
             .into()
     }
 
     pub fn environment(
         &self,
         uid: u32,
-        gid: u32,
         session_id: u32,
         term: Option<sync::Arc<str>>,
         sessiond_runtime_dir: sync::Arc<str>,
     ) -> BTreeMap<sync::Arc<str>, sync::Arc<str>> {
         #[cfg(feature = "consolekit")]
         let _ = session_id;
-        let runtime_dir = self.runtime_dir(uid, gid);
+        let runtime_dir = self.runtime_dir(uid);
         let mut env: BTreeMap<sync::Arc<str>, sync::Arc<str>> = BTreeMap::from([
             (sync::Arc::from("XDG_RUNTIME_DIR"), runtime_dir),
             #[cfg(not(feature = "consolekit"))]

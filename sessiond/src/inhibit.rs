@@ -79,9 +79,6 @@ pub struct What(pub(crate) u32);
 #[derive(Component, Debug, Clone, Copy)]
 pub struct Uid(pub(crate) u32);
 
-#[derive(Component, Debug)]
-pub struct Username(pub(crate) String);
-
 #[derive(Component, Debug, Clone, Copy)]
 pub struct Pid(pub(crate) u32);
 
@@ -99,7 +96,6 @@ pub struct InhibitorBundle {
     pub who: Who,
     pub why: Why,
     pub uid: Uid,
-    pub username: Username,
     pub pid: Pid,
     pub comm: Comm,
     pub mode: Mode,
@@ -177,9 +173,6 @@ impl hyprwire::Dispatch<session_inhibit_manager::SessionInhibitManager> for crat
         let creds = *object.client().creds();
         let uid = creds.uid.as_raw();
         let pid = creds.pid.as_raw_pid().cast_unsigned();
-        let username = uzers::get_user_by_uid(uid)
-            .map(|user| user.name().to_string_lossy().into_owned())
-            .unwrap_or_default();
         let comm = fs::read_to_string(format!("/proc/{pid}/comm"))
             .map(|comm| comm.trim().to_owned())
             .unwrap_or_default();
@@ -192,7 +185,6 @@ impl hyprwire::Dispatch<session_inhibit_manager::SessionInhibitManager> for crat
             who: Who(who),
             why: Why(why),
             uid: Uid(uid),
-            username: Username(username),
             pid: Pid(pid),
             comm: Comm(comm),
             mode: Mode(mode),
@@ -292,7 +284,6 @@ pub fn handle_add_object(
             &Who,
             &Why,
             &Uid,
-            &Username,
             &Pid,
             &Comm,
             &Mode,
@@ -302,9 +293,9 @@ pub fn handle_add_object(
     >,
 ) {
     for request in requests.read() {
-        let Some((id, what, who, why, uid, username, pid, comm, mode, mut objects)) = inhibitors
+        let Some((id, what, who, why, uid, pid, comm, mode, mut objects)) = inhibitors
             .iter_mut()
-            .find(|(id, _, _, _, _, _, _, _, _, _)| **id == request.inhibitor_id)
+            .find(|(id, _, _, _, _, _, _, _, _)| **id == request.inhibitor_id)
         else {
             request.object.send_active(0);
             request.object.send_destroyed();
@@ -314,7 +305,6 @@ pub fn handle_add_object(
         request.object.send_inhibitor_id(id.as_raw());
         request.object.send_who(&who.0);
         request.object.send_uid(uid.0);
-        request.object.send_username(&username.0);
         request.object.send_pid(pid.0);
         request.object.send_comm(&comm.0);
         request.object.send_what(what.0);

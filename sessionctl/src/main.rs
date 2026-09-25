@@ -21,6 +21,12 @@ use seat_core_v1::{seat_core_client, seat_core_device, seat_core_manager, seat_c
 use serde_json::json;
 use std::{collections::BTreeSet, env, ffi::OsString, fs, io, path, process, time};
 
+fn username(uid: u32) -> String {
+    uzers::get_user_by_uid(uid)
+        .map(|user| user.name().to_string_lossy().into_owned())
+        .unwrap_or_else(|| uid.to_string())
+}
+
 struct Session {
     object: Option<session_core_session::SessionCoreSession>,
     id: u32,
@@ -516,8 +522,10 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for State {
         };
         match event {
             session_core_session::Event::SessionId { session_id } => s.id = session_id,
-            session_core_session::Event::Uid { uid } => s.uid = uid,
-            session_core_session::Event::Username { username } => s.username = username,
+            session_core_session::Event::Uid { uid } => {
+                s.uid = uid;
+                s.username = username(uid);
+            }
             session_core_session::Event::Class { class } => s.class = class,
             session_core_session::Event::Vt { vt } => s.vt = vt,
             session_core_session::Event::Leader { leader } => s.leader = leader,
@@ -545,8 +553,10 @@ impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for State {
             return;
         };
         match event {
-            session_core_user::Event::Uid { uid } => u.uid = uid,
-            session_core_user::Event::Username { username } => u.username = username,
+            session_core_user::Event::Uid { uid } => {
+                u.uid = uid;
+                u.username = username(uid);
+            }
             session_core_user::Event::Lingering { lingering } => u.lingering = lingering != 0,
             session_core_user::Event::State { state } => u.state = state,
             session_core_user::Event::CanModify { can_modify } => u.can_modify = can_modify != 0,
@@ -575,9 +585,9 @@ impl hyprwire::Dispatch<session_core_inhibitor::SessionCoreInhibitor> for State 
                 self.inhibitors[index].id = inhibitor_id;
             }
             session_core_inhibitor::Event::Who { who } => self.inhibitors[index].who = who,
-            session_core_inhibitor::Event::Uid { uid } => self.inhibitors[index].uid = uid,
-            session_core_inhibitor::Event::Username { username } => {
-                self.inhibitors[index].username = username;
+            session_core_inhibitor::Event::Uid { uid } => {
+                self.inhibitors[index].uid = uid;
+                self.inhibitors[index].username = username(uid);
             }
             session_core_inhibitor::Event::Pid { pid } => self.inhibitors[index].pid = pid,
             session_core_inhibitor::Event::Comm { comm } => self.inhibitors[index].comm = comm,

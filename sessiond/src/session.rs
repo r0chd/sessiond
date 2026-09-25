@@ -92,7 +92,6 @@ impl SessionManagementTarget {
 pub struct PendingSession {
     pub manager: Option<session_manager::SessionManager>,
     pub uid: u32,
-    pub gid: u32,
     pub class: Option<SessionClass>,
     pub vt: Option<num::NonZeroU32>,
     pub remote_host: Option<sync::Arc<str>>,
@@ -153,8 +152,6 @@ pub struct SessionBundle {
     pub id: SessionId,
     pub class: SessionClass,
     pub uid: Uid,
-    pub gid: Gid,
-    pub username: Username,
     pub timestamp: Timestamp,
     pub leader_id: LeaderId,
     pub env: SessionEnv,
@@ -176,12 +173,6 @@ pub struct IsLocal;
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Uid(pub u32);
-
-#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Gid(pub u32);
-
-#[derive(Component, Debug, Clone, PartialEq, Eq)]
-pub struct Username(pub sync::Arc<str>);
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Vt(pub num::NonZeroU32);
@@ -271,8 +262,6 @@ pub fn spawn(
     session_id: SessionId,
     class: SessionClass,
     uid: u32,
-    gid: u32,
-    username: sync::Arc<str>,
     vt: Option<u32>,
     leader_id: i32,
     remote_host: Option<sync::Arc<str>>,
@@ -288,8 +277,6 @@ pub fn spawn(
         id: session_id,
         class,
         uid: Uid(uid),
-        gid: Gid(gid),
-        username: Username(username),
         timestamp: Timestamp(time::SystemTime::now()),
         leader_id: LeaderId(leader_id),
         env: SessionEnv(env),
@@ -535,7 +522,6 @@ pub fn handle_add_object(
             Entity,
             &SessionId,
             &Uid,
-            &Username,
             Option<&Vt>,
             &SessionClass,
             &ActiveState,
@@ -554,7 +540,6 @@ pub fn handle_add_object(
             entity,
             session_id,
             uid,
-            username,
             vt,
             class,
             state,
@@ -565,9 +550,7 @@ pub fn handle_add_object(
             mut objects,
         )) = sessions
             .iter_mut()
-            .find(|(_, session_id, _, _, _, _, _, _, _, _, _, _)| {
-                **session_id == request.session_id
-            })
+            .find(|(_, session_id, _, _, _, _, _, _, _, _, _)| **session_id == request.session_id)
         else {
             log::warn!(session_id = request.session_id.as_raw(); "get_session_by_pid requested for unknown session");
             request.object.send_destroyed();
@@ -577,7 +560,6 @@ pub fn handle_add_object(
         log::debug!(session_id = request.session_id.as_raw(), uid = request.object.client().creds().uid.as_raw(); "session info requested");
         request.object.send_session_id(session_id.as_raw());
         request.object.send_uid(uid.0);
-        request.object.send_username(&username.0);
         request.object.send_class((*class).into());
         request.object.send_vt(vt.map_or(0, |vt| vt.0.get()));
         request.object.send_active(state.0);
@@ -801,21 +783,18 @@ pub fn handle_session_management_action(
                 uid,
                 leader_id,
             } => {
-                if let Some(user) = uzers::get_user_by_uid(*uid) {
-                    pending_sessions.by_management_object.insert(
-                        object.clone(),
-                        PendingSession {
-                            manager: management_object.clone(),
-                            uid: *uid,
-                            gid: user.primary_group_id(),
-                            class: None,
-                            vt: None,
-                            remote_host: None,
-                            env: BTreeMap::new(),
-                            leader_id: *leader_id,
-                        },
-                    );
-                }
+                pending_sessions.by_management_object.insert(
+                    object.clone(),
+                    PendingSession {
+                        manager: management_object.clone(),
+                        uid: *uid,
+                        class: None,
+                        vt: None,
+                        remote_host: None,
+                        env: BTreeMap::new(),
+                        leader_id: *leader_id,
+                    },
+                );
                 continue;
             }
             SessionManagementAction::Env { key, value } => {
@@ -858,7 +837,7 @@ pub fn handle_session_management_action(
                         );
                         return;
                     };
-                    let username = user.name().to_string_lossy().into();
+                    let username: sync::Arc<str> = user.name().to_string_lossy().into();
 
                     let session_id = next_id.take();
 
@@ -894,7 +873,7 @@ pub fn handle_session_management_action(
                     let user_config = config.users.get(&username).cloned().unwrap_or_default();
                     user::create_runtime_dir(
                         pending_session.uid,
-                        &user_config.runtime_dir(pending_session.uid, pending_session.gid),
+                        &user_config.runtime_dir(pending_session.uid),
                     );
 
                     let is_local = pending_session.remote_host.is_none();
@@ -910,7 +889,6 @@ pub fn handle_session_management_action(
                     let term = pending_session.env.get("TERM").cloned();
                     let mut env = user_config.environment(
                         pending_session.uid,
-                        pending_session.gid,
                         session_id.as_raw(),
                         term,
                         sync::Arc::clone(&sessiond_runtime_dir.0),
@@ -929,8 +907,6 @@ pub fn handle_session_management_action(
                         session_id,
                         pending_session.class.unwrap_or_default(),
                         pending_session.uid,
-                        pending_session.gid,
-                        username,
                         pending_session.vt.map(num::NonZeroU32::get),
                         pending_session.leader_id,
                         pending_session.remote_host,

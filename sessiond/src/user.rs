@@ -3,7 +3,7 @@ use bevy_ecs::prelude::*;
 use hyprwire_protocols_sessiond::server::session_core::v1::session_core_v1;
 use hyprwire_protocols_sessiond::server::session_core::v1::session_core_v1::session_core_user;
 use std::collections::HashMap;
-use std::{fs, io, sync};
+use std::{fs, io};
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UserState(pub session_core_v1::UserState);
@@ -32,7 +32,6 @@ pub struct UserRegistry {
 pub struct UserBundle {
     pub marker: User,
     pub uid: session::Uid,
-    pub username: session::Username,
     pub state: UserState,
     pub objects: Objects,
 }
@@ -49,7 +48,6 @@ pub struct Objects(pub Vec<session_core_user::SessionCoreUser>);
 pub fn spawn(
     commands: &mut Commands,
     uid: u32,
-    username: sync::Arc<str>,
     lingering: bool,
     state: UserState,
     user_registry: &mut ResMut<UserRegistry>,
@@ -58,7 +56,6 @@ pub fn spawn(
     let mut cmd = commands.spawn(UserBundle {
         marker: User,
         uid: session::Uid(uid),
-        username: session::Username(username),
         state,
         objects: Objects::default(),
     });
@@ -98,13 +95,13 @@ pub fn remove_runtime_dir(path: &str) -> io::Result<()> {
 pub fn ensure_session_users(
     mut commands: Commands,
     sessions: Query<
-        (&session::Uid, &session::Username, &session::ActiveState),
+        (&session::Uid, &session::ActiveState),
         (With<session::Session>, Added<session::Session>),
     >,
     mut user_registry: ResMut<UserRegistry>,
     info_managers: Res<session::SessionInfoManagers>,
 ) {
-    for (uid, username, session_state) in sessions {
+    for (uid, session_state) in sessions {
         if user_registry.by_uid.contains_key(&uid.0) {
             continue;
         }
@@ -118,7 +115,6 @@ pub fn ensure_session_users(
         spawn(
             &mut commands,
             uid.0,
-            sync::Arc::clone(&username.0),
             false,
             state,
             &mut user_registry,
@@ -182,7 +178,6 @@ pub fn handle_add_object(
         (
             Entity,
             &session::Uid,
-            &session::Username,
             Option<&Lingering>,
             &UserState,
             &mut Objects,
@@ -192,9 +187,9 @@ pub fn handle_add_object(
     mut user_registry: ResMut<UserRegistry>,
 ) {
     for request in requests.read() {
-        let Some((entity, uid, username, lingering, state, mut objects)) = users
+        let Some((entity, uid, lingering, state, mut objects)) = users
             .iter_mut()
-            .find(|(_, uid, _, _, _, _)| uid.0 == request.uid)
+            .find(|(_, uid, _, _, _)| uid.0 == request.uid)
         else {
             log::warn!(uid = request.uid; "get_user requested for unknown user");
             request.object.send_not_found();
@@ -202,7 +197,6 @@ pub fn handle_add_object(
         };
 
         request.object.send_uid(uid.0);
-        request.object.send_username(&username.0);
         if lingering.is_some() {
             request.object.send_lingering(1);
         } else {
@@ -364,34 +358,26 @@ pub fn initialize_lingering_users(
         .filter(|(_, config)| config.linger)
         .filter_map(|(name, config)| {
             let user = uzers::get_user_by_name(name.as_ref())?;
-            Some((
-                user.uid(),
-                config.runtime_dir(user.uid(), user.primary_group_id()),
-            ))
+            Some((user.uid(), config.runtime_dir(user.uid())))
         })
         .collect::<Vec<_>>();
     for (uid, runtime_dir) in lingering_users {
-        if let Some(user) = uzers::get_user_by_uid(uid) {
-            spawn(
-                &mut commands,
-                uid,
-                user.name().to_string_lossy().into(),
-                true,
-                UserState::LINGERING,
-                &mut user_registry,
-                &info_managers,
-            );
+        spawn(
+            &mut commands,
+            uid,
+            true,
+            UserState::LINGERING,
+            &mut user_registry,
+            &info_managers,
+        );
 
-            create_runtime_dir(uid, &runtime_dir);
-            if let Err(e) = cgroup_manager.ensure_user_cgroup(uid) {
-                log::error!(
-                    uid,
-                    error = e.to_string().as_str();
-                    "failed to create user cgroup"
-                );
-            }
-        } else {
-            log::warn!(uid; "configured lingering user no longer exists");
+        create_runtime_dir(uid, &runtime_dir);
+        if let Err(e) = cgroup_manager.ensure_user_cgroup(uid) {
+            log::error!(
+                uid,
+                error = e.to_string().as_str();
+                "failed to create user cgroup"
+            );
         }
     }
 }

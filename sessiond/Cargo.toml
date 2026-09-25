@@ -14,6 +14,7 @@ readme.workspace = true
 workspace = true
 
 [dependencies]
+sessiond-state = { path = "../sessiond-state", version = "0.1.0" }
 anyhow = "1.0.102"
 clap = { version = "4.6.1", features = ["derive"] }
 env_logger = { version = "0.11.10", features = ["kv"] }

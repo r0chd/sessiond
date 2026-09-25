@@ -1,66 +1,41 @@
 use crate::{cgroup, config, session, user};
-use anyhow::Context;
 use bevy_ecs::prelude::*;
 use hyprwire_protocols_sessiond::server::session_core::v1::session_core_v1;
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use sessiond_state::{ActiveState, Session, SessionClass, State, UserState};
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::{fs, path, sync, time};
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub struct State {
-    pub next_session_id: u32,
-    #[serde(default)]
-    pub sessions: BTreeMap<String, Session>,
+trait SessionExt {
+    fn class(&self) -> session::SessionClass;
+    fn timestamp(&self) -> time::SystemTime;
+    fn active_state(&self) -> session_core_v1::ActiveState;
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub struct Session {
-    pub uid: u32,
-    pub gid: u32,
-    pub username: sync::Arc<str>,
-    #[serde(default)]
-    pub class: String,
-    #[serde(default)]
-    pub vt: Option<u32>,
-    pub leader: i32,
-    #[serde(default)]
-    pub remote_host: Option<sync::Arc<str>>,
-    pub timestamp: u128,
-    #[serde(default)]
-    pub env: BTreeMap<sync::Arc<str>, sync::Arc<str>>,
-    #[serde(default)]
-    pub active: String,
-    pub recoverable: bool,
-}
-
-impl Session {
-    pub fn class(&self) -> session::SessionClass {
-        match self.class.as_str() {
-            "greeter" => session::SessionClass::Greeter,
-            "lock-screen" => session::SessionClass::LockScreen,
-            "background" => session::SessionClass::Background,
-            "background-light" => session::SessionClass::BackgroundLight,
-            "manager" => session::SessionClass::Manager,
-            "manager-early" => session::SessionClass::ManagerEarly,
-            _ => session::SessionClass::User,
+impl SessionExt for Session {
+    fn class(&self) -> session::SessionClass {
+        match self.class {
+            SessionClass::Greeter => session::SessionClass::Greeter,
+            SessionClass::LockScreen => session::SessionClass::LockScreen,
+            SessionClass::Background => session::SessionClass::Background,
+            SessionClass::BackgroundLight => session::SessionClass::BackgroundLight,
+            SessionClass::Manager => session::SessionClass::Manager,
+            SessionClass::ManagerEarly => session::SessionClass::ManagerEarly,
+            SessionClass::User | SessionClass::Unknown => session::SessionClass::User,
         }
     }
 
-    pub fn timestamp(&self) -> time::SystemTime {
+    fn timestamp(&self) -> time::SystemTime {
         time::UNIX_EPOCH
             + time::Duration::from_micros(u64::try_from(self.timestamp).unwrap_or(u64::MAX))
     }
 
-    pub fn active_state(&self) -> session_core_v1::ActiveState {
-        match self.active.as_str() {
-            "active" => session_core_v1::ActiveState::Active,
-            "closing" => session_core_v1::ActiveState::Closing,
-            "opening" => session_core_v1::ActiveState::Opening,
-            _ => session_core_v1::ActiveState::Online,
+    fn active_state(&self) -> session_core_v1::ActiveState {
+        match self.active {
+            ActiveState::Active => session_core_v1::ActiveState::Active,
+            ActiveState::Closing => session_core_v1::ActiveState::Closing,
+            ActiveState::Opening => session_core_v1::ActiveState::Opening,
+            ActiveState::Online | ActiveState::Unknown => session_core_v1::ActiveState::Online,
         }
     }
 }
@@ -74,8 +49,6 @@ pub fn write_state(
         (
             &session::SessionId,
             &session::Uid,
-            &session::Gid,
-            &session::Username,
             &session::SessionClass,
             Option<&session::Vt>,
             &session::LeaderId,
@@ -94,8 +67,6 @@ pub fn write_state(
             Or<(
                 Added<session::Session>,
                 Changed<session::Uid>,
-                Changed<session::Gid>,
-                Changed<session::Username>,
                 Changed<session::SessionClass>,
                 Changed<session::Vt>,
                 Changed<session::LeaderId>,
@@ -108,8 +79,26 @@ pub fn write_state(
     >,
     removed: RemovedComponents<session::Session>,
     next_session_id: Res<session::NextSessionId>,
+    users: Query<(&session::Uid, &user::UserState), With<user::User>>,
+    changed_users: Query<
+        Entity,
+        (
+            With<user::User>,
+            Or<(
+                Added<user::User>,
+                Changed<user::UserState>,
+                Changed<session::Uid>,
+            )>,
+        ),
+    >,
+    removed_users: RemovedComponents<user::User>,
 ) {
-    if changed.is_empty() && removed.is_empty() && !next_session_id.is_changed() {
+    if changed.is_empty()
+        && removed.is_empty()
+        && !next_session_id.is_changed()
+        && changed_users.is_empty()
+        && removed_users.is_empty()
+    {
         return;
     }
 
@@ -119,8 +108,6 @@ pub fn write_state(
             |(
                 id,
                 uid,
-                gid,
-                username,
                 class,
                 vt,
                 leader,
@@ -136,28 +123,26 @@ pub fn write_state(
                     .unwrap_or_default()
                     .as_micros();
                 let class = match class {
-                    session::SessionClass::User => "user",
-                    session::SessionClass::Greeter => "greeter",
-                    session::SessionClass::LockScreen => "lock-screen",
-                    session::SessionClass::Background => "background",
-                    session::SessionClass::BackgroundLight => "background-light",
-                    session::SessionClass::Manager => "manager",
-                    session::SessionClass::ManagerEarly => "manager-early",
+                    session::SessionClass::User => SessionClass::User,
+                    session::SessionClass::Greeter => SessionClass::Greeter,
+                    session::SessionClass::LockScreen => SessionClass::LockScreen,
+                    session::SessionClass::Background => SessionClass::Background,
+                    session::SessionClass::BackgroundLight => SessionClass::BackgroundLight,
+                    session::SessionClass::Manager => SessionClass::Manager,
+                    session::SessionClass::ManagerEarly => SessionClass::ManagerEarly,
                 };
                 let active = match active_state.0 {
-                    session_core_v1::ActiveState::Active => "active",
-                    session_core_v1::ActiveState::Closing => "closing",
-                    session_core_v1::ActiveState::Opening => "opening",
-                    _ => "online",
+                    session_core_v1::ActiveState::Active => ActiveState::Active,
+                    session_core_v1::ActiveState::Closing => ActiveState::Closing,
+                    session_core_v1::ActiveState::Opening => ActiveState::Opening,
+                    _ => ActiveState::Online,
                 };
 
                 (
                     id.as_raw().to_string(),
                     Session {
                         uid: uid.0,
-                        gid: gid.0,
-                        username: sync::Arc::clone(&username.0),
-                        class: class.to_owned(),
+                        class,
                         vt: vt.map(|vt| vt.0.get()),
                         leader: leader.0,
                         remote_host: remote_host.map(|host| sync::Arc::clone(&host.0)),
@@ -167,7 +152,7 @@ pub fn write_state(
                             .iter()
                             .map(|(name, value)| (sync::Arc::clone(name), sync::Arc::clone(value)))
                             .collect(),
-                        active: active.to_owned(),
+                        active,
                         recoverable: recoverable.is_some(),
                     },
                 )
@@ -177,6 +162,20 @@ pub fn write_state(
 
     let state = State {
         next_session_id: next_session_id.0.as_raw(),
+        users: users
+            .iter()
+            .map(|(uid, state)| {
+                let state = match state.0 {
+                    session_core_v1::UserState::Active => UserState::Active,
+                    session_core_v1::UserState::Closing => UserState::Closing,
+                    session_core_v1::UserState::Lingering => UserState::Lingering,
+                    session_core_v1::UserState::Online => UserState::Online,
+                    session_core_v1::UserState::Offline => UserState::Offline,
+                    _ => UserState::Unknown,
+                };
+                (uid.0, sessiond_state::User { state })
+            })
+            .collect(),
         sessions,
     };
 
@@ -185,23 +184,12 @@ pub fn write_state(
     }
 }
 
-impl State {
-    pub fn load(path: &path::Path) -> anyhow::Result<Self> {
-        let state = fs::read_to_string(path)
-            .with_context(|| format!("failed to read state file: {}", path.display()))?;
+trait StateExt: Sized {
+    fn write(&self, path: &path::Path) -> anyhow::Result<()>;
+}
 
-        toml::from_str::<Self>(&state)
-            .inspect_err(|err| {
-                log::error!(
-                    path = path.to_string_lossy().as_ref(),
-                    error = err.to_string().as_str();
-                    "failed to parse config file"
-                );
-            })
-            .with_context(|| format!("failed to parse staet file {}", path.display()))
-    }
-
-    pub fn write(&self, path: &path::Path) -> anyhow::Result<()> {
+impl StateExt for State {
+    fn write(&self, path: &path::Path) -> anyhow::Result<()> {
         let mut temp_path = path.as_os_str().to_os_string();
         temp_path.push("~");
 
@@ -228,7 +216,7 @@ pub fn load_state(
     loop_handle: NonSend<'_, calloop::LoopHandle<'static, crate::Sessiond>>,
 ) {
     if state_writer.0.exists() {
-        match State::load(&state_writer.0) {
+        match sessiond_state::try_read(&state_writer.0) {
             Ok(saved_state) => {
                 next_session_id.0 = session::SessionId::from_raw(saved_state.next_session_id);
 
@@ -242,6 +230,13 @@ pub fn load_state(
                         continue;
                     };
                     let session_id = session::SessionId::from_raw(raw_id);
+
+                    let Some(user) = uzers::get_user_by_uid(saved_session.uid) else {
+                        log::warn!(session_id = raw_id, uid = saved_session.uid; "ignoring session whose user no longer exists");
+                        continue;
+                    };
+                    let username: sync::Arc<str> =
+                        user.name().to_string_lossy().into_owned().into();
 
                     let cgroup = match cgroup_manager
                         .restore_session_cgroup(saved_session.uid, session_id)
@@ -264,10 +259,10 @@ pub fn load_state(
 
                     let runtime_dir = config
                         .users
-                        .get(&saved_session.username)
+                        .get(&username)
                         .cloned()
                         .unwrap_or_default()
-                        .runtime_dir(saved_session.uid, saved_session.gid);
+                        .runtime_dir(saved_session.uid);
                     user::create_runtime_dir(saved_session.uid, &runtime_dir);
 
                     let active_state = saved_session.active_state();
@@ -277,8 +272,6 @@ pub fn load_state(
                         session_id,
                         saved_session.class(),
                         saved_session.uid,
-                        saved_session.gid,
-                        sync::Arc::clone(&saved_session.username),
                         saved_session.vt,
                         saved_session.leader,
                         saved_session.remote_host.as_ref().map(sync::Arc::clone),

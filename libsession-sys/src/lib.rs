@@ -37,6 +37,7 @@ pub enum LibsessionUserState {
     Online = 2,
     Active = 3,
     Closing = 4,
+    Unknown = 5,
 }
 
 #[repr(C)]

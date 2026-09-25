@@ -2,6 +2,7 @@
 members = [
   "sessionctl",
   "sessiond",
+  "sessiond-state",
   "libsession-sys",
   "libsession-rs",
   "pam",

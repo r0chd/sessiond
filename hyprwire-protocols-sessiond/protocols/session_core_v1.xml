@@ -116,9 +116,6 @@
   <s2c name="uid">
    <arg name="uid" type="uint" summary="user id"/>
   </s2c>
-  <s2c name="username">
-   <arg name="username" type="varchar" summary="username"/>
-  </s2c>
   <s2c name="class">
    <arg name="class" type="enum" interface="session_class" summary="session class"/>
   </s2c>
@@ -196,9 +193,6 @@
   <s2c name="uid">
    <arg name="uid" type="uint" summary="owner user identifier"/>
   </s2c>
-  <s2c name="username">
-   <arg name="username" type="varchar" summary="owner user name"/>
-  </s2c>
   <s2c name="pid">
    <arg name="pid" type="uint" summary="owner process identifier"/>
   </s2c>
@@ -233,9 +227,6 @@
   </description>
   <s2c name="uid">
    <arg name="uid" type="uint" summary="user id"/>
-  </s2c>
-  <s2c name="username">
-   <arg name="username" type="varchar" summary="username"/>
   </s2c>
   <s2c name="lingering">
    <arg name="lingering" type="uint" summary="non-zero if the user has lingering enabled"/>

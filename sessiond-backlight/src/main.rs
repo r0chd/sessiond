@@ -380,16 +380,20 @@ fn main() -> anyhow::Result<()> {
         devices: Vec::new(),
     };
 
-    let socket_path = path::Path::new("/run/sessiond-backlight.sock");
-    let mut server = server::Server::bind(&socket_path)?;
-    fs::set_permissions(socket_path, fs::Permissions::from_mode(0o666))?;
+    let sessiond_runtime_dir: path::PathBuf = env::var_os("SESSIOND_RUNTIME_DIR")
+        .map(path::PathBuf::from)
+        .unwrap_or_else(|| path::PathBuf::from("/run/sessiond"));
+    let backlight_socket_path = sessiond_runtime_dir.join("backlight.sock");
+
+    let mut server = server::Server::bind(&backlight_socket_path)?;
+    fs::set_permissions(backlight_socket_path, fs::Permissions::from_mode(0o666))?;
 
     server.add_implementation::<session_backlight_v1::SessionBacklightV1, _>(
         &mut sessiond_backlight,
         1,
     );
 
-    let mut client = client::Client::connect("/run/sessiond/sessiond.sock")?;
+    let mut client = client::Client::connect(sessiond_runtime_dir.join("sessiond.sock"))?;
     let eq = client.new_event_queue();
 
     client.add_implementation::<session_core_v1::SessionCoreV1>();

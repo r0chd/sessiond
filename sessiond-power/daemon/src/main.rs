@@ -15,9 +15,6 @@ use session_power_v1::session_power_manager;
 use std::os::unix::fs::PermissionsExt;
 use std::{env, fs, path, process};
 
-const SESSIOND_SOCKET_PATH: &str = "/run/sessiond/sessiond.sock";
-const POWER_SOCKET_PATH: &str = "/run/sessiond/power.sock";
-
 #[derive(Parser)]
 struct Args {
     #[arg(short, long, help = "Path to configuration file")]
@@ -438,8 +435,13 @@ fn main() -> anyhow::Result<()> {
         error: None,
     };
 
-    let mut session_socket = client::Client::connect(SESSIOND_SOCKET_PATH)
-        .with_context(|| format!("failed to connect to {SESSIOND_SOCKET_PATH}"))?;
+    let sessiond_runtime_dir: path::PathBuf = env::var_os("SESSIOND_RUNTIME_DIR")
+        .map(path::PathBuf::from)
+        .unwrap_or_else(|| path::PathBuf::from("/run/sessiond"));
+    let sessiond_socket_path = sessiond_runtime_dir.join("sessiond.sock");
+
+    let mut session_socket = client::Client::connect(&sessiond_socket_path)
+        .with_context(|| format!("failed to connect to {}", sessiond_socket_path.display()))?;
     let session_queue = session_socket.new_event_queue();
     session_socket.add_implementation::<session_core_v1::SessionCoreV1>();
     session_queue.wait_for_handshake(&mut sessiond_power)?;
@@ -459,8 +461,9 @@ fn main() -> anyhow::Result<()> {
         anyhow::bail!(message);
     }
 
-    let mut power_socket = server::Server::bind(&POWER_SOCKET_PATH)?;
-    fs::set_permissions(POWER_SOCKET_PATH, fs::Permissions::from_mode(0o666))?;
+    let power_socket_path = sessiond_runtime_dir.join("power.sock");
+    let mut power_socket = server::Server::bind(&power_socket_path)?;
+    fs::set_permissions(power_socket_path, fs::Permissions::from_mode(0o666))?;
     power_socket.add_implementation::<session_power_v1::SessionPowerV1, _>(&mut sessiond_power, 1);
 
     let mut event_loop = calloop::EventLoop::<SessiondPower>::try_new()?;

@@ -25,7 +25,10 @@ use rustix::net;
 use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
-use std::{env, fs, path};
+use std::{env, fs, path, sync};
+
+#[derive(Resource)]
+pub struct SessiondRuntimeDir(sync::Arc<str>);
 
 #[derive(Parser)]
 struct Args {
@@ -58,7 +61,7 @@ struct ShutdownRequested;
 
 struct Sessiond {
     world: World,
-    notify_schedule: Schedule,
+    schedule: Schedule,
 }
 
 fn notify(message: &[u8]) -> rustix::io::Result<()> {
@@ -93,7 +96,7 @@ fn handle_shutdown(
     loop_signal.0.stop();
 }
 
-fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
+fn run(runtime_dir: path::PathBuf, config: config::Config) -> anyhow::Result<()> {
     let mut event_loop = calloop::EventLoop::try_new()?;
     let signals = signals::Signals::new(&[
         signals::Signal::SIGUSR1,
@@ -116,6 +119,7 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
     world.insert_resource(inhibit::NextInhibitorId(inhibit::InhibitorId::from_raw(1)));
     world.init_resource::<session::SessionInfoManagers>();
     world.init_resource::<ShutdownState>();
+    world.insert_resource(SessiondRuntimeDir(runtime_dir.to_string_lossy().into()));
     world.init_resource::<reconcile::NotifyBatch>();
     world.init_resource::<session::SessionRegistry>();
     world.init_resource::<user::UserRegistry>();
@@ -172,10 +176,7 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
     schedule.add_systems(state::write_state.after(reconcile::send_done));
     schedule.add_systems(message::message_update_system.after(reconcile::send_done));
 
-    let mut sessiond = Sessiond {
-        world,
-        notify_schedule: schedule,
-    };
+    let mut sessiond = Sessiond { world, schedule };
 
     let mut startup = Schedule::default();
     startup.add_systems((user::initialize_lingering_users, state::load_state));
@@ -190,8 +191,8 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
 
     sessiond.world.clear_trackers();
 
-    fs::create_dir_all(runtime_dir)?;
-    fs::set_permissions(runtime_dir, fs::Permissions::from_mode(0o755))?;
+    fs::create_dir_all(&runtime_dir)?;
+    fs::set_permissions(&runtime_dir, fs::Permissions::from_mode(0o755))?;
 
     let socket_path = runtime_dir.join("sessiond.sock");
     let mut socket = server::Server::bind(&socket_path)?;
@@ -274,7 +275,7 @@ fn run(runtime_dir: &path::Path, config: config::Config) -> anyhow::Result<()> {
     }
 
     event_loop.run(None, &mut sessiond, |state| {
-        state.notify_schedule.run(&mut state.world);
+        state.schedule.run(&mut state.world);
     })?;
 
     terminal::Terminal::open(0)
@@ -310,5 +311,5 @@ fn main() -> anyhow::Result<()> {
 
     log::info!("sessiond daemon starting");
 
-    run(&args.runtime_dir, config::Config::load(args.config)?)
+    run(args.runtime_dir, config::Config::load(args.config)?)
 }

@@ -26,6 +26,15 @@ in
       '';
     };
 
+    runtimeDir = lib.mkOption {
+      type = types.strMatching "/.*";
+      default = "/run/sessiond";
+      description = ''
+        Absolute path to the sessiond runtime directory containing its socket and state.
+        Passed to companion services as `SESSIOND_RUNTIME_DIR`.
+      '';
+    };
+
     debug = lib.mkOption {
       type = types.bool;
       default = false;

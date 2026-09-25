@@ -754,6 +754,7 @@ pub fn handle_session_management_action(
     sessions: Query<(&SessionEnv, &Uid), With<Session>>,
     config: Res<config::Config>,
     loop_handle: NonSend<'_, calloop::LoopHandle<'static, crate::Sessiond>>,
+    sessiond_runtime_dir: Res<crate::SessiondRuntimeDir>,
 ) {
     for action in actions.read() {
         if let SessionManagementAction::ManagerDestroy { management_object } = &action.action {
@@ -912,6 +913,7 @@ pub fn handle_session_management_action(
                         pending_session.gid,
                         session_id.as_raw(),
                         term,
+                        sync::Arc::clone(&sessiond_runtime_dir.0),
                     );
                     for (session_env, _) in sessions
                         .iter()

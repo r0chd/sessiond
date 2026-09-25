@@ -15,6 +15,8 @@ in
       after = [ "sessiond.service" ];
       wantedBy = [ "default.target" ];
 
+      environment.SESSIOND_RUNTIME_DIR = config.services.sessiond.runtimeDir;
+
       serviceConfig = {
         ExecStart = "${lib.getExe cfg.package}";
         Environment = if cfg.debug then "LOG_LEVEL=debug" else "LOG_LEVEL=info";

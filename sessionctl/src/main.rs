@@ -4,6 +4,7 @@ mod seat_core_v1 {
     pub use spec::*;
 }
 
+use anyhow::Context;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use comfy_table::presets;
 use hyprwire::client;
@@ -1238,7 +1239,11 @@ fn acquire_inhibitor(
     mode: InhibitMode,
 ) -> anyhow::Result<()> {
     let mut state = InhibitState::default();
-    let mut socket = client::Client::connect("/run/sessiond/sessiond.sock")?;
+    let sessiond_runtime_dir: path::PathBuf = env::var_os("SESSIOND_RUNTIME_DIR")
+        .map(path::PathBuf::from)
+        .unwrap_or_else(|| path::PathBuf::from("/run/sessiond"));
+    let mut socket = client::Client::connect(sessiond_runtime_dir.join("sessiond.sock"))
+        .context("failed to connect to /run/sessiond/sessiond.sock")?;
     let queue = socket.new_event_queue();
 
     socket.add_implementation::<session_inhibit_v1::SessionInhibitV1>();
@@ -1298,7 +1303,11 @@ fn main() -> anyhow::Result<()> {
     }
 
     let mut state = State::default();
-    let mut socket = client::Client::connect("/run/sessiond/sessiond.sock")?;
+    let sessiond_runtime_dir: path::PathBuf = env::var_os("SESSIOND_RUNTIME_DIR")
+        .map(path::PathBuf::from)
+        .unwrap_or_else(|| path::PathBuf::from("/run/sessiond"));
+    let mut socket = client::Client::connect(sessiond_runtime_dir.join("sessiond.sock"))
+        .context("failed to connect to /run/sessiond/sessiond.sock")?;
     let queue = socket.new_event_queue();
 
     socket.add_implementation::<session_core_v1::SessionCoreV1>();

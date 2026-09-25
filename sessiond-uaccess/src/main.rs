@@ -396,7 +396,10 @@ fn main() -> anyhow::Result<()> {
             loop_signal.wakeup();
         })?;
 
-    let mut socket = client::Client::connect("/run/sessiond/sessiond.sock")
+    let sessiond_runtime_dir: path::PathBuf = env::var_os("SESSIOND_RUNTIME_DIR")
+        .map(path::PathBuf::from)
+        .unwrap_or_else(|| path::PathBuf::from("/run/sessiond"));
+    let mut socket = client::Client::connect(sessiond_runtime_dir.join("sessiond.sock"))
         .context("failed to connect to /run/sessiond/sessiond.sock")?;
     let eq = socket.new_event_queue();
 

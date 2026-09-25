@@ -36,6 +36,7 @@ impl UserConfig {
         gid: u32,
         session_id: u32,
         term: Option<sync::Arc<str>>,
+        sessiond_runtime_dir: sync::Arc<str>,
     ) -> BTreeMap<sync::Arc<str>, sync::Arc<str>> {
         let runtime_dir = self.runtime_dir(uid, gid);
         let mut env: BTreeMap<sync::Arc<str>, sync::Arc<str>> = BTreeMap::from([
@@ -47,6 +48,10 @@ impl UserConfig {
             (
                 sync::Arc::from("TERM"),
                 term.unwrap_or_else(|| "linux".into()),
+            ),
+            (
+                sync::Arc::from("SESSIOND_RUNTIME_DIR"),
+                sessiond_runtime_dir,
             ),
         ]);
 

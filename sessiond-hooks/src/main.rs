@@ -16,7 +16,7 @@ use hyprwire_protocols_sessiond::client::session_management::v2::session_managem
 use std::collections::BTreeMap;
 use std::os::fd::AsRawFd;
 use std::os::unix::process::CommandExt;
-use std::{env, ops, path, process, time};
+use std::{env, fs, io, ops, path, process, time};
 use uzers::os::unix::UserExt;
 
 #[derive(Parser)]
@@ -543,7 +543,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     let normal_uids = normal_uid_range(
-        &std::fs::read_to_string("/etc/login.defs").context("reading /etc/login.defs")?,
+        &fs::read_to_string("/etc/login.defs").context("reading /etc/login.defs")?,
     )?;
     let log_level = match env::var("LOG_LEVEL") {
         Ok(log) if log == "trace" => log::LevelFilter::Trace,
@@ -566,7 +566,11 @@ fn main() -> anyhow::Result<()> {
     }
 
     let mut event_loop = calloop::EventLoop::try_new()?;
-    let mut socket = client::Client::connect("/run/sessiond/sessiond.sock")?;
+
+    let sessiond_runtime_dir: path::PathBuf = env::var_os("SESSIOND_RUNTIME_DIR")
+        .map(path::PathBuf::from)
+        .unwrap_or_else(|| path::PathBuf::from("/run/sessiond"));
+    let mut socket = client::Client::connect(sessiond_runtime_dir.join("sessiond.sock"))?;
     let eq = socket.new_event_queue();
 
     let mut sessiond_hooks = SessiondHooks {
@@ -603,8 +607,7 @@ fn main() -> anyhow::Result<()> {
     event_loop
         .handle()
         .insert_source(source, move |_, _, state| {
-            eq.dispatch_events(state, false)
-                .map_err(std::io::Error::other)?;
+            eq.dispatch_events(state, false).map_err(io::Error::other)?;
             Ok(calloop::PostAction::Continue)
         })?;
 

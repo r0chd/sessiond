@@ -7,7 +7,6 @@ use calloop::{generic, timer};
 use rustix::process;
 use std::collections::HashSet;
 use std::io::{Read, Seek};
-use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::{fs, io, path, sync, time};
 
@@ -357,7 +356,7 @@ pub fn watch_empty(
 ) -> anyhow::Result<()> {
     let cgroup_path = path.0.clone();
     let mut file = fs::File::open(path.0.join("cgroup.events"))?;
-    let fd_wrapper = unsafe { generic::FdWrapper::new(file.as_raw_fd()) };
+    let fd_wrapper = unsafe { generic::FdWrapper::new(file.try_clone()?) };
     let source = generic::Generic::new(fd_wrapper, calloop::Interest::EMPTY, calloop::Mode::Level);
 
     loop_handle.insert_source(source, move |_, _, state| {

@@ -1,6 +1,6 @@
 use anyhow::Context as _;
 use serde::Deserialize;
-use std::{fs, io, path};
+use std::{fs, path};
 
 #[derive(Clone, Copy, Default, Deserialize)]
 pub enum RestartPolicy {
@@ -59,15 +59,10 @@ impl Command {
 
 impl Config {
     pub fn load(path: Option<path::PathBuf>) -> anyhow::Result<Self> {
-        let explicit_path = path.is_some();
         let path = path.unwrap_or_else(|| path::PathBuf::from("/etc/sessiond-hooks.toml"));
 
         let config = match fs::read_to_string(&path) {
             Ok(config) => config,
-            Err(err) if !explicit_path && err.kind() == io::ErrorKind::NotFound => {
-                log::info!(path = path.to_string_lossy().as_ref(); "config file not found, using defaults");
-                anyhow::bail!("");
-            }
             Err(err) => {
                 log::error!(
                     path = path.to_string_lossy().as_ref(),

@@ -16,7 +16,7 @@ calloop = "0.14.4"
 env_logger = "0.11.11"
 hyprwire = { version = "0.5.1", features = ["log"] }
 hyprwire-protocols-sessiond = { path = "../../hyprwire-protocols-sessiond", version = "0.2.0" }
-log = "0.4.28"
+log = { version = "0.4.28", features = ["kv"] }
 serde = { version = "1.0.228", features = ["derive"] }
 syslog = "7.0.0"
 toml = "1.1.3"

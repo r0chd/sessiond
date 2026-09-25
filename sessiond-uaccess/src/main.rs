@@ -1,5 +1,6 @@
 mod config;
 mod ecs;
+#[path = "../../shared/logging.rs"]
 mod logging;
 mod session;
 
@@ -12,8 +13,7 @@ use hyprwire::client;
 use hyprwire_protocols_sessiond::client::session_core::v1::session_core_v1;
 use posix_acl as acl;
 use session_core_v1::session_core_manager;
-use std::os::fd::AsRawFd;
-use std::{env, path, sync, time};
+use std::{env, path, process, sync, time};
 
 struct SessiondUaccess {
     reconcile: Schedule,
@@ -312,10 +312,26 @@ enum LogTarget {
     Syslog,
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() -> process::ExitCode {
     let startup_started = time::Instant::now();
     let args = Args::parse();
+    if let Err(error) = init_logging(args.log_target) {
+        eprintln!("failed to initialize logging: {error:#}");
+        return process::ExitCode::FAILURE;
+    }
 
+    let status = match run(args, startup_started) {
+        Ok(()) => process::ExitCode::SUCCESS,
+        Err(error) => {
+            log::error!("application failed: {error:#}");
+            process::ExitCode::FAILURE
+        }
+    };
+    log::logger().flush();
+    status
+}
+
+fn init_logging(log_target: LogTarget) -> anyhow::Result<()> {
     let log_level = match env::var("LOG_LEVEL") {
         Ok(log) if log == "trace" => log::LevelFilter::Trace,
         Ok(log) if log == "debug" => log::LevelFilter::Debug,
@@ -325,19 +341,21 @@ fn main() -> anyhow::Result<()> {
         _ => log::LevelFilter::Info,
     };
 
-    match args.log_target {
+    match log_target {
         LogTarget::Stderr => {
             env_logger::Builder::new()
                 .filter(Some("sessiond_uaccess"), log_level)
-                .init();
+                .try_init()?;
         }
         LogTarget::Syslog => {
-            logging::init_syslog(syslog::Facility::LOG_DAEMON, log_level)?;
+            logging::init_syslog(syslog::Facility::LOG_DAEMON, log_level, "sessiond-uaccess")?;
         }
     }
+    log::info!(target:? = log_target, level:? = log_level; "logging initialized");
+    Ok(())
+}
 
-    log::info!(target:? = args.log_target, level:? = log_level; "logging initialized");
-
+fn run(args: Args, startup_started: time::Instant) -> anyhow::Result<()> {
     let mut schedule = Schedule::default();
     schedule.add_systems(
         (
@@ -397,8 +415,7 @@ fn main() -> anyhow::Result<()> {
         })?;
 
     let sessiond_runtime_dir: path::PathBuf = env::var_os("SESSIOND_RUNTIME_DIR")
-        .map(path::PathBuf::from)
-        .unwrap_or_else(|| path::PathBuf::from("/run/sessiond"));
+        .map_or_else(|| path::PathBuf::from("/run/sessiond"), path::PathBuf::from);
     let mut socket = client::Client::connect(sessiond_runtime_dir.join("sessiond.sock"))
         .context("failed to connect to /run/sessiond/sessiond.sock")?;
     let eq = socket.new_event_queue();
@@ -416,7 +433,8 @@ fn main() -> anyhow::Result<()> {
 
     eq.roundtrip(&mut sessiond_uaccess)?;
 
-    let fd_wrapper = unsafe { generic::FdWrapper::new(socket.extract_loop_fd().as_raw_fd()) };
+    let fd_wrapper =
+        unsafe { generic::FdWrapper::new(socket.extract_loop_fd().try_clone_to_owned()?) };
     let source = generic::Generic::new(
         fd_wrapper,
         calloop::Interest {

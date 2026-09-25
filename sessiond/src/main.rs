@@ -3,6 +3,8 @@ mod config;
 #[cfg(feature = "consolekit")]
 mod consolekit;
 mod inhibit;
+#[path = "../../shared/logging.rs"]
+mod logging;
 mod reconcile;
 mod session;
 mod state;
@@ -22,10 +24,9 @@ use hyprwire_protocols_sessiond::server::session_inhibit::v1::session_inhibit_v1
 use hyprwire_protocols_sessiond::server::session_management::v1::session_management_v1;
 use hyprwire_protocols_sessiond::server::session_management::v2::session_management_v2;
 use rustix::net;
-use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
-use std::{env, fs, path, sync};
+use std::{env, fs, path, process, sync};
 
 #[derive(Resource)]
 pub struct SessiondRuntimeDir(sync::Arc<str>);
@@ -96,7 +97,11 @@ fn handle_shutdown(
     loop_signal.0.stop();
 }
 
-fn run(runtime_dir: path::PathBuf, config: config::Config) -> anyhow::Result<()> {
+fn run(args: Args) -> anyhow::Result<()> {
+    log::info!("sessiond daemon starting");
+
+    let runtime_dir = args.runtime_dir;
+    let config = config::Config::load(args.config)?;
     let mut event_loop = calloop::EventLoop::try_new()?;
     let signals = signals::Signals::new(&[
         signals::Signal::SIGUSR1,
@@ -127,9 +132,6 @@ fn run(runtime_dir: path::PathBuf, config: config::Config) -> anyhow::Result<()>
     world.insert_resource(config);
     world.insert_resource(LoopSignal(event_loop.get_signal()));
     let state_path = runtime_dir.join("state.toml");
-    if let Err(e) = rustix::fs::chmod(&state_path, rustix::fs::Mode::from_bits_truncate(0o644)) {
-        log::error!(path = state_path.to_str(), error = e.to_string().as_str(); "failed to chmod state path");
-    }
     world.insert_resource(state::StateWriter(state_path));
     world.insert_non_send(event_loop.handle());
     #[cfg(feature = "consolekit")]
@@ -203,7 +205,8 @@ fn run(runtime_dir: path::PathBuf, config: config::Config) -> anyhow::Result<()>
     socket.add_implementation::<session_core_v1::SessionCoreV1, _>(&mut sessiond, 3);
     socket.add_implementation::<session_inhibit_v1::SessionInhibitV1, _>(&mut sessiond, 1);
 
-    let fd_wrapper = unsafe { generic::FdWrapper::new(socket.extract_loop_fd().as_raw_fd()) };
+    let fd_wrapper =
+        unsafe { generic::FdWrapper::new(socket.extract_loop_fd().try_clone_to_owned()?) };
     let source = generic::Generic::new(
         fd_wrapper,
         calloop::Interest {
@@ -286,9 +289,25 @@ fn run(runtime_dir: path::PathBuf, config: config::Config) -> anyhow::Result<()>
     Ok(())
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() -> process::ExitCode {
     let args = Args::parse();
+    if let Err(error) = init_logging(args.log_target) {
+        eprintln!("failed to initialize logging: {error:#}");
+        return process::ExitCode::FAILURE;
+    }
 
+    let status = match run(args) {
+        Ok(()) => process::ExitCode::SUCCESS,
+        Err(error) => {
+            log::error!("application failed: {error:#}");
+            process::ExitCode::FAILURE
+        }
+    };
+    log::logger().flush();
+    status
+}
+
+fn init_logging(log_target: LogTarget) -> anyhow::Result<()> {
     let log_level = match env::var("LOG_LEVEL") {
         Ok(log) if log == "trace" => log::LevelFilter::Trace,
         Ok(log) if log == "debug" => log::LevelFilter::Debug,
@@ -298,18 +317,15 @@ fn main() -> anyhow::Result<()> {
         _ => log::LevelFilter::Info,
     };
 
-    match args.log_target {
+    match log_target {
         LogTarget::Stderr => {
             env_logger::Builder::new()
                 .filter(Some("sessiond"), log_level)
-                .init();
+                .try_init()?;
         }
         LogTarget::Syslog => {
-            syslog::init(syslog::Facility::LOG_DAEMON, log_level, Some("sessiond"))?;
+            logging::init_syslog(syslog::Facility::LOG_DAEMON, log_level, "sessiond")?;
         }
     }
-
-    log::info!("sessiond daemon starting");
-
-    run(args.runtime_dir, config::Config::load(args.config)?)
+    Ok(())
 }

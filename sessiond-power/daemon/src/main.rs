@@ -1,4 +1,6 @@
 mod config;
+#[path = "../../../shared/logging.rs"]
+mod logging;
 
 use hyprwire_protocols_sessiond::server::session_power::v1::session_power_v1;
 
@@ -400,9 +402,25 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for SessiondPo
     }
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() -> process::ExitCode {
     let args = Args::parse();
+    if let Err(error) = init_logging(args.log_target) {
+        eprintln!("failed to initialize logging: {error:#}");
+        return process::ExitCode::FAILURE;
+    }
 
+    let status = match run(args) {
+        Ok(()) => process::ExitCode::SUCCESS,
+        Err(error) => {
+            log::error!("application failed: {error:#}");
+            process::ExitCode::FAILURE
+        }
+    };
+    log::logger().flush();
+    status
+}
+
+fn init_logging(log_target: LogTarget) -> anyhow::Result<()> {
     let log_level = match env::var("LOG_LEVEL") {
         Ok(log) if log == "trace" => log::LevelFilter::Trace,
         Ok(log) if log == "debug" => log::LevelFilter::Debug,
@@ -412,19 +430,20 @@ fn main() -> anyhow::Result<()> {
         _ => log::LevelFilter::Info,
     };
 
-    match args.log_target {
+    match log_target {
         LogTarget::Stderr => {
-            env_logger::Builder::new().filter_level(log_level).init();
+            env_logger::Builder::new()
+                .filter_level(log_level)
+                .try_init()?;
         }
         LogTarget::Syslog => {
-            syslog::init(
-                syslog::Facility::LOG_DAEMON,
-                log_level,
-                Some("sessiond-power"),
-            )?;
+            logging::init_syslog(syslog::Facility::LOG_DAEMON, log_level, "sessiond-power")?;
         }
     }
+    Ok(())
+}
 
+fn run(args: Args) -> anyhow::Result<()> {
     let mut sessiond_power = SessiondPower {
         config: config::Config::load(args.config)?,
         managers: Vec::new(),
@@ -436,8 +455,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     let sessiond_runtime_dir: path::PathBuf = env::var_os("SESSIOND_RUNTIME_DIR")
-        .map(path::PathBuf::from)
-        .unwrap_or_else(|| path::PathBuf::from("/run/sessiond"));
+        .map_or_else(|| path::PathBuf::from("/run/sessiond"), path::PathBuf::from);
     let sessiond_socket_path = sessiond_runtime_dir.join("sessiond.sock");
 
     let mut session_socket = client::Client::connect(&sessiond_socket_path)

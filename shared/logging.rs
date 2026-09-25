@@ -1,7 +1,7 @@
 use log::kv;
 use std::fmt::Write as _;
 use std::io::Write as _;
-use std::sync;
+use std::{process, sync};
 
 type SyslogLogger = syslog::Logger<syslog::LoggerBackend, syslog::Formatter3164>;
 
@@ -68,7 +68,7 @@ impl<'kvs> kv::VisitSource<'kvs> for FieldVisitor {
     }
 }
 
-pub fn format_message(record: &log::Record<'_>) -> String {
+fn format_message(record: &log::Record<'_>) -> String {
     let mut message = record.args().to_string();
     let mut visitor = FieldVisitor {
         fields: String::new(),
@@ -88,12 +88,16 @@ pub fn format_message(record: &log::Record<'_>) -> String {
     message
 }
 
-pub fn init_syslog(facility: syslog::Facility, log_level: log::LevelFilter) -> syslog::Result<()> {
+pub fn init_syslog(
+    facility: syslog::Facility,
+    log_level: log::LevelFilter,
+    process_name: &str,
+) -> syslog::Result<()> {
     let formatter = syslog::Formatter3164 {
         facility,
         hostname: None,
-        process: "sessiond-hooks".to_owned(),
-        pid: std::process::id(),
+        process: process_name.to_owned(),
+        pid: process::id(),
     };
 
     let logger = if let Ok(logger) = syslog::unix(formatter.clone()) {
@@ -108,4 +112,57 @@ pub fn init_syslog(facility: syslog::Facility, log_level: log::LevelFilter) -> s
         .map_err(|error| syslog::Error::Initialization(Box::new(error)))?;
     log::set_max_level(log_level);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_message;
+
+    #[test]
+    fn includes_key_values_after_message() {
+        let record = log::Record::builder()
+            .args(format_args!("session added"))
+            .key_values(&[("session_id", 42)])
+            .build();
+
+        assert_eq!(format_message(&record), "session added session_id=42");
+    }
+
+    #[test]
+    fn supports_values_with_spaces() {
+        let record = log::Record::builder()
+            .args(format_args!("assigned"))
+            .key_values(&[("seat", "seat 1")])
+            .build();
+
+        assert_eq!(format_message(&record), "assigned seat=seat 1");
+    }
+
+    #[test]
+    fn preserves_messages_without_key_values() {
+        let record = log::Record::builder()
+            .args(format_args!("application failed: connection refused"))
+            .build();
+
+        assert_eq!(
+            format_message(&record),
+            "application failed: connection refused"
+        );
+    }
+
+    #[test]
+    fn includes_all_error_fields() {
+        let record = log::Record::builder()
+            .args(format_args!("failed to open device"))
+            .key_values(&[
+                ("path", "/dev/input/event0"),
+                ("error", "Permission denied"),
+            ])
+            .build();
+
+        assert_eq!(
+            format_message(&record),
+            "failed to open device path=/dev/input/event0 error=Permission denied"
+        );
+    }
 }

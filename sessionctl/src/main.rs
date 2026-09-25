@@ -1240,8 +1240,7 @@ fn acquire_inhibitor(
 ) -> anyhow::Result<()> {
     let mut state = InhibitState::default();
     let sessiond_runtime_dir: path::PathBuf = env::var_os("SESSIOND_RUNTIME_DIR")
-        .map(path::PathBuf::from)
-        .unwrap_or_else(|| path::PathBuf::from("/run/sessiond"));
+        .map_or_else(|| path::PathBuf::from("/run/sessiond"), path::PathBuf::from);
     let mut socket = client::Client::connect(sessiond_runtime_dir.join("sessiond.sock"))
         .context("failed to connect to /run/sessiond/sessiond.sock")?;
     let queue = socket.new_event_queue();
@@ -1304,8 +1303,7 @@ fn main() -> anyhow::Result<()> {
 
     let mut state = State::default();
     let sessiond_runtime_dir: path::PathBuf = env::var_os("SESSIOND_RUNTIME_DIR")
-        .map(path::PathBuf::from)
-        .unwrap_or_else(|| path::PathBuf::from("/run/sessiond"));
+        .map_or_else(|| path::PathBuf::from("/run/sessiond"), path::PathBuf::from);
     let mut socket = client::Client::connect(sessiond_runtime_dir.join("sessiond.sock"))
         .context("failed to connect to /run/sessiond/sessiond.sock")?;
     let queue = socket.new_event_queue();

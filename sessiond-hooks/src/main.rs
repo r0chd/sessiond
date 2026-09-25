@@ -1,4 +1,5 @@
 mod config;
+#[path = "../../shared/logging.rs"]
 mod logging;
 
 use anyhow::Context;
@@ -14,7 +15,6 @@ use hyprwire_protocols_sessiond::client::session_management::v2::session_managem
     session_management_session, session_manager,
 };
 use std::collections::BTreeMap;
-use std::os::fd::AsRawFd;
 use std::os::unix::process::CommandExt;
 use std::{env, fs, io, ops, path, process, time};
 use uzers::os::unix::UserExt;
@@ -532,19 +532,25 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
     }
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() -> process::ExitCode {
     let cli = Cli::parse();
+    if let Err(error) = init_logging(cli.log_target) {
+        eprintln!("failed to initialize logging: {error:#}");
+        return process::ExitCode::FAILURE;
+    }
 
-    let config = match config::Config::load(cli.config) {
-        Ok(config) => config,
-        Err(err) => {
-            anyhow::bail!(err);
+    let status = match run(cli) {
+        Ok(()) => process::ExitCode::SUCCESS,
+        Err(error) => {
+            log::error!("application failed: {error:#}");
+            process::ExitCode::FAILURE
         }
     };
+    log::logger().flush();
+    status
+}
 
-    let normal_uids = normal_uid_range(
-        &fs::read_to_string("/etc/login.defs").context("reading /etc/login.defs")?,
-    )?;
+fn init_logging(log_target: LogTarget) -> anyhow::Result<()> {
     let log_level = match env::var("LOG_LEVEL") {
         Ok(log) if log == "trace" => log::LevelFilter::Trace,
         Ok(log) if log == "debug" => log::LevelFilter::Debug,
@@ -554,22 +560,29 @@ fn main() -> anyhow::Result<()> {
         _ => log::LevelFilter::Info,
     };
 
-    match cli.log_target {
+    match log_target {
         LogTarget::Stderr => {
             env_logger::Builder::new()
                 .filter(Some("sessiond_hooks"), log_level)
-                .init();
+                .try_init()?;
         }
         LogTarget::Syslog => {
-            logging::init_syslog(syslog::Facility::LOG_DAEMON, log_level)?;
+            logging::init_syslog(syslog::Facility::LOG_DAEMON, log_level, "sessiond-hooks")?;
         }
     }
+    Ok(())
+}
+
+fn run(cli: Cli) -> anyhow::Result<()> {
+    let config = config::Config::load(cli.config)?;
+    let normal_uids = normal_uid_range(
+        &fs::read_to_string("/etc/login.defs").context("reading /etc/login.defs")?,
+    )?;
 
     let mut event_loop = calloop::EventLoop::try_new()?;
 
     let sessiond_runtime_dir: path::PathBuf = env::var_os("SESSIOND_RUNTIME_DIR")
-        .map(path::PathBuf::from)
-        .unwrap_or_else(|| path::PathBuf::from("/run/sessiond"));
+        .map_or_else(|| path::PathBuf::from("/run/sessiond"), path::PathBuf::from);
     let mut socket = client::Client::connect(sessiond_runtime_dir.join("sessiond.sock"))?;
     let eq = socket.new_event_queue();
 
@@ -595,7 +608,8 @@ fn main() -> anyhow::Result<()> {
 
     eq.roundtrip(&mut sessiond_hooks)?;
 
-    let fd_wrapper = unsafe { generic::FdWrapper::new(socket.extract_loop_fd().as_raw_fd()) };
+    let fd_wrapper =
+        unsafe { generic::FdWrapper::new(socket.extract_loop_fd().try_clone_to_owned()?) };
     let source = generic::Generic::new(
         fd_wrapper,
         calloop::Interest {

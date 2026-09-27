@@ -69,17 +69,12 @@ pub struct State {
 #[serde(rename_all = "kebab-case")]
 pub struct Session {
     pub uid: u32,
-    #[serde(default)]
     pub class: SessionClass,
-    #[serde(default)]
     pub vt: Option<u32>,
     pub leader: i32,
-    #[serde(default)]
     pub remote_host: Option<sync::Arc<str>>,
     pub timestamp: u128,
-    #[serde(default)]
     pub env: BTreeMap<sync::Arc<str>, sync::Arc<str>>,
-    #[serde(default)]
     pub active: ActiveState,
     pub recoverable: bool,
     pub display: u32,

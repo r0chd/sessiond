@@ -96,7 +96,6 @@ pub struct PendingSession {
     pub vt: Option<num::NonZeroU32>,
     pub remote_host: Option<sync::Arc<str>>,
     pub env: BTreeMap<sync::Arc<str>, sync::Arc<str>>,
-    pub leader_id: i32,
 }
 
 #[derive(Resource, Default)]
@@ -153,7 +152,7 @@ pub struct SessionBundle {
     pub class: SessionClass,
     pub uid: Uid,
     pub timestamp: Timestamp,
-    pub leader_id: LeaderId,
+    pub leader: Leader,
     pub env: SessionEnv,
     pub active_state: ActiveState,
     pub objects: Objects,
@@ -181,8 +180,8 @@ pub struct Vt(pub num::NonZeroU32);
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Timestamp(pub time::SystemTime);
 
-#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LeaderId(pub i32);
+#[derive(Component, Debug)]
+pub struct Leader(pub i32);
 
 #[derive(Component, Debug, Clone, PartialEq, Eq)]
 pub struct RemoteHost(pub sync::Arc<str>);
@@ -267,7 +266,7 @@ pub fn spawn(
     class: SessionClass,
     uid: u32,
     vt: Option<u32>,
-    leader_id: i32,
+    leader: Leader,
     remote_host: Option<sync::Arc<str>>,
     active_state: session_core_v1::ActiveState,
     session_object: Option<session_management_session::SessionManagementSession>,
@@ -283,7 +282,7 @@ pub fn spawn(
         class,
         uid: Uid(uid),
         timestamp: Timestamp(time::SystemTime::now()),
-        leader_id: LeaderId(leader_id),
+        leader,
         env: SessionEnv(env),
         active_state: active_state.into(),
         objects: Objects::default(),
@@ -531,7 +530,7 @@ pub fn handle_add_object(
             Option<&Vt>,
             &SessionClass,
             &ActiveState,
-            &LeaderId,
+            &Leader,
             &Timestamp,
             Option<&IsLocal>,
             Option<&RemoteHost>,
@@ -549,7 +548,7 @@ pub fn handle_add_object(
             vt,
             class,
             state,
-            leader_id,
+            leader,
             timestamp,
             is_local,
             remote_host,
@@ -569,7 +568,7 @@ pub fn handle_add_object(
         request.object.send_class((*class).into());
         request.object.send_vt(vt.map_or(0, |vt| vt.0.get()));
         request.object.send_active(state.0);
-        request.object.send_leader(leader_id.0.cast_unsigned());
+        request.object.send_leader(leader.0.cast_unsigned());
         let timestamp_secs = timestamp
             .0
             .duration_since(time::UNIX_EPOCH)
@@ -668,8 +667,6 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for crate::Sessiond {
         object: &session_manager::SessionManager,
         event: <session_manager::SessionManager as hyprwire::Object>::Event<'_>,
     ) {
-        let client = object.client();
-
         match event {
             session_manager::Event::Destroy => {
                 self.world.write_message(SessionManagementMessage {
@@ -683,12 +680,10 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for crate::Sessiond {
                 session_management_session,
                 uid,
             } => {
-                let leader_id = client.creds().pid.as_raw_pid();
                 self.world.write_message(SessionManagementMessage {
                     action: SessionManagementAction::Create {
                         management_object: Some(object.clone()),
                         uid,
-                        leader_id,
                     },
                     object: Some(SessionManagementTarget::V2(session_management_session)),
                 });
@@ -708,7 +703,6 @@ pub enum SessionManagementAction {
     Create {
         management_object: Option<session_manager::SessionManager>,
         uid: u32,
-        leader_id: i32,
     },
     ManagerDestroy {
         management_object: session_manager::SessionManager,
@@ -726,7 +720,9 @@ pub enum SessionManagementAction {
     Class {
         class: SessionClass,
     },
-    Done,
+    Done {
+        leader_pid: i32,
+    },
     Destroy,
 }
 
@@ -787,7 +783,6 @@ pub fn handle_session_management_action(
             SessionManagementAction::Create {
                 management_object,
                 uid,
-                leader_id,
             } => {
                 pending_sessions.by_management_object.insert(
                     object.clone(),
@@ -798,7 +793,6 @@ pub fn handle_session_management_action(
                         vt: None,
                         remote_host: None,
                         env: BTreeMap::new(),
-                        leader_id: *leader_id,
                     },
                 );
                 continue;
@@ -833,7 +827,7 @@ pub fn handle_session_management_action(
                     continue;
                 }
             }
-            SessionManagementAction::Done => {
+            SessionManagementAction::Done { leader_pid } => {
                 if let Some(pending_session) = pending_sessions.by_management_object.remove(object)
                 {
                     let Some(user) = uzers::get_user_by_uid(pending_session.uid) else {
@@ -846,11 +840,16 @@ pub fn handle_session_management_action(
                     let username: sync::Arc<str> = user.name().to_string_lossy().into();
 
                     let session_id = next_id.take();
+                    if *leader_pid <= 0 {
+                        object.send_error(SessionManagementError::Io, "invalid leader PID");
+                        return;
+                    }
+                    let leader = Leader(*leader_pid);
 
                     let cgroup = match cgroup_manager.create_session_cgroup(
                         &user,
                         session_id,
-                        pending_session.leader_id,
+                        *leader_pid,
                     ) {
                         Ok(cgroup) => cgroup,
                         Err(e) => {
@@ -919,7 +918,7 @@ pub fn handle_session_management_action(
                         pending_session.class.unwrap_or_default(),
                         pending_session.uid,
                         pending_session.vt.map(num::NonZeroU32::get),
-                        pending_session.leader_id,
+                        leader,
                         pending_session.remote_host,
                         active_state,
                         object.owned_session(),
@@ -977,7 +976,6 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                     action: SessionManagementAction::Create {
                         management_object: None,
                         uid,
-                        leader_id: client.creds().pid.as_raw_pid(),
                     },
                     object: Some(target.clone()),
                 });
@@ -1011,8 +1009,11 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                         object: Some(target.clone()),
                     });
                 }
+
                 self.world.write_message(SessionManagementMessage {
-                    action: SessionManagementAction::Done,
+                    action: SessionManagementAction::Done {
+                        leader_pid: client.creds().pid.as_raw_pid(),
+                    },
                     object: Some(target),
                 });
             }
@@ -1068,7 +1069,12 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                     value: value.into(),
                 }
             }
-            session_management_session::Event::Done => SessionManagementAction::Done,
+            session_management_session::Event::Done { leader_pid } => {
+                let Ok(leader_pid) = i32::try_from(leader_pid) else {
+                    return;
+                };
+                SessionManagementAction::Done { leader_pid }
+            }
             session_management_session::Event::Destroy => SessionManagementAction::Destroy,
             _ => return,
         };

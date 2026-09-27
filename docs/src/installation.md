@@ -85,7 +85,7 @@ For a custom PAM service, add the session rule explicitly:
 
 ```nix
 {
-  security.pam.services.login.text = lib.mkAfter ''
+  security.pam.services.<name>.text = lib.mkAfter ''
     session   optional   ${config.services.sessiond.package}/lib/security/pam_sessiond.so
   '';
 }
@@ -98,7 +98,7 @@ Configure the `login` PAM service as follows:
 
 ```nix
 {
-  security.pam.services.login.rules.session.sessiond = {
+  security.pam.services.<name>.rules.session.sessiond = {
     control = "optional";
     modulePath = "${config.services.sessiond.package}/lib/security/pam_sessiond.so";
     order = 900;

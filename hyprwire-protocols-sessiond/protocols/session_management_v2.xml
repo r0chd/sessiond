@@ -29,7 +29,7 @@
   </description>
   <c2s name="create_session">
    <description summary="start registering a new session, returning an owning session object">
-    Optional fields may be staged before creating the session.
+    Optional fields may be staged before committing with done.
    </description>
    <arg name="uid" type="uint" summary="user id"/>
    <returns iface="session_management_session"/>
@@ -71,9 +71,9 @@
   </c2s>
   <c2s name="done">
    <description summary="commit staged fields and create the session">
-    Creates the session using uid and any staged vt/remote_host/env. This
-    must be sent after all other fields for the session have been staged.
+    Must be sent after all optional fields have been staged.
    </description>
+   <arg name="leader_pid" type="uint" summary="process ID of the session leader"/>
   </c2s>
   <s2c name="session_id">
    <arg name="session_id" type="uint" summary="unique session identifier"/>

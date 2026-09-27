@@ -48,7 +48,7 @@ struct PendingManagedSession {
 struct ManagedSession {
     id: u32,
     uid: u32,
-    _object: session_management_session::SessionManagementSession,
+    object: session_management_session::SessionManagementSession,
     envs: BTreeMap<String, String>,
     hook: Option<process::Child>,
 }
@@ -140,6 +140,8 @@ impl ManagedSession {
                 return;
             }
         };
+
+        self.object.send_done(child.id());
 
         self.hook = Some(child);
 
@@ -315,7 +317,6 @@ impl SessiondHooks {
         pending_session
             .object
             .send_class(session_management_v2::SessionClass::Manager);
-        pending_session.object.send_done();
 
         self.pending_managed_sessions.push(pending_session);
     }
@@ -485,7 +486,7 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                 let mut managed_session = ManagedSession {
                     id: session.id,
                     uid: session.uid,
-                    _object: session.object,
+                    object: session.object,
                     envs: session.envs,
                     hook: None,
                 };

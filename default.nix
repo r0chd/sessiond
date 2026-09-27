@@ -29,6 +29,7 @@ let
           ".md"
         ]
         || baseNameOf path == "LICENSE"
+        || baseNameOf path == "cbindgen.toml"
       );
   };
   callPackage = path: pkgs.callPackage path { inherit craneLib src; };

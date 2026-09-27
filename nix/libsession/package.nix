@@ -2,6 +2,7 @@
   lib,
   stdenv,
   pkg-config,
+  rust-cbindgen,
   systemdLibs,
   craneLib,
   src,
@@ -30,6 +31,7 @@ craneLib.buildPackage {
 
   nativeBuildInputs = [
     pkg-config
+    rust-cbindgen
   ];
 
   buildInputs = lib.optional logindSupport systemdLibs;
@@ -38,8 +40,14 @@ craneLib.buildPackage {
     "--locked -p libsession-sys --no-default-features"
     + lib.optionalString (features != [ ]) " --features ${lib.concatStringsSep "," features}";
 
+  postBuild = ''
+    if [ -z "''${CRANE_BUILD_DEPS_ONLY:-}" ]; then
+      cbindgen --config libsession-sys/cbindgen.toml --crate libsession-sys --output libsession.h libsession-sys
+    fi
+  '';
+
   postInstall = ''
-    install -Dm644 libsession-sys/include/libsession.h $dev/include/libsession.h
+    install -Dm644 libsession.h $dev/include/libsession.h
 
     mkdir -p $dev/lib/pkgconfig
     substitute libsession-sys/libsession.pc.in $dev/lib/pkgconfig/libsession.pc \

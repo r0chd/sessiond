@@ -1,4 +1,5 @@
 mod backend;
+mod logging;
 
 #[cfg(not(any(feature = "sessiond", feature = "logind", feature = "consolekit")))]
 compile_error!(
@@ -11,13 +12,14 @@ use backend::consolekit;
 use backend::logind;
 #[cfg(feature = "sessiond")]
 use backend::sessiond;
-use std::{env, ffi, process, ptr};
+use std::{env, ffi, process, ptr, rc};
 
 struct Libsession {
     backend: Box<dyn backend::Backend>,
+    logger: rc::Rc<logging::Logger>,
 }
 
-#[repr(C)]
+#[allow(non_camel_case_types)]
 pub struct libsession_context {
     _private: [u8; 0],
 }
@@ -53,31 +55,37 @@ pub enum LibsessionSessionState {
 #[unsafe(no_mangle)]
 #[must_use]
 pub extern "C" fn libsession_new() -> *mut libsession_context {
+    let logger = rc::Rc::new(logging::Logger::default());
     if let Ok(backend) = env::var("LIBSESSION_BACKEND") {
         match backend.as_str() {
             #[cfg(feature = "sessiond")]
             "sessiond" => {
-                if let Some(sessiond) = sessiond::Sessiond::try_connect() {
+                if let Some(sessiond) = sessiond::Sessiond::try_connect(rc::Rc::clone(&logger)) {
                     return Box::into_raw(Box::new(Libsession {
                         backend: Box::new(sessiond),
+                        logger,
                     }))
                     .cast::<libsession_context>();
                 }
             }
             #[cfg(feature = "logind")]
             "logind" => {
-                if let Some(logind) = logind::Logind::try_connect() {
+                if let Some(logind) = logind::Logind::try_connect(rc::Rc::clone(&logger)) {
                     return Box::into_raw(Box::new(Libsession {
                         backend: Box::new(logind),
+                        logger,
                     }))
                     .cast::<libsession_context>();
                 }
             }
             #[cfg(feature = "consolekit")]
             "consolekit" => {
-                if let Some(consolekit) = consolekit::ConsoleKit::try_connect() {
+                if let Some(consolekit) =
+                    consolekit::ConsoleKit::try_connect(rc::Rc::clone(&logger))
+                {
                     return Box::into_raw(Box::new(Libsession {
                         backend: Box::new(consolekit),
+                        logger,
                     }))
                     .cast::<libsession_context>();
                 }
@@ -87,23 +95,26 @@ pub extern "C" fn libsession_new() -> *mut libsession_context {
     }
 
     #[cfg(feature = "sessiond")]
-    if let Some(sessiond) = sessiond::Sessiond::try_connect() {
+    if let Some(sessiond) = sessiond::Sessiond::try_connect(rc::Rc::clone(&logger)) {
         return Box::into_raw(Box::new(Libsession {
             backend: Box::new(sessiond),
+            logger,
         }))
         .cast::<libsession_context>();
     }
     #[cfg(feature = "logind")]
-    if let Some(logind) = logind::Logind::try_connect() {
+    if let Some(logind) = logind::Logind::try_connect(rc::Rc::clone(&logger)) {
         return Box::into_raw(Box::new(Libsession {
             backend: Box::new(logind),
+            logger,
         }))
         .cast::<libsession_context>();
     }
     #[cfg(feature = "consolekit")]
-    if let Some(consolekit) = consolekit::ConsoleKit::try_connect() {
+    if let Some(consolekit) = consolekit::ConsoleKit::try_connect(rc::Rc::clone(&logger)) {
         return Box::into_raw(Box::new(Libsession {
             backend: Box::new(consolekit),
+            logger,
         }))
         .cast::<libsession_context>();
     }
@@ -350,7 +361,7 @@ pub unsafe extern "C" fn libsession_session_is_local(
     LibsessionStatus::Ok
 }
 
-#[repr(C)]
+#[allow(non_camel_case_types)]
 pub struct libsession_monitor {
     _private: [u8; 0],
 }
@@ -358,11 +369,13 @@ pub struct libsession_monitor {
 struct Monitor(Box<dyn backend::BackendMonitor>);
 
 #[unsafe(no_mangle)]
-pub extern "C" fn libsession_monitor_new(ctx: *mut libsession_context) -> *mut libsession_monitor {
+pub extern "C" fn libsession_monitor_new(
+    ctx: *const libsession_context,
+) -> *mut libsession_monitor {
     if ctx.is_null() {
         return ptr::null_mut();
     }
-    let libsession = unsafe { &mut *ctx.cast::<Libsession>() };
+    let libsession = unsafe { &*ctx.cast::<Libsession>() };
     if let Some(monitor) = libsession.backend.get_monitor() {
         return Box::into_raw(Box::new(Monitor(monitor))).cast::<libsession_monitor>();
     }
@@ -395,4 +408,59 @@ pub extern "C" fn libsession_monitor_fd(monitor: *mut libsession_monitor) -> ffi
     }
     let monitor = unsafe { &*monitor.cast::<Monitor>() };
     monitor.0.fd()
+}
+
+pub type LibsessionLogFn = Option<unsafe extern "C" fn(LibsessionLogLevel, *const ffi::c_char)>;
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn libsession_set_log_fn(
+    ctx: *mut libsession_context,
+    callback: LibsessionLogFn,
+) -> LibsessionStatus {
+    if ctx.is_null() {
+        return LibsessionStatus::Failed;
+    }
+    let libsession = unsafe { &*ctx.cast::<Libsession>() };
+
+    libsession.logger.set_callback(callback);
+
+    LibsessionStatus::Ok
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub enum LibsessionLogLevel {
+    #[default]
+    Off = 0,
+    Error = 1,
+    Warn = 2,
+    Info = 3,
+    Debug = 4,
+    Trace = 5,
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn libsession_set_log_level(
+    ctx: *mut libsession_context,
+    log_level: LibsessionLogLevel,
+) -> LibsessionStatus {
+    if ctx.is_null() {
+        return LibsessionStatus::Failed;
+    }
+    let libsession = unsafe { &*ctx.cast::<Libsession>() };
+
+    libsession.logger.set_level(log_level);
+
+    LibsessionStatus::Ok
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn libsession_get_log_level(
+    ctx: *const libsession_context,
+) -> LibsessionLogLevel {
+    if ctx.is_null() {
+        return LibsessionLogLevel::Off;
+    }
+    let libsession = unsafe { &*ctx.cast::<Libsession>() };
+    libsession.logger.level()
 }

@@ -1,17 +1,20 @@
+use crate::logging;
 use std::os::fd::AsRawFd;
-use std::{ffi, fs};
+use std::{ffi, fs, path, rc};
 
 pub struct Sessiond {
+    logger: rc::Rc<logging::Logger>,
     state: sessiond_state::State,
     monitor: sessiond_state::Monitor,
 }
 
 impl Sessiond {
-    pub fn try_connect() -> Option<Self> {
+    pub fn try_connect(logger: rc::Rc<logging::Logger>) -> Option<Self> {
         let mut state = sessiond_state::State::new();
         state.try_read().ok()?;
 
         Some(Self {
+            logger,
             monitor: state.monitor().ok()?,
             state,
         })
@@ -20,7 +23,14 @@ impl Sessiond {
 
 impl super::Backend for Sessiond {
     fn get_session_id(&mut self, pid: u32) -> Option<String> {
-        let cgroup = fs::read_to_string(format!("/proc/{pid}/cgroup")).ok()?;
+        self.logger.log(crate::LibsessionLogLevel::Debug, || {
+            format!("sessiond: looking up session for process {pid}")
+        });
+        let cgroup_path = path::PathBuf::from("/proc")
+            .join(pid.to_string())
+            .join("cgroup");
+
+        let cgroup = fs::read_to_string(cgroup_path).ok()?;
         cgroup.lines().find_map(|line| {
             let path = line.splitn(3, ':').nth(2)?;
             path.split('/')
@@ -29,7 +39,11 @@ impl super::Backend for Sessiond {
     }
 
     fn get_owner_uid(&mut self, pid: u32) -> Option<u32> {
-        let owner_uid = fs::read_to_string(format!("/proc/{pid}/loginuid")).ok()?;
+        let path = path::PathBuf::from("/proc")
+            .join(pid.to_string())
+            .join("loginuid");
+
+        let owner_uid = fs::read_to_string(path).ok()?;
         owner_uid.trim().parse().ok()
     }
 
@@ -94,13 +108,13 @@ impl super::Backend for Sessiond {
         }
     }
 
-    fn is_local_session(&mut self, session_id: &ffi::CStr) -> Option<bool> {
+    fn is_local_session(&self, session_id: &ffi::CStr) -> Option<bool> {
         let session = self.state.sessions.get(session_id.to_str().ok()?)?;
 
         Some(session.remote_host.is_some())
     }
 
-    fn get_monitor(&mut self) -> Option<Box<dyn super::BackendMonitor>> {
+    fn get_monitor(&self) -> Option<Box<dyn super::BackendMonitor>> {
         Some(Box::new(self.state.monitor().ok()?))
     }
 }

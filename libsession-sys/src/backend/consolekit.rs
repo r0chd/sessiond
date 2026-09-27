@@ -1,6 +1,6 @@
-use std::{ffi, path};
-use zbus::blocking::{Connection, connection};
-use zbus::zvariant::OwnedObjectPath;
+use crate::logging;
+use std::{ffi, path, rc};
+use zbus::{blocking, zvariant};
 
 #[zbus::proxy(
     default_service = "org.freedesktop.ConsoleKit",
@@ -9,9 +9,9 @@ use zbus::zvariant::OwnedObjectPath;
 )]
 trait ConsoleKitManager {
     #[zbus(name = "GetSessions")]
-    fn get_sessions(&self) -> zbus::Result<Vec<OwnedObjectPath>>;
+    fn get_sessions(&self) -> zbus::Result<Vec<zvariant::OwnedObjectPath>>;
     #[zbus(name = "GetSessionForUnixProcess")]
-    fn get_session_for_unix_process(&self, pid: u32) -> zbus::Result<OwnedObjectPath>;
+    fn get_session_for_unix_process(&self, pid: u32) -> zbus::Result<zvariant::OwnedObjectPath>;
 }
 
 #[zbus::proxy(
@@ -33,17 +33,19 @@ trait ConsoleKitSession {
 }
 
 pub struct ConsoleKit {
-    connection: Connection,
+    logger: rc::Rc<logging::Logger>,
+    connection: blocking::Connection,
     manager: ConsoleKitManagerProxyBlocking<'static>,
 }
 
 impl ConsoleKit {
-    pub fn try_connect() -> Option<Self> {
-        let connection = connection::Builder::system().ok()?.build().ok()?;
+    pub fn try_connect(logger: rc::Rc<logging::Logger>) -> Option<Self> {
+        let connection = blocking::connection::Builder::system().ok()?.build().ok()?;
 
         let manager = ConsoleKitManagerProxyBlocking::new(&connection).ok()?;
 
         Some(Self {
+            logger,
             connection,
             manager,
         })
@@ -51,7 +53,7 @@ impl ConsoleKit {
 }
 
 impl super::Backend for ConsoleKit {
-    fn get_monitor(&mut self) -> Option<Box<dyn super::BackendMonitor>> {
+    fn get_monitor(&self) -> Option<Box<dyn super::BackendMonitor>> {
         Some(Box::new(super::inotify::InotifyMonitor::new(
             path::Path::new("/var/run/ConsoleKit"),
         )?))
@@ -144,7 +146,7 @@ impl super::Backend for ConsoleKit {
         None
     }
 
-    fn is_local_session(&mut self, session_id: &ffi::CStr) -> Option<bool> {
+    fn is_local_session(&self, session_id: &ffi::CStr) -> Option<bool> {
         let session_id = session_id.to_string_lossy();
         for path in self.manager.get_sessions().ok()? {
             let session = ConsoleKitSessionProxyBlocking::builder(&self.connection)
@@ -160,6 +162,9 @@ impl super::Backend for ConsoleKit {
     }
 
     fn get_session_id(&mut self, pid: u32) -> Option<String> {
+        self.logger.log(crate::LibsessionLogLevel::Debug, || {
+            format!("consolekit: looking up session for process {pid}")
+        });
         let session_path = self.manager.get_session_for_unix_process(pid).ok()?;
 
         let session = ConsoleKitSessionProxyBlocking::builder(&self.connection)

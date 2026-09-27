@@ -1,6 +1,7 @@
+use crate::logging;
 use libsystemd_sys::login;
 use std::os::fd;
-use std::{ffi, ptr};
+use std::{ffi, ptr, rc};
 
 fn sd_string(value: *mut ffi::c_char) -> Option<String> {
     let value = ptr::NonNull::new(value)?;
@@ -10,10 +11,12 @@ fn sd_string(value: *mut ffi::c_char) -> Option<String> {
     unsafe { libc::free(value.as_ptr().cast()) };
     Some(result)
 }
-pub struct Logind {}
+pub struct Logind {
+    logger: rc::Rc<logging::Logger>,
+}
 
 impl Logind {
-    pub fn try_connect() -> Option<Self> {
+    pub fn try_connect(logger: rc::Rc<logging::Logger>) -> Option<Self> {
         let mut sessions = ptr::null_mut::<*mut ffi::c_char>();
         let result = unsafe { login::sd_get_sessions(&raw mut sessions) };
         if result < 0 {
@@ -27,12 +30,12 @@ impl Logind {
             }
             unsafe { libc::free(sessions.cast()) };
         }
-        Some(Self {})
+        Some(Self { logger })
     }
 }
 
 impl super::Backend for Logind {
-    fn is_local_session(&mut self, session_id: &ffi::CStr) -> Option<bool> {
+    fn is_local_session(&self, session_id: &ffi::CStr) -> Option<bool> {
         let result = unsafe { login::sd_session_is_remote(session_id.as_ptr()) };
         (result >= 0).then_some(result == 0)
     }
@@ -58,6 +61,9 @@ impl super::Backend for Logind {
     }
 
     fn get_session_id(&mut self, pid: u32) -> Option<String> {
+        self.logger.log(crate::LibsessionLogLevel::Debug, || {
+            format!("logind: looking up session for process {pid}")
+        });
         let mut session = ptr::null_mut();
         let result = unsafe { login::sd_pid_get_session(pid.cast_signed(), &raw mut session) };
         (result >= 0).then(|| sd_string(session))?
@@ -91,7 +97,7 @@ impl super::Backend for Logind {
         })
     }
 
-    fn get_monitor(&mut self) -> Option<Box<dyn super::BackendMonitor>> {
+    fn get_monitor(&self) -> Option<Box<dyn super::BackendMonitor>> {
         let mut monitor = ptr::null_mut();
         let result = unsafe { login::sd_login_monitor_new(c"session".as_ptr(), &raw mut monitor) };
 

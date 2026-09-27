@@ -22,9 +22,11 @@ craneLib.devShell {
   };
 
   nativeBuildInputs = [ pkgs.pkg-config ];
+
   buildInputs = [
     sessiond
     libsession
+    pkgs.rust-cbindgen
   ];
 
   RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";

@@ -1,0 +1,31 @@
+language = "C"
+include_guard = "LIBSESSION_H"
+cpp_compat = true
+style = "tag"
+documentation = false
+sys_includes = ["sys/types.h"]
+
+trailer = """
+#define LIBSESSION_LOG_OFF LIBSESSION_LOG_LEVEL_OFF
+#define LIBSESSION_LOG_ERROR LIBSESSION_LOG_LEVEL_ERROR
+#define LIBSESSION_LOG_WARN LIBSESSION_LOG_LEVEL_WARN
+#define LIBSESSION_LOG_INFO LIBSESSION_LOG_LEVEL_INFO
+#define LIBSESSION_LOG_DEBUG LIBSESSION_LOG_LEVEL_DEBUG
+#define LIBSESSION_LOG_TRACE LIBSESSION_LOG_LEVEL_TRACE
+#define LIBSESSION_STATE_ONLINE LIBSESSION_SESSION_STATE_ONLINE
+#define LIBSESSION_STATE_ACTIVE LIBSESSION_SESSION_STATE_ACTIVE
+#define LIBSESSION_STATE_CLOSING LIBSESSION_SESSION_STATE_CLOSING
+#define LIBSESSION_STATE_OPENING LIBSESSION_SESSION_STATE_OPENING
+#define LIBSESSION_STATE_UNKNOWN LIBSESSION_SESSION_STATE_UNKOWN
+"""
+
+[export.rename]
+LibsessionStatus = "libsession_status"
+LibsessionLogLevel = "libsession_log_level"
+LibsessionUserState = "libsession_user_state"
+LibsessionSessionState = "libsession_session_state"
+LibsessionLogFn = "libsession_log_fn"
+
+[enum]
+rename_variants = "ScreamingSnakeCase"
+prefix_with_name = true

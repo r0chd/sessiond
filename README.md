@@ -2,4 +2,4 @@
 
 Modular session management daemon
 
-See the [documentation](docs/src/README.md).
+See the [documentation](r0chd.tngl.sh).

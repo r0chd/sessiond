@@ -1,24 +1,25 @@
 use std::os::fd;
-use std::os::fd::{AsRawFd, FromRawFd};
-use std::{ffi, io};
+use std::os::fd::AsRawFd;
+use std::{io, path};
 
-pub(super) struct InotifyMonitor(fd::OwnedFd);
+pub(super) struct InotifyMonitor(inotify::Inotify);
 
 impl InotifyMonitor {
-    pub(super) fn new(directory: &ffi::CStr) -> Option<Self> {
-        let raw = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
-        if raw < 0 {
-            return None;
-        }
-        let fd = unsafe { fd::OwnedFd::from_raw_fd(raw) };
-        let mask = libc::IN_MOVED_TO
-            | libc::IN_CLOSE_WRITE
-            | libc::IN_DELETE
-            | libc::IN_DELETE_SELF
-            | libc::IN_MOVE_SELF
-            | libc::IN_ONLYDIR;
-        let watch = unsafe { libc::inotify_add_watch(fd.as_raw_fd(), directory.as_ptr(), mask) };
-        (watch >= 0).then_some(Self(fd))
+    pub(super) fn new(directory: &path::Path) -> Option<Self> {
+        let inotify = inotify::Inotify::init().ok()?;
+        inotify
+            .watches()
+            .add(
+                directory,
+                inotify::WatchMask::MOVED_TO
+                    | inotify::WatchMask::CLOSE_WRITE
+                    | inotify::WatchMask::DELETE
+                    | inotify::WatchMask::DELETE_SELF
+                    | inotify::WatchMask::MOVE_SELF
+                    | inotify::WatchMask::ONLYDIR,
+            )
+            .ok()?;
+        Some(Self(inotify))
     }
 }
 
@@ -30,15 +31,11 @@ impl super::BackendMonitor for InotifyMonitor {
     fn flush(&mut self) {
         let mut buffer = [0_u8; 4096];
         loop {
-            let read =
-                unsafe { libc::read(self.0.as_raw_fd(), buffer.as_mut_ptr().cast(), buffer.len()) };
-            if read > 0 {
-                continue;
+            match self.0.read_events(&mut buffer) {
+                Ok(_) => {}
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                Err(_) => break,
             }
-            if read < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
-                continue;
-            }
-            break;
         }
     }
 }

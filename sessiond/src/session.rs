@@ -157,6 +157,7 @@ pub struct SessionBundle {
     pub env: SessionEnv,
     pub active_state: ActiveState,
     pub objects: Objects,
+    pub display: DisplaySession,
 }
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
@@ -242,6 +243,9 @@ pub struct Objects(pub Vec<session_core_session::SessionCoreSession>);
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SessionId(u32);
 
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DisplaySession(pub SessionId);
+
 impl SessionId {
     pub const fn as_raw(self) -> u32 {
         self.0
@@ -271,6 +275,7 @@ pub fn spawn(
     env: BTreeMap<sync::Arc<str>, sync::Arc<str>>,
     cgroup: cgroup::CgroupBundle,
     session_registry: &mut ResMut<SessionRegistry>,
+    display: SessionId,
 ) -> Entity {
     let mut cmd = commands.spawn(SessionBundle {
         marker: Session,
@@ -282,6 +287,7 @@ pub fn spawn(
         env: SessionEnv(env),
         active_state: active_state.into(),
         objects: Objects::default(),
+        display: DisplaySession(display),
     });
     cmd.insert(cgroup);
     if let Some(vt) = vt.and_then(num::NonZeroU32::new) {
@@ -733,7 +739,7 @@ pub fn handle_session_management_action(
     cgroup_manager: Res<cgroup::CgroupManager>,
     info_managers: Res<SessionInfoManagers>,
     mut session_registry: ResMut<SessionRegistry>,
-    sessions: Query<(&SessionEnv, &Uid), With<Session>>,
+    sessions: Query<(&SessionId, &SessionEnv, &Uid, &Timestamp), With<Session>>,
     config: Res<config::Config>,
     loop_handle: NonSend<'_, calloop::LoopHandle<'static, crate::Sessiond>>,
     sessiond_runtime_dir: Res<crate::SessiondRuntimeDir>,
@@ -886,6 +892,7 @@ pub fn handle_session_management_action(
                     } else {
                         session_core_v1::ActiveState::Online
                     };
+
                     let term = pending_session.env.get("TERM").cloned();
                     let mut env = user_config.environment(
                         pending_session.uid,
@@ -893,12 +900,16 @@ pub fn handle_session_management_action(
                         term,
                         sync::Arc::clone(&sessiond_runtime_dir.0),
                     );
-                    for (session_env, _) in sessions
+
+                    let display_session = sessions
                         .iter()
-                        .filter(|(_, uid)| uid.0 == pending_session.uid)
-                    {
-                        env.extend(session_env.0.clone());
-                    }
+                        .filter(|(_, _, uid, _)| uid.0 == pending_session.uid)
+                        .map(|(session_id, session_env, _, timestamp)| {
+                            env.extend(session_env.0.clone());
+                            (session_id, timestamp)
+                        })
+                        .min_by_key(|(session_id, timestamp)| (timestamp.0, session_id.as_raw()))
+                        .map_or(session_id, |(session_id, _)| *session_id);
                     env.extend(pending_session.env.clone());
                     let protocol_env = env.clone();
 
@@ -916,6 +927,7 @@ pub fn handle_session_management_action(
                         env,
                         cgroup,
                         &mut session_registry,
+                        display_session,
                     );
 
                     for (name, value) in protocol_env {

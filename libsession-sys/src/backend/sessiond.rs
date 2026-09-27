@@ -1,22 +1,20 @@
-use super::inotify;
-use std::os::unix::ffi::OsStrExt;
-use std::{env, ffi, fs, path};
+use std::os::fd::AsRawFd;
+use std::{ffi, fs};
 
 pub struct Sessiond {
-    state_path: path::PathBuf,
+    state: sessiond_state::State,
+    monitor: sessiond_state::Monitor,
 }
 
 impl Sessiond {
     pub fn try_connect() -> Option<Self> {
-        let runtime_dir = env::var_os("SESSIOND_RUNTIME_DIR")
-            .map_or_else(|| path::PathBuf::from("/run/sessiond"), path::PathBuf::from);
-        let backend = Self {
-            state_path: runtime_dir.join("state.toml"),
-        };
+        let mut state = sessiond_state::State::new();
+        state.try_read().ok()?;
 
-        sessiond_state::try_read(&backend.state_path).ok()?;
-
-        Some(backend)
+        Some(Self {
+            monitor: state.monitor().ok()?,
+            state,
+        })
     }
 }
 
@@ -36,8 +34,12 @@ impl super::Backend for Sessiond {
     }
 
     fn get_uid(&mut self, session_id: &ffi::CStr) -> Option<u32> {
-        let state = sessiond_state::try_read(&self.state_path).ok()?;
-        let session = state
+        if self.monitor.has_changed().ok()? {
+            self.state.try_read().ok()?;
+        }
+
+        let session = self
+            .state
             .sessions
             .get(&session_id.to_string_lossy().to_string())?;
 
@@ -45,8 +47,11 @@ impl super::Backend for Sessiond {
     }
 
     fn get_state(&mut self, uid: u32) -> Option<crate::LibsessionUserState> {
-        let state = sessiond_state::try_read(&self.state_path).ok()?;
-        let user = state.users.get(&uid)?;
+        if self.monitor.has_changed().ok()? {
+            self.state.try_read().ok()?;
+        }
+
+        let user = self.state.users.get(&uid)?;
 
         match user.state {
             sessiond_state::UserState::Offline => Some(crate::LibsessionUserState::Offline),
@@ -59,15 +64,26 @@ impl super::Backend for Sessiond {
     }
 
     fn get_display(&mut self, uid: u32) -> Option<String> {
-        todo!()
+        if self.monitor.has_changed().ok()? {
+            self.state.try_read().ok()?;
+        }
+
+        self.state
+            .sessions
+            .values()
+            .find(|session| session.uid == uid)
+            .map(|session| session.display.to_string())
     }
 
     fn get_session_state(
         &mut self,
         session_id: &ffi::CStr,
     ) -> Option<crate::LibsessionSessionState> {
-        let state = sessiond_state::try_read(&self.state_path).ok()?;
-        let session = state.sessions.get(session_id.to_str().ok()?)?;
+        if self.monitor.has_changed().ok()? {
+            self.state.try_read().ok()?;
+        }
+
+        let session = self.state.sessions.get(session_id.to_str().ok()?)?;
 
         match session.active {
             sessiond_state::ActiveState::Online => Some(crate::LibsessionSessionState::Online),
@@ -79,17 +95,22 @@ impl super::Backend for Sessiond {
     }
 
     fn is_local_session(&mut self, session_id: &ffi::CStr) -> Option<bool> {
-        let state = sessiond_state::try_read(&self.state_path).ok()?;
-        let session = state.sessions.get(session_id.to_str().ok()?)?;
+        let session = self.state.sessions.get(session_id.to_str().ok()?)?;
 
         Some(session.remote_host.is_some())
     }
 
     fn get_monitor(&mut self) -> Option<Box<dyn super::BackendMonitor>> {
-        Some(Box::new(inotify::InotifyMonitor::new(
-            ffi::CString::new(self.state_path.as_os_str().as_bytes())
-                .ok()?
-                .as_c_str(),
-        )?))
+        Some(Box::new(self.state.monitor().ok()?))
+    }
+}
+
+impl super::BackendMonitor for sessiond_state::Monitor {
+    fn fd(&self) -> std::os::fd::RawFd {
+        self.as_raw_fd()
+    }
+
+    fn flush(&mut self) {
+        let _ = self.has_changed();
     }
 }

@@ -19,13 +19,9 @@ use hyprwire_protocols_sessiond::client::session_inhibit::v1::session_inhibit_v1
 use owo_colors::OwoColorize;
 use seat_core_v1::{seat_core_client, seat_core_device, seat_core_manager, seat_core_seat};
 use serde_json::json;
-use std::{collections::BTreeSet, env, ffi::OsString, fs, io, path, process, time};
-
-fn username(uid: u32) -> String {
-    uzers::get_user_by_uid(uid)
-        .map(|user| user.name().to_string_lossy().into_owned())
-        .unwrap_or_else(|| uid.to_string())
-}
+use std::collections::BTreeSet;
+use std::ffi::OsString;
+use std::{env, fs, io, path, process, time};
 
 struct Session {
     object: Option<session_core_session::SessionCoreSession>,
@@ -524,7 +520,9 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for State {
             session_core_session::Event::SessionId { session_id } => s.id = session_id,
             session_core_session::Event::Uid { uid } => {
                 s.uid = uid;
-                s.username = username(uid);
+                s.username = uzers::get_user_by_uid(uid)
+                    .map(|user| user.name().to_string_lossy().into_owned())
+                    .unwrap_or_default();
             }
             session_core_session::Event::Class { class } => s.class = class,
             session_core_session::Event::Vt { vt } => s.vt = vt,
@@ -555,7 +553,9 @@ impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for State {
         match event {
             session_core_user::Event::Uid { uid } => {
                 u.uid = uid;
-                u.username = username(uid);
+                u.username = uzers::get_user_by_uid(uid)
+                    .map(|user| user.name().to_string_lossy().into_owned())
+                    .unwrap_or_default();
             }
             session_core_user::Event::Lingering { lingering } => u.lingering = lingering != 0,
             session_core_user::Event::State { state } => u.state = state,
@@ -587,7 +587,9 @@ impl hyprwire::Dispatch<session_core_inhibitor::SessionCoreInhibitor> for State 
             session_core_inhibitor::Event::Who { who } => self.inhibitors[index].who = who,
             session_core_inhibitor::Event::Uid { uid } => {
                 self.inhibitors[index].uid = uid;
-                self.inhibitors[index].username = username(uid);
+                self.inhibitors[index].username = uzers::get_user_by_uid(uid)
+                    .map(|user| user.name().to_string_lossy().into_owned())
+                    .unwrap_or_default();
             }
             session_core_inhibitor::Event::Pid { pid } => self.inhibitors[index].pid = pid,
             session_core_inhibitor::Event::Comm { comm } => self.inhibitors[index].comm = comm,

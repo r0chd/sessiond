@@ -1,4 +1,4 @@
-use std::ffi;
+use std::{ffi, path};
 use zbus::blocking::{Connection, connection};
 use zbus::zvariant::OwnedObjectPath;
 
@@ -53,7 +53,7 @@ impl ConsoleKit {
 impl super::Backend for ConsoleKit {
     fn get_monitor(&mut self) -> Option<Box<dyn super::BackendMonitor>> {
         Some(Box::new(super::inotify::InotifyMonitor::new(
-            c"/var/run/ConsoleKit",
+            path::Path::new("/var/run/ConsoleKit"),
         )?))
     }
 

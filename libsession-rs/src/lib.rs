@@ -1,4 +1,5 @@
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
+use std::os::fd;
+use std::os::fd::{AsFd, AsRawFd};
 use std::{ffi, ptr, result};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,14 +49,14 @@ impl Monitor {
 }
 
 impl AsRawFd for Monitor {
-    fn as_raw_fd(&self) -> RawFd {
+    fn as_raw_fd(&self) -> fd::RawFd {
         libsession_sys::libsession_monitor_fd(self.0.as_ptr())
     }
 }
 
 impl AsFd for Monitor {
-    fn as_fd(&self) -> BorrowedFd<'_> {
-        unsafe { BorrowedFd::borrow_raw(self.as_raw_fd()) }
+    fn as_fd(&self) -> fd::BorrowedFd<'_> {
+        unsafe { fd::BorrowedFd::borrow_raw(self.as_raw_fd()) }
     }
 }
 

@@ -38,9 +38,12 @@ impl UserConfig {
         term: Option<sync::Arc<str>>,
         sessiond_runtime_dir: sync::Arc<str>,
     ) -> BTreeMap<sync::Arc<str>, sync::Arc<str>> {
+        #[cfg(feature = "consolekit")]
+        let _ = session_id;
         let runtime_dir = self.runtime_dir(uid, gid);
         let mut env: BTreeMap<sync::Arc<str>, sync::Arc<str>> = BTreeMap::from([
             (sync::Arc::from("XDG_RUNTIME_DIR"), runtime_dir),
+            #[cfg(not(feature = "consolekit"))]
             (
                 sync::Arc::from("XDG_SESSION_ID"),
                 session_id.to_string().into(),

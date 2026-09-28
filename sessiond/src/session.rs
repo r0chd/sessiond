@@ -10,7 +10,7 @@ use hyprwire_protocols_sessiond::server::session_management::v2::session_managem
 use hyprwire_protocols_sessiond::server::session_management::v2::session_management_v2::session_management_session;
 use hyprwire_protocols_sessiond::server::session_management::v2::session_management_v2::session_manager;
 use std::collections::{BTreeMap, HashMap};
-use std::{num, sync, time};
+use std::{convert, num, sync, time};
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ActiveState(pub session_core_v1::ActiveState);
@@ -54,10 +54,14 @@ impl SessionManagementTarget {
         }
     }
 
-    fn send_env(&self, name: &str, value: &str) {
+    fn send_env(&self, env: &BTreeMap<sync::Arc<str>, sync::Arc<str>>) {
+        let entries: Vec<String> = env
+            .iter()
+            .map(|(name, value)| format!("{name}={value}"))
+            .collect();
         match self {
-            Self::V1(object) => object.send_env(name, value),
-            Self::V2(object) => object.send_env(name, value),
+            Self::V1(object) => object.send_env(&entries),
+            Self::V2(object) => object.send_env(&entries),
         }
     }
 
@@ -90,6 +94,7 @@ impl SessionManagementTarget {
 }
 
 pub struct PendingSession {
+    pub id: SessionId,
     pub manager: Option<session_manager::SessionManager>,
     pub uid: u32,
     pub class: Option<SessionClass>,
@@ -462,7 +467,9 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
         else {
             return;
         };
-        let client = object.client();
+        let Some(client) = object.try_client() else {
+            return;
+        };
 
         match event {
             session_core_session::Event::Terminate => {
@@ -562,7 +569,7 @@ pub fn handle_add_object(
             continue;
         };
 
-        log::debug!(session_id = request.session_id.as_raw(), uid = request.object.client().creds().uid.as_raw(); "session info requested");
+        log::debug!(session_id = request.session_id.as_raw(), uid = request.creds.uid.as_raw(); "session info requested");
         request.object.send_session_id(session_id.as_raw());
         request.object.send_uid(uid.0);
         request.object.send_class((*class).into());
@@ -720,8 +727,8 @@ pub enum SessionManagementAction {
     Class {
         class: SessionClass,
     },
-    Done {
-        leader_pid: i32,
+    Commit {
+        leader_pid: u32,
     },
     Destroy,
 }
@@ -760,11 +767,15 @@ pub fn handle_session_management_action(
         {
             match action.action {
                 SessionManagementAction::Destroy => {
+                    let Some(client) = management_object.try_client() else {
+                        log::debug!("ignoring destroy for disconnected management client");
+                        continue;
+                    };
                     session_control.write(SessionControlMessage {
                         entity,
                         object: None,
                         action: SessionControlAction::Terminate {
-                            creds: *management_object.client().creds(),
+                            creds: *client.creds(),
                         },
                     });
                 }
@@ -784,15 +795,57 @@ pub fn handle_session_management_action(
                 management_object,
                 uid,
             } => {
+                let Some(user) = uzers::get_user_by_uid(*uid) else {
+                    return;
+                };
+
+                let user_config = config
+                    .users
+                    .get(&convert::Into::<sync::Arc<str>>::into(
+                        user.name().to_string_lossy(),
+                    ))
+                    .cloned()
+                    .unwrap_or_default();
+
+                let session_id = next_id.take();
+                object.send_session_id(session_id.as_raw());
+                for manager in &info_managers.0 {
+                    manager.send_session_added(session_id.as_raw());
+                }
+
+                let runtime_dir = user_config.runtime_dir(*uid);
+                let mut env: BTreeMap<sync::Arc<str>, sync::Arc<str>> = BTreeMap::from([
+                    (sync::Arc::from("XDG_RUNTIME_DIR"), runtime_dir),
+                    (
+                        sync::Arc::from("SESSIOND_RUNTIME_DIR"),
+                        sync::Arc::clone(&sessiond_runtime_dir.0),
+                    ),
+                    #[cfg(not(feature = "consolekit"))]
+                    (
+                        sync::Arc::from("XDG_SESSION_ID"),
+                        session_id.0.to_string().into(),
+                    ),
+                ]);
+
+                for (_, session_env, _, _) in sessions
+                    .iter()
+                    .filter(|(_, _, session_uid, _)| session_uid.0 == *uid)
+                {
+                    env.extend(session_env.0.clone());
+                }
+
+                object.send_env(&env);
+
                 pending_sessions.by_management_object.insert(
                     object.clone(),
                     PendingSession {
+                        id: session_id,
                         manager: management_object.clone(),
                         uid: *uid,
                         class: None,
                         vt: None,
                         remote_host: None,
-                        env: BTreeMap::new(),
+                        env,
                     },
                 );
                 continue;
@@ -827,7 +880,7 @@ pub fn handle_session_management_action(
                     continue;
                 }
             }
-            SessionManagementAction::Done { leader_pid } => {
+            SessionManagementAction::Commit { leader_pid } => {
                 if let Some(pending_session) = pending_sessions.by_management_object.remove(object)
                 {
                     let Some(user) = uzers::get_user_by_uid(pending_session.uid) else {
@@ -839,21 +892,21 @@ pub fn handle_session_management_action(
                     };
                     let username: sync::Arc<str> = user.name().to_string_lossy().into();
 
-                    let session_id = next_id.take();
-                    if *leader_pid <= 0 {
+                    let Some(leader_pid) = i32::try_from(*leader_pid).ok().filter(|pid| *pid > 0)
+                    else {
                         object.send_error(SessionManagementError::Io, "invalid leader PID");
-                        return;
-                    }
-                    let leader = Leader(*leader_pid);
+                        continue;
+                    };
+                    let leader = Leader(leader_pid);
 
                     let cgroup = match cgroup_manager.create_session_cgroup(
                         &user,
-                        session_id,
-                        *leader_pid,
+                        pending_session.id,
+                        leader_pid,
                     ) {
                         Ok(cgroup) => cgroup,
                         Err(e) => {
-                            log::error!(session_id = session_id.as_raw(), error = e.to_string().as_str(); "failed to create session cgroup");
+                            log::error!(session_id = pending_session.id.as_raw(), error = e.to_string().as_str(); "failed to create session cgroup");
                             object.send_error(
                                 SessionManagementError::Io,
                                 format!("failed to create session cgroup: {e}"),
@@ -863,11 +916,11 @@ pub fn handle_session_management_action(
                     };
                     if let Err(error) = cgroup::watch_empty(
                         &cgroup.path,
-                        session_id,
+                        pending_session.id,
                         Uid(pending_session.uid),
                         &loop_handle,
                     ) {
-                        log::error!(session_id = session_id.as_raw(), error = error.to_string().as_str(); "failed to watch session cgroup");
+                        log::error!(session_id = pending_session.id.as_raw(), error = error.to_string().as_str(); "failed to watch session cgroup");
                         object.send_error(
                             SessionManagementError::Io,
                             "failed to watch session cgroup",
@@ -892,29 +945,16 @@ pub fn handle_session_management_action(
                         session_core_v1::ActiveState::Online
                     };
 
-                    let term = pending_session.env.get("TERM").cloned();
-                    let mut env = user_config.environment(
-                        pending_session.uid,
-                        session_id.as_raw(),
-                        term,
-                        sync::Arc::clone(&sessiond_runtime_dir.0),
-                    );
-
                     let display_session = sessions
                         .iter()
                         .filter(|(_, _, uid, _)| uid.0 == pending_session.uid)
-                        .map(|(session_id, session_env, _, timestamp)| {
-                            env.extend(session_env.0.clone());
-                            (session_id, timestamp)
-                        })
+                        .map(|(session_id, _, _, timestamp)| (session_id, timestamp))
                         .min_by_key(|(session_id, timestamp)| (timestamp.0, session_id.as_raw()))
-                        .map_or(session_id, |(session_id, _)| *session_id);
-                    env.extend(pending_session.env.clone());
-                    let protocol_env = env.clone();
+                        .map_or(pending_session.id, |(session_id, _)| *session_id);
 
                     spawn(
                         &mut commands,
-                        session_id,
+                        pending_session.id,
                         pending_session.class.unwrap_or_default(),
                         pending_session.uid,
                         pending_session.vt.map(num::NonZeroU32::get),
@@ -923,22 +963,13 @@ pub fn handle_session_management_action(
                         active_state,
                         object.owned_session(),
                         matches!(object, SessionManagementTarget::V1(_)),
-                        env,
+                        pending_session.env,
                         cgroup,
                         &mut session_registry,
                         display_session,
                     );
 
-                    for (name, value) in protocol_env {
-                        object.send_env(name.as_ref(), value.as_ref());
-                    }
-
-                    object.send_session_id(session_id.as_raw());
                     object.send_done();
-
-                    for manager in &info_managers.0 {
-                        manager.send_session_added(session_id.as_raw());
-                    }
 
                     continue;
                 }
@@ -959,7 +990,9 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
         object: &session_manager_v1::SessionManager,
         event: <session_manager_v1::SessionManager as hyprwire::Object>::Event<'_>,
     ) {
-        let client = object.client();
+        let Some(client) = object.try_client() else {
+            return;
+        };
 
         match event {
             session_manager_v1::Event::CreateSession {
@@ -1011,8 +1044,8 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                 }
 
                 self.world.write_message(SessionManagementMessage {
-                    action: SessionManagementAction::Done {
-                        leader_pid: client.creds().pid.as_raw_pid(),
+                    action: SessionManagementAction::Commit {
+                        leader_pid: client.creds().pid.as_raw_pid().cast_unsigned(),
                     },
                     object: Some(target),
                 });
@@ -1069,11 +1102,8 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                     value: value.into(),
                 }
             }
-            session_management_session::Event::Done { leader_pid } => {
-                let Ok(leader_pid) = i32::try_from(leader_pid) else {
-                    return;
-                };
-                SessionManagementAction::Done { leader_pid }
+            session_management_session::Event::Commit { leader_pid } => {
+                SessionManagementAction::Commit { leader_pid }
             }
             session_management_session::Event::Destroy => SessionManagementAction::Destroy,
             _ => return,
@@ -1091,11 +1121,14 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
         object: &session_core_manager::SessionCoreManager,
         event: <session_core_manager::SessionCoreManager as hyprwire::Object>::Event<'_>,
     ) {
+        let Some(client) = object.try_client() else {
+            return;
+        };
         match event {
             session_core_manager::Event::GetCurrentSession {
                 session_core_session,
             } => {
-                let pid = object.client().creds().pid.as_raw_pid().cast_unsigned();
+                let pid = client.creds().pid.as_raw_pid().cast_unsigned();
                 let Ok(Some(session_id)) = self
                     .world
                     .resource::<cgroup::CgroupManager>()
@@ -1109,7 +1142,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                 self.world.write_message(AddObject {
                     session_id,
                     object: session_core_session,
-                    creds: *object.client().creds(),
+                    creds: *client.creds(),
                 });
             }
             session_core_manager::Event::GetSession {
@@ -1119,7 +1152,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                 self.world.write_message(AddObject {
                     session_id: SessionId::from_raw(session_id),
                     object: session_core_session,
-                    creds: *object.client().creds(),
+                    creds: *client.creds(),
                 });
             }
             session_core_manager::Event::GetSessionByPid {
@@ -1139,7 +1172,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                 self.world.write_message(AddObject {
                     session_id,
                     object: session_core_session,
-                    creds: *object.client().creds(),
+                    creds: *client.creds(),
                 });
             }
             session_core_manager::Event::GetDisplaySessionByUid {
@@ -1170,7 +1203,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                     self.world.write_message(AddObject {
                         session_id,
                         object: session_core_session,
-                        creds: *object.client().creds(),
+                        creds: *client.creds(),
                     });
                     return;
                 }
@@ -1185,7 +1218,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                 self.world.write_message(user::AddObject {
                     uid,
                     object: session_core_user,
-                    creds: *object.client().creds(),
+                    creds: *client.creds(),
                 });
             }
             session_core_manager::Event::GetInhibitor {

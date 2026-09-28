@@ -170,7 +170,10 @@ impl hyprwire::Dispatch<session_inhibit_manager::SessionInhibitManager> for crat
             return;
         }
 
-        let creds = *object.client().creds();
+        let Some(client) = object.try_client() else {
+            return;
+        };
+        let creds = *client.creds();
         let uid = creds.uid.as_raw();
         let pid = creds.pid.as_raw_pid().cast_unsigned();
         let comm = fs::read_to_string(format!("/proc/{pid}/comm"))

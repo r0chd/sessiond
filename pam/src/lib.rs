@@ -19,8 +19,14 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Session {
             session_manager::Event::SessionId { session_id } => {
                 self.id = Some(session_id);
             }
-            session_manager::Event::Env { name, value } => {
-                self.env.push((name, value));
+            session_manager::Event::Env { env } => {
+                self.env = env
+                    .iter()
+                    .filter_map(|entry| {
+                        let (name, value) = entry.split_once('=')?;
+                        Some((name.to_owned(), value.to_owned()))
+                    })
+                    .collect();
             }
             session_manager::Event::Done => {
                 self.done = true;

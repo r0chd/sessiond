@@ -315,7 +315,9 @@ impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for crate::Sessiond 
         {
             return;
         }
-        let client = object.client();
+        let Some(client) = object.try_client() else {
+            return;
+        };
 
         match event {
             session_core_user::Event::Destroy => {

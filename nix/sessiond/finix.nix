@@ -1,4 +1,5 @@
 {
+  inputs,
   modules,
   config,
   lib,
@@ -12,6 +13,8 @@ let
   configFile = format.generate "sessiond.toml" cfg.settings;
 in
 {
+  disabledModules = [ "${inputs.finix}/modules/services/sessiond" ];
+
   imports = [
     ./common.nix
     modules.polkit
@@ -25,13 +28,12 @@ in
       packages = [ cfg.package ];
     };
 
-    services.polkit = {
-      enable = true;
-      package = pkgs.polkit.override {
+    services.polkit.package = lib.mkDefault (
+      pkgs.polkit.override {
         useSystemd = false;
         useConsoleKit = true;
-      };
-    };
+      }
+    );
 
     finit.services.sessiond = {
       description = "daemon for power management";

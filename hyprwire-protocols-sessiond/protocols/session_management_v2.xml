@@ -29,7 +29,8 @@
   </description>
   <c2s name="create_session">
    <description summary="start registering a new session, returning an owning session object">
-    Optional fields may be staged before committing with done.
+    Optional fields may be staged before commit supplies the leader PID and
+    creates the session.
    </description>
    <arg name="uid" type="uint" summary="user id"/>
    <returns iface="session_management_session"/>
@@ -69,21 +70,23 @@
    <arg name="name" type="varchar" summary="environment variable name"/>
    <arg name="value" type="varchar" summary="environment variable value"/>
   </c2s>
-  <c2s name="done">
-   <description summary="commit staged fields and create the session">
-    Must be sent after all optional fields have been staged.
-   </description>
-   <arg name="leader_pid" type="uint" summary="process ID of the session leader"/>
-  </c2s>
   <s2c name="session_id">
    <arg name="session_id" type="uint" summary="unique session identifier"/>
   </s2c>
   <s2c name="env">
-   <arg name="name" type="varchar" summary="environment variable name"/>
-   <arg name="value" type="varchar" summary="environment variable value"/>
+   <description summary="complete initial environment">
+    Sent once after session_id, while the session is still staged, including
+    when the array is empty. Each entry is KEY=VALUE; split at the first equals
+    sign because values may contain equals signs. This completes the initial
+    environment snapshot but does not indicate that session resources exist.
+   </description>
+   <arg name="env" type="array varchar" summary="environment as KEY=VALUE strings"/>
   </s2c>
   <s2c name="done">
-   <description summary="session created, initial field dump complete"/>
+   <description summary="commit succeeded and session setup is complete">
+    The leader has been placed in its session cgroup. The client may now
+    release the leader to execute the session command.
+   </description>
   </s2c>
   <s2c name="error">
    <description summary="session creation failed"/>
@@ -92,6 +95,16 @@
   </s2c>
   <c2s name="destroy" destructor="true">
    <description summary="tear down the session"/>
+  </c2s>
+  <c2s name="commit">
+   <description summary="commit staged fields and create the session">
+    Supplies the leader PID after all optional fields have been staged.
+    Validates the leader PID and creates the session, replying with done on
+    success or error on failure. Commit consumes the staged session even on
+    failure; retrying requires a new session object. No fields may be changed
+    after commit, and committing an already-created session is a protocol error.
+   </description>
+   <arg name="leader_pid" type="uint" summary="process ID of the session leader"/>
   </c2s>
  </object>
 

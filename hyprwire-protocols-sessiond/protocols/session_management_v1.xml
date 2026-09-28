@@ -48,8 +48,12 @@
    <arg name="session_id" type="uint" summary="unique session identifier"/>
   </s2c>
   <s2c name="env">
-   <arg name="name" type="varchar" summary="environment variable name"/>
-   <arg name="value" type="varchar" summary="environment variable value"/>
+   <description summary="complete initial environment">
+    Sent once after session_id, including when the array is empty. Each entry
+    is KEY=VALUE; split at the first equals sign because values may contain
+    equals signs. Wait for done before treating registration as successful.
+   </description>
+   <arg name="env" type="array varchar" summary="environment as KEY=VALUE strings"/>
   </s2c>
   <s2c name="done">
    <description summary="unsafe session created, initial field dump complete"/>

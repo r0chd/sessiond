@@ -119,6 +119,10 @@
           finix-vm = finix.lib.finixSystem {
             inherit (pkgs) lib;
             specialArgs = {
+              inputs = {
+                finix = finix.outPath;
+                community-modules = import sources.community-modules.outPath;
+              };
               inherit (self.packages.${system})
                 sessiond
                 sessiond-backlight
@@ -136,14 +140,7 @@
               ./nix/sessiond-power/finix.nix
               ./nix/internal/finix-vm.nix
               "${finix.outPath}/modules/virtualisation/qemu.nix"
-            ]
-            ++ builtins.attrValues {
-              inherit (finix.nixosModules)
-                getty
-                sysklogd
-                polkit
-                ;
-            };
+            ];
           };
         };
 

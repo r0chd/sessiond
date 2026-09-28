@@ -2,7 +2,6 @@ use anyhow::Context;
 use bevy_ecs::prelude::*;
 use std::collections::BTreeMap;
 use std::{fs, io, path, sync};
-use uzers::os::unix::UserExt;
 
 #[derive(Clone, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -27,50 +26,6 @@ impl UserConfig {
         self.runtime_dir
             .replace(concat!("{", "uid", "}"), &uid.to_string())
             .into()
-    }
-
-    pub fn environment(
-        &self,
-        uid: u32,
-        session_id: u32,
-        term: Option<sync::Arc<str>>,
-        sessiond_runtime_dir: sync::Arc<str>,
-    ) -> BTreeMap<sync::Arc<str>, sync::Arc<str>> {
-        #[cfg(feature = "consolekit")]
-        let _ = session_id;
-        let runtime_dir = self.runtime_dir(uid);
-        let mut env: BTreeMap<sync::Arc<str>, sync::Arc<str>> = BTreeMap::from([
-            (sync::Arc::from("XDG_RUNTIME_DIR"), runtime_dir),
-            #[cfg(not(feature = "consolekit"))]
-            (
-                sync::Arc::from("XDG_SESSION_ID"),
-                session_id.to_string().into(),
-            ),
-            (
-                sync::Arc::from("TERM"),
-                term.unwrap_or_else(|| "linux".into()),
-            ),
-            (
-                sync::Arc::from("SESSIOND_RUNTIME_DIR"),
-                sessiond_runtime_dir,
-            ),
-        ]);
-
-        if let Some(user) = uzers::get_user_by_uid(uid) {
-            let username: sync::Arc<str> = user.name().to_string_lossy().to_string().into();
-            env.insert("USER".into(), username.clone());
-            env.insert("LOGNAME".into(), username);
-            env.insert(
-                "HOME".into(),
-                user.home_dir().to_string_lossy().to_string().into(),
-            );
-            env.insert(
-                "SHELL".into(),
-                user.shell().to_string_lossy().to_string().into(),
-            );
-        }
-
-        env
     }
 }
 

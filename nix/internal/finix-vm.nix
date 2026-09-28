@@ -2,6 +2,7 @@
   lib,
   pkgs,
   config,
+  inputs,
   modules,
   sessiond,
   sessiond-hooks,
@@ -12,48 +13,32 @@
 }:
 let
   virtualTerminals = builtins.genList (index: "tty${toString (index + 1)}") 9;
-  polkitTestAction = pkgs.writeTextFile {
-    name = "sessiond-polkit-test-action";
-    destination = "/share/polkit-1/actions/org.sessiond.consolekit-test.policy";
-    text = ''
-      <?xml version="1.0" encoding="UTF-8"?>
-      <!DOCTYPE policyconfig PUBLIC
-        "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
-        "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
-      <policyconfig>
-        <vendor>sessiond test</vendor>
-        <action id="org.sessiond.consolekit-test">
-          <description>Test ConsoleKit subject resolution</description>
-          <message>Testing ConsoleKit subject resolution</message>
-          <defaults>
-            <allow_any>no</allow_any>
-            <allow_inactive>no</allow_inactive>
-            <allow_active>no</allow_active>
-          </defaults>
-        </action>
-      </policyconfig>
-    '';
-  };
 in
 {
-  imports = [ modules.zzz ];
-  services = {
-    polkit = {
-      enable = true;
-      extraConfig = ''
-        polkit.addRule(function(action, subject) {
-          if (
-            action.id == "org.sessiond.consolekit-test" &&
-            subject.local &&
-            subject.active
-          ) {
-            return polkit.Result.YES;
-          }
+  imports = [
+    modules.zzz
+    modules.doas
+    modules.getty
+    modules.sysklogd
+    inputs.community-modules.nixosModules.dinit
+  ];
 
-          return polkit.Result.NO;
-        });
-      '';
-    };
+  dinit.user.services = {
+    boot.type = lib.mkDefault "internal";
+  };
+
+  programs.doas.enable = true;
+  providers.privileges.rules = [
+    {
+      groups = [ "wheel" ];
+      command = "ALL";
+      runAs = "*";
+      requirePassword = false;
+    }
+  ];
+
+  services = {
+    polkit.enable = true;
     sysklogd.enable = true;
     sessiond = {
       enable = true;
@@ -103,7 +88,7 @@ in
           args = [
             "--user"
             "--services-dir"
-            "~/.config/dinit.d"
+            "/etc/dinit.d/user"
           ];
         };
         restart = {
@@ -112,7 +97,7 @@ in
         };
       };
     };
-    mdevd.enable = true;
+    keventd.enable = true;
     getty = {
       enable = true;
       ttys = virtualTerminals ++ [
@@ -179,8 +164,9 @@ in
   ];
 
   environment.systemPackages = [
+    pkgs.dinit
+    pkgs.bashInteractive
     pkgs.systemd
-    polkitTestAction
   ];
 
   users.users = {
@@ -204,8 +190,4 @@ in
     };
     root.password = "";
   };
-
-  security.pam.services.login.text = lib.mkAfter ''
-    session   optional   ${config.services.sessiond.package}/lib/security/pam_sessiond.so
-  '';
 }

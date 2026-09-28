@@ -11,6 +11,7 @@ use hyprwire_protocols_sessiond::server::session_management::v2::session_managem
 use hyprwire_protocols_sessiond::server::session_management::v2::session_management_v2::session_manager;
 use std::collections::{BTreeMap, HashMap};
 use std::{convert, num, sync, time};
+use uzers::os::unix::UserExt;
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ActiveState(pub session_core_v1::ActiveState);
@@ -833,6 +834,18 @@ pub fn handle_session_management_action(
                 {
                     env.extend(session_env.0.clone());
                 }
+
+                env.insert(
+                    sync::Arc::from("HOME"),
+                    user.home_dir().to_string_lossy().into(),
+                );
+                let username: sync::Arc<str> = user.name().to_string_lossy().into();
+                env.insert(sync::Arc::from("USER"), sync::Arc::clone(&username));
+                env.insert(sync::Arc::from("LOGNAME"), sync::Arc::clone(&username));
+                env.insert(
+                    sync::Arc::from("SHELL"),
+                    user.shell().to_string_lossy().into(),
+                );
 
                 object.send_env(&env);
 

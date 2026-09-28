@@ -135,10 +135,10 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
             cmd.arg("-c")
                 .arg(
                     r#"
-                        [ -r /etc/profile ] && . /etc/profile
+                    [ -r /etc/profile ] && . /etc/profile
 
-                        exec env "$@"
-                        "#,
+                    exec env "$@"
+                    "#,
                 )
                 .arg("sessiond-hook");
 

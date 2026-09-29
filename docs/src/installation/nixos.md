@@ -1,11 +1,13 @@
 # NixOS
 
-The NixOS module runs `sessiond` as a systemd service. PAM integration and the
-choice of session manager need additional configuration, described below.
+`sessiond` is not officially supported on NixOS and requires additional manual
+configuration. NixOS is deeply integrated with `logind`, which `sessiond`
+replaces, so some system components may continue to depend on `logind` and need
+separate adjustment.
 
 ## Install the module
 
-Choose either flakes or npins to import the module.
+Choose your prefered way of pinning the source.
 
 ### Flakes
 

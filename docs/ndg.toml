@@ -18,8 +18,8 @@ new_title = "Introduction"
 position = 1
 
 [[sidebar.matches]]
-path = "installation/overview.md"
-new_title = "Overview and source builds"
+path = "installation/from-source.md"
+new_title = "From source"
 position = 2
 
 [[sidebar.matches]]
@@ -35,31 +35,32 @@ path = "configuration.md"
 position = 5
 
 [[sidebar.matches]]
-path = "polkit.md"
+path = "consolekit.md"
+new_title = "ConsoleKit interface"
 position = 6
 
 [[sidebar.matches]]
-path = "clients.md"
+path = "clients/overview.md"
 position = 7
 
 [[sidebar.matches]]
-path = "client-hooks.md"
+path = "clients/client-hooks.md"
 position = 8
 
 [[sidebar.matches]]
-path = "client-backlight.md"
+path = "clients/client-backlight.md"
 position = 9
 
 [[sidebar.matches]]
-path = "client-uaccess.md"
+path = "clients/client-uaccess.md"
 position = 10
 
 [[sidebar.matches]]
-path = "client-power.md"
+path = "clients/client-power.md"
 position = 11
 
 [[sidebar.matches]]
-path = "writing-a-client.md"
+path = "clients/writing-a-client.md"
 new_title = "Writing a Client"
 position = 12
 

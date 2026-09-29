@@ -1,11 +1,4 @@
-# Installation
-
-Choose the guide for your system. Each covers installation and platform-specific setup:
-
-- [Finix](finix.md): native integration and PAM configuration.
-- [NixOS](nixos.md): module installation, logind, PAM, and Polkit integration.
-
-## From source
+# From source
 
 Build `sessiond`, `sessionctl`, and the PAM module in release mode:
 

@@ -31,5 +31,10 @@ in
         DelegateSubgroup = "supervisor";
       };
     };
+
+    security.polkit.package = pkgs.polkit.override {
+      useConsoleKit = true;
+      useSystemd = false;
+    };
   };
 }

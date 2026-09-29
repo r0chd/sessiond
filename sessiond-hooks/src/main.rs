@@ -2,7 +2,7 @@ mod config;
 #[path = "../../shared/logging.rs"]
 mod logging;
 
-use calloop::generic;
+use calloop::{generic, timer};
 use clap::{Parser, ValueEnum};
 use hyprwire::client;
 use hyprwire_protocols_sessiond::client::session_core::v1::session_core_v1;
@@ -38,6 +38,7 @@ enum LogTarget {
 struct Hook {
     uid: u32,
     envs: BTreeMap<String, String>,
+    restarts: u32,
     state: HookState,
 }
 
@@ -46,12 +47,8 @@ enum HookState {
         object: session_management_session::SessionManagementSession,
     },
     Running {
-        object: session_management_session::SessionManagementSession,
+        _object: session_management_session::SessionManagementSession,
         child: process::Child,
-    },
-    Restarting {
-        failures: u32,
-        retry_at: time::Instant,
     },
 }
 
@@ -83,6 +80,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for SessiondHo
                         uid,
                         envs: BTreeMap::new(),
                         state: HookState::Starting { object: session },
+                        restarts: 0,
                     });
                 }
             }
@@ -121,6 +119,12 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                     Some((name.to_owned(), value.to_owned()))
                 })
                 .collect();
+
+            let uid = hook.uid;
+
+            let Some(hook) = self.hooks.iter_mut().find(|hook| hook.uid == uid) else {
+                return;
+            };
 
             let Some(user) = uzers::get_user_by_uid(hook.uid) else {
                 log::error!(uid = hook.uid; "cannot start hook for unknown uid");
@@ -195,8 +199,68 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                         calloop::Mode::Level,
                     );
 
+                    let uid = hook.uid;
                     if let Err(err) = self.loop_handle.insert_source(source, move |_, _, state| {
-                        //
+                        let Some(hook) = state.hooks.iter_mut().find(|hook| hook.uid == uid) else {
+                            return Ok(calloop::PostAction::Remove);
+                        };
+                        let HookState::Running { child, .. } = &mut hook.state else {
+                            return Ok(calloop::PostAction::Reregister);
+                        };
+                        let Ok(Some(status)) = child.try_wait() else {
+                            return Ok(calloop::PostAction::Reregister);
+                        };
+
+                        match (state.config.restart.on, status.success()) {
+                            (config::RestartPolicy::Never, _)
+                            | (config::RestartPolicy::Failure, true) => {}
+                            (config::RestartPolicy::Always, _)
+                            | (config::RestartPolicy::Failure, false) => {
+                                let restart_delay = state.config.restart.delay;
+                                let restart = timer::Timer::from_duration(
+                                    time::Duration::from_secs(restart_delay),
+                                );
+                                if let Err(error) =
+                                    state
+                                        .loop_handle
+                                        .insert_source(restart, move |_, (), state| {
+                                            if let Some(hook) =
+                                                state.hooks.iter_mut().find(|hook| hook.uid == uid)
+                                            {
+                                                hook.restarts += 1;
+
+                                                log::info!(
+                                                    uid,
+                                                    delay_seconds = restart_delay,
+                                                    failures = hook.restarts;
+                                                    "restarting hook"
+                                                );
+
+                                                if let Some(session_manager) =
+                                                    state.session_manager.as_ref()
+                                                    && let Some(session) = session_manager
+                                                        .send_create_session::<Self>(uid)
+                                                {
+                                                    session.send_class(
+                                                    session_management_v2::SessionClass::Manager,
+                                                );
+                                                    hook.state =
+                                                        HookState::Starting { object: session };
+                                                }
+                                            }
+
+                                            timer::TimeoutAction::Drop
+                                        })
+                                {
+                                    log::error!(
+                                        uid,
+                                        error:% = error;
+                                        "failed to schedule restart"
+                                    );
+                                }
+                            }
+                        }
+
                         Ok(calloop::PostAction::Remove)
                     }) {
                         log::error!(
@@ -210,7 +274,7 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                     }
 
                     hook.state = HookState::Running {
-                        object: object.clone(),
+                        _object: object.clone(),
                         child,
                     }
                 }

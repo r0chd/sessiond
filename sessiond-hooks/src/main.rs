@@ -171,7 +171,8 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                 match cmd.spawn() {
                     Ok(mut child) => {
                         let gate = child.stdin.take().expect("stdin was configured as piped");
-                        object.send_commit(child.id());
+                        object.send_leader(child.id());
+                        object.send_commit();
 
                         hook.state = HookState::AwaitingCommit {
                             object: object.clone(),

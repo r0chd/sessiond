@@ -29,8 +29,8 @@
   </description>
   <c2s name="create_session">
    <description summary="start registering a new session, returning an owning session object">
-    Optional fields may be staged before commit supplies the leader PID and
-    creates the session.
+    The leader PID and optional fields may be staged before commit finalizes
+    the configuration and creates the session.
    </description>
    <arg name="uid" type="uint" summary="user id"/>
    <returns iface="session_management_session"/>
@@ -40,8 +40,8 @@
 
  <object name="session_management_session" version="1">
   <description summary="owning handle for a session created via create_session">
-   Optional fields may be sent while the session is staged. Setting
-   remote_host marks the session as remote. Once the session has been
+   The leader PID and optional fields may be sent while the session is staged.
+   Setting remote_host marks the session as remote. Once the session has been
    committed, modifying staged fields or committing it again is a protocol
    error. Destroying this object tears down the session and its resources.
   </description>
@@ -98,11 +98,21 @@
   </c2s>
   <c2s name="commit">
    <description summary="commit staged fields and create the session">
-    Supplies the leader PID after all optional fields have been staged.
-    Validates the leader PID and creates the session, replying with done on
-    success or error on failure. Commit consumes the staged session even on
+    Finalizes the staged configuration and creates the session, replying with
+    done on success or error on failure. Both leader and delegate_cgroup are
+    optional. If neither is set, the PID from the client's peer credentials
+    (ucreds) is used as the session leader. Sending both is a protocol error.
+    Commit consumes the staged session even on
     failure; retrying requires a new session object. No fields may be changed
     after commit, and committing an already-created session is a protocol error.
+   </description>
+  </c2s>
+  <c2s name="leader">
+   <description summary="stage the session leader PID">
+    Optional. Must be sent while staged. Supplies the process
+    ID of the leader to place in the session cgroup when committed.
+    Sending both leader and delegate_cgroup for the same session, in either
+    order, is a protocol error.
    </description>
    <arg name="leader_pid" type="uint" summary="process ID of the session leader"/>
   </c2s>

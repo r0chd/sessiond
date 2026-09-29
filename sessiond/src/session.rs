@@ -102,6 +102,7 @@ pub struct PendingSession {
     pub vt: Option<num::NonZeroU32>,
     pub remote_host: Option<sync::Arc<str>>,
     pub env: BTreeMap<sync::Arc<str>, sync::Arc<str>>,
+    pub leader: Option<i32>,
 }
 
 #[derive(Resource, Default)]
@@ -272,7 +273,7 @@ pub fn spawn(
     class: SessionClass,
     uid: u32,
     vt: Option<u32>,
-    leader: Leader,
+    leader: i32,
     remote_host: Option<sync::Arc<str>>,
     active_state: session_core_v1::ActiveState,
     session_object: Option<session_management_session::SessionManagementSession>,
@@ -288,7 +289,7 @@ pub fn spawn(
         class,
         uid: Uid(uid),
         timestamp: Timestamp(time::SystemTime::now()),
-        leader,
+        leader: Leader(leader),
         env: SessionEnv(env),
         active_state: active_state.into(),
         objects: Objects::default(),
@@ -728,9 +729,10 @@ pub enum SessionManagementAction {
     Class {
         class: SessionClass,
     },
-    Commit {
+    Leader {
         leader_pid: u32,
     },
+    Commit,
     Destroy,
 }
 
@@ -859,6 +861,7 @@ pub fn handle_session_management_action(
                         vt: None,
                         remote_host: None,
                         env,
+                        leader: None,
                     },
                 );
                 continue;
@@ -893,7 +896,20 @@ pub fn handle_session_management_action(
                     continue;
                 }
             }
-            SessionManagementAction::Commit { leader_pid } => {
+            SessionManagementAction::Leader { leader_pid } => {
+                if let Some(pending_session) = pending_sessions.by_management_object.get_mut(object)
+                {
+                    let Some(leader_pid) = i32::try_from(*leader_pid).ok().filter(|pid| *pid > 0)
+                    else {
+                        object.send_error(SessionManagementError::Io, "invalid leader PID");
+                        continue;
+                    };
+
+                    pending_session.leader = Some(leader_pid);
+                    continue;
+                }
+            }
+            SessionManagementAction::Commit => {
                 if let Some(pending_session) = pending_sessions.by_management_object.remove(object)
                 {
                     let Some(user) = uzers::get_user_by_uid(pending_session.uid) else {
@@ -905,17 +921,28 @@ pub fn handle_session_management_action(
                     };
                     let username: sync::Arc<str> = user.name().to_string_lossy().into();
 
-                    let Some(leader_pid) = i32::try_from(*leader_pid).ok().filter(|pid| *pid > 0)
-                    else {
-                        object.send_error(SessionManagementError::Io, "invalid leader PID");
-                        continue;
+                    let leader = if let Some(pid) = pending_session.leader {
+                        pid
+                    } else {
+                        let Some(client) = pending_session
+                            .manager
+                            .as_ref()
+                            .and_then(hyprwire_protocols_sessiond::server::session_management::v2::session_management_v2::session_manager::SessionManager::try_client)
+                        else {
+                            object.send_error(
+                                SessionManagementError::Io,
+                                "cannot determine session leader",
+                            );
+                            continue;
+                        };
+
+                        client.creds().pid.as_raw_pid()
                     };
-                    let leader = Leader(leader_pid);
 
                     let cgroup = match cgroup_manager.create_session_cgroup(
                         &user,
                         pending_session.id,
-                        leader_pid,
+                        leader,
                     ) {
                         Ok(cgroup) => cgroup,
                         Err(e) => {
@@ -1057,9 +1084,14 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                 }
 
                 self.world.write_message(SessionManagementMessage {
-                    action: SessionManagementAction::Commit {
+                    action: SessionManagementAction::Leader {
                         leader_pid: client.creds().pid.as_raw_pid().cast_unsigned(),
                     },
+                    object: Some(target.clone()),
+                });
+
+                self.world.write_message(SessionManagementMessage {
+                    action: SessionManagementAction::Commit,
                     object: Some(target),
                 });
             }
@@ -1115,9 +1147,10 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                     value: value.into(),
                 }
             }
-            session_management_session::Event::Commit { leader_pid } => {
-                SessionManagementAction::Commit { leader_pid }
+            session_management_session::Event::Leader { leader_pid } => {
+                SessionManagementAction::Leader { leader_pid }
             }
+            session_management_session::Event::Commit => SessionManagementAction::Commit,
             session_management_session::Event::Destroy => SessionManagementAction::Destroy,
             _ => return,
         };

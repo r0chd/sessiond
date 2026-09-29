@@ -239,7 +239,7 @@ pub fn load_state(
                     saved_session.class(),
                     saved_session.uid,
                     saved_session.vt,
-                    session::Leader(saved_session.leader),
+                    saved_session.leader,
                     saved_session.remote_host.as_ref().map(sync::Arc::clone),
                     active_state,
                     None,

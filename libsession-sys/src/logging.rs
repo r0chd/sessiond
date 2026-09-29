@@ -1,7 +1,7 @@
 use std::{cell, ffi};
 
 #[derive(Default)]
-pub(crate) struct Logger {
+pub struct Logger {
     callback: cell::Cell<crate::LibsessionLogFn>,
     level: cell::Cell<crate::LibsessionLogLevel>,
 }
@@ -15,7 +15,7 @@ impl Logger {
         self.level.set(level);
     }
 
-    pub(crate) fn level(&self) -> crate::LibsessionLogLevel {
+    pub(crate) const fn level(&self) -> crate::LibsessionLogLevel {
         self.level.get()
     }
 

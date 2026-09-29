@@ -2,7 +2,6 @@
   lib,
   pkgs,
   config,
-  inputs,
   modules,
   sessiond,
   sessiond-hooks,
@@ -20,12 +19,11 @@ in
     modules.doas
     modules.getty
     modules.sysklogd
-    inputs.community-modules.nixosModules.dinit
   ];
 
-  dinit.user.services = {
-    boot.type = lib.mkDefault "internal";
-  };
+  environment.etc."dinit.d/user/boot".text = ''
+    type = internal
+  '';
 
   programs.doas.enable = true;
   providers.privileges.rules = [

@@ -1,5 +1,4 @@
 {
-  inputs,
   modules,
   config,
   lib,
@@ -13,7 +12,9 @@ let
   configFile = format.generate "sessiond.toml" cfg.settings;
 in
 {
-  disabledModules = [ "${inputs.finix}/modules/services/sessiond" ];
+  # finix ships its own sessiond module; locate it through the `modules`
+  # specialArg, which finix always provides (unlike `inputs`)
+  disabledModules = builtins.filter (m: baseNameOf m == "sessiond") modules.default.imports;
 
   imports = [
     ./common.nix

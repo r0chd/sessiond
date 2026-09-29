@@ -119,10 +119,6 @@
           finix-vm = finix.lib.finixSystem {
             inherit (pkgs) lib;
             specialArgs = {
-              inputs = {
-                finix = finix.outPath;
-                community-modules = import sources.community-modules.outPath;
-              };
               inherit (self.packages.${system})
                 sessiond
                 sessiond-backlight

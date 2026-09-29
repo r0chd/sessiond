@@ -70,8 +70,7 @@ The module starts the daemon but does not add the PAM session rule. To register
 console logins, configure the `login` PAM service:
 
 ```nix
-{ config, ... }:
-{
+{ config, ... }: {
   security.pam.services.login.rules.session.sessiond = {
     control = "optional";
     modulePath = "${config.services.sessiond.package}/lib/security/pam_sessiond.so";
@@ -83,14 +82,41 @@ console logins, configure the `login` PAM service:
 For other login paths, add the rule to the corresponding PAM service as well.
 Configuring `login` alone does not configure a display manager or SSH.
 
+## Seat management
+
+`sessiond` does not provide seat management on its own. To allow your compositor
+to access graphical devices, enable `seatd` and add your user to the `seat` group.
+
+```nix
+{ config, ... }: {
+  services.seatd.enable = true;
+
+  users.users.myUser.extraGroups = [ config.services.seatd.group ];
+}
+```
+
+## Greeters/Display Managers
+
+To allow the greeter to access graphical devices, add the user under which the
+service runs to the `seat` group. Also ensure that `greetd` starts after both
+`seatd` and `sessiond` to avoid race conditions.
+
+```nix
+{ config, ... }: {
+  users.users.cosmic-greeter.extraGroups =  [
+    config.services.seatd.group
+  ];
+  
+  systemd.services.greetd = {
+    wants = [ "seatd.service" "sessiond.service" ];
+    after = [ "seatd.service" "sessiond.service" ];
+  };
+}
+```
+
 ## Known issues
 
 The following problems remain unresolved in this setup.
-
-### greetd greeter
-
-The greetd greeter fails to start, leaving a black screen. The cause has not
-yet been identified.
 
 ### Switching configurations
 

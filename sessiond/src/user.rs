@@ -126,7 +126,11 @@ pub fn ensure_session_users(
 pub fn reconcile_user_states(
     users: Query<(&session::Uid, Option<&Lingering>, &mut UserState), With<User>>,
     sessions: Query<
-        (&session::Uid, &session::SessionClass, &session::SessionState),
+        (
+            &session::Uid,
+            &session::SessionClass,
+            &session::SessionState,
+        ),
         With<session::Session>,
     >,
 ) {

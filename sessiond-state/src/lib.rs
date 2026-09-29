@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::{env, fs, io, path, result, sync};
+use std::{env, fs, io, num, path, result, sync};
 use toml::{de, ser};
 
 #[cfg(feature = "monitor")]
@@ -70,8 +70,8 @@ pub struct State {
 pub struct Session {
     pub uid: u32,
     pub class: SessionClass,
-    pub vt: Option<u32>,
-    pub leader: i32,
+    pub vt: Option<num::NonZeroU32>,
+    pub leader: Option<num::NonZeroU32>,
     pub remote_host: Option<sync::Arc<str>>,
     pub timestamp: u128,
     pub env: BTreeMap<sync::Arc<str>, sync::Arc<str>>,

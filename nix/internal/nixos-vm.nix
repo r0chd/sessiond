@@ -59,18 +59,16 @@ in
     sessiond-hooks = {
       package = sessiond-hooks;
       debug = true;
-      hooks.dinit.settings = {
-        on_start = {
-          exec = lib.getExe' pkgs.dinit "dinit";
-          args = [
-            "--user"
-            "--services-dir"
-            "~/.config/dinit.d"
-          ];
-        };
-        restart = {
-          on = "Failure";
-          delay = 5;
+      hooks = {
+        systemd.settings = {
+          on_start = {
+            exec = "${pkgs.systemd}/lib/systemd/systemd";
+            args = [ "--user" ];
+          };
+          restart = {
+            on = "Always";
+            delay = 5;
+          };
         };
       };
     };

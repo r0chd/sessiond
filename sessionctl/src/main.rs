@@ -509,13 +509,14 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for State {
         object: &session_core_session::SessionCoreSession,
         event: <session_core_session::SessionCoreSession as hyprwire::Object>::Event<'_>,
     ) {
-        let Some(s) = self
+        let Some(index) = self
             .sessions
-            .iter_mut()
-            .find(|s| s.object.as_ref() == Some(object))
+            .iter()
+            .position(|s| s.object.as_ref() == Some(object))
         else {
             return;
         };
+        let s = &mut self.sessions[index];
         match event {
             session_core_session::Event::SessionId { session_id } => s.id = session_id,
             session_core_session::Event::Uid { uid } => {
@@ -530,8 +531,9 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for State {
             session_core_session::Event::Timestamp { timestamp } => s.timestamp = timestamp,
             session_core_session::Event::State { state } => s.state = state,
             session_core_session::Event::CanModify { can_modify } => s.can_modify = can_modify != 0,
-            session_core_session::Event::Done | session_core_session::Event::Destroyed => {
-                s.done = true;
+            session_core_session::Event::Done => s.done = true,
+            session_core_session::Event::Destroyed => {
+                self.sessions.remove(index);
             }
             _ => {}
         }

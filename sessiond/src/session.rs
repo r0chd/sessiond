@@ -2,13 +2,15 @@ use crate::{cgroup, config, inhibit, user, vt};
 use bevy_ecs::prelude::*;
 use hyprwire::server;
 use hyprwire_protocols_sessiond::server::session_core::v1::session_core_v1;
-use hyprwire_protocols_sessiond::server::session_core::v1::session_core_v1::session_core_manager;
-use hyprwire_protocols_sessiond::server::session_core::v1::session_core_v1::session_core_session;
+use hyprwire_protocols_sessiond::server::session_core::v1::session_core_v1::{
+    session_core_manager, session_core_session,
+};
 use hyprwire_protocols_sessiond::server::session_management::v1::session_management_v1;
 use hyprwire_protocols_sessiond::server::session_management::v1::session_management_v1::session_manager as session_manager_v1;
 use hyprwire_protocols_sessiond::server::session_management::v2::session_management_v2;
-use hyprwire_protocols_sessiond::server::session_management::v2::session_management_v2::session_management_session;
-use hyprwire_protocols_sessiond::server::session_management::v2::session_management_v2::session_manager;
+use hyprwire_protocols_sessiond::server::session_management::v2::session_management_v2::{
+    session_management_cgroup, session_management_session, session_manager,
+};
 use std::collections::{BTreeMap, HashMap};
 use std::{convert, num, sync, time};
 use uzers::os::unix::UserExt;
@@ -73,6 +75,14 @@ impl SessionManagementTarget {
         }
     }
 
+    fn error(&self, code: u32, message: impl AsRef<str>) {
+        let message = message.as_ref();
+        match self {
+            Self::V1(object) => object.error(code, message),
+            Self::V2(object) => object.error(code, message),
+        }
+    }
+
     fn send_error(&self, code: SessionManagementError, message: impl AsRef<str>) {
         let message = message.as_ref();
         match self {
@@ -94,6 +104,11 @@ impl SessionManagementTarget {
     }
 }
 
+pub enum CgroupControl {
+    LeaderId(num::NonZeroU32),
+    Cgroup(cgroup::CgroupBundle),
+}
+
 pub struct PendingSession {
     pub id: SessionId,
     pub manager: Option<session_manager::SessionManager>,
@@ -102,7 +117,7 @@ pub struct PendingSession {
     pub vt: Option<num::NonZeroU32>,
     pub remote_host: Option<sync::Arc<str>>,
     pub env: BTreeMap<sync::Arc<str>, sync::Arc<str>>,
-    pub leader: Option<i32>,
+    pub cgroup: Option<CgroupControl>,
 }
 
 #[derive(Resource, Default)]
@@ -159,7 +174,6 @@ pub struct SessionBundle {
     pub class: SessionClass,
     pub uid: Uid,
     pub timestamp: Timestamp,
-    pub leader: Leader,
     pub env: SessionEnv,
     pub state: SessionState,
     pub objects: Objects,
@@ -188,7 +202,7 @@ pub struct Vt(pub num::NonZeroU32);
 pub struct Timestamp(pub time::SystemTime);
 
 #[derive(Component, Debug)]
-pub struct Leader(pub i32);
+pub struct Leader(pub num::NonZeroU32);
 
 #[derive(Component, Debug, Clone, PartialEq, Eq)]
 pub struct RemoteHost(pub sync::Arc<str>);
@@ -272,8 +286,8 @@ pub fn spawn(
     session_id: SessionId,
     class: SessionClass,
     uid: u32,
-    vt: Option<u32>,
-    leader: i32,
+    vt: Option<num::NonZeroU32>,
+    leader: Option<num::NonZeroU32>,
     remote_host: Option<sync::Arc<str>>,
     session_state: session_core_v1::SessionState,
     session_object: Option<session_management_session::SessionManagementSession>,
@@ -289,15 +303,17 @@ pub fn spawn(
         class,
         uid: Uid(uid),
         timestamp: Timestamp(time::SystemTime::now()),
-        leader: Leader(leader),
         env: SessionEnv(env),
         state: session_state.into(),
         objects: Objects::default(),
         display: DisplaySession(display),
     });
     cmd.insert(cgroup);
-    if let Some(vt) = vt.and_then(num::NonZeroU32::new) {
+    if let Some(vt) = vt {
         cmd.insert(Vt(vt));
+    }
+    if let Some(leader) = leader {
+        cmd.insert(Leader(leader));
     }
     if let Some(remote_host) = remote_host {
         cmd.insert(RemoteHost(sync::Arc::clone(&remote_host)));
@@ -355,8 +371,7 @@ pub fn handle_session_control(
     for action in actions.read() {
         match action.action {
             SessionControlAction::Terminate { creds } => {
-                let Ok((session_id, uid, mut state, vt, _)) =
-                    sessions.get_mut(action.entity)
+                let Ok((session_id, uid, mut state, vt, _)) = sessions.get_mut(action.entity)
                 else {
                     continue;
                 };
@@ -380,8 +395,7 @@ pub fn handle_session_control(
                 }
             }
             SessionControlAction::Kill { creds } => {
-                let Ok((session_id, uid, mut state, vt, _)) =
-                    sessions.get_mut(action.entity)
+                let Ok((session_id, uid, mut state, vt, _)) = sessions.get_mut(action.entity)
                 else {
                     continue;
                 };
@@ -539,7 +553,7 @@ pub fn handle_add_object(
             Option<&Vt>,
             &SessionClass,
             &SessionState,
-            &Leader,
+            Option<&Leader>,
             &Timestamp,
             Option<&IsLocal>,
             Option<&RemoteHost>,
@@ -577,7 +591,9 @@ pub fn handle_add_object(
         request.object.send_class((*class).into());
         request.object.send_vt(vt.map_or(0, |vt| vt.0.get()));
         request.object.send_state(state.0);
-        request.object.send_leader(leader.0.cast_unsigned());
+        request
+            .object
+            .send_leader(leader.map_or(0, |leader| leader.0.get()));
         let timestamp_secs = timestamp
             .0
             .duration_since(time::UNIX_EPOCH)
@@ -732,6 +748,9 @@ pub enum SessionManagementAction {
     Leader {
         leader_pid: u32,
     },
+    DelegateCgroup {
+        cgroup_object: session_management_cgroup::SessionManagementCgroup,
+    },
     Commit,
     Destroy,
 }
@@ -811,10 +830,13 @@ pub fn handle_session_management_action(
                     .unwrap_or_default();
 
                 let session_id = next_id.take();
+                log::info!(
+                    session_id = session_id.as_raw(),
+                    uid = *uid,
+                    manager = management_object.is_some();
+                    "session manager created session"
+                );
                 object.send_session_id(session_id.as_raw());
-                for manager in &info_managers.0 {
-                    manager.send_session_added(session_id.as_raw());
-                }
 
                 let runtime_dir = user_config.runtime_dir(*uid);
                 let mut env: BTreeMap<sync::Arc<str>, sync::Arc<str>> = BTreeMap::from([
@@ -861,7 +883,7 @@ pub fn handle_session_management_action(
                         vt: None,
                         remote_host: None,
                         env,
-                        leader: None,
+                        cgroup: None,
                     },
                 );
                 continue;
@@ -899,14 +921,65 @@ pub fn handle_session_management_action(
             SessionManagementAction::Leader { leader_pid } => {
                 if let Some(pending_session) = pending_sessions.by_management_object.get_mut(object)
                 {
-                    let Some(leader_pid) = i32::try_from(*leader_pid).ok().filter(|pid| *pid > 0)
-                    else {
+                    if pending_session.cgroup.is_some() {
+                        object.error(
+                            session_management_v2::ErrorCode::Io as u32,
+                            "session cgroup has already been created",
+                        );
+                        continue;
+                    }
+
+                    let Some(leader_pid) = num::NonZeroU32::new(*leader_pid) else {
                         object.send_error(SessionManagementError::Io, "invalid leader PID");
                         continue;
                     };
 
-                    pending_session.leader = Some(leader_pid);
+                    pending_session.cgroup = Some(CgroupControl::LeaderId(leader_pid));
+
                     continue;
+                }
+            }
+            SessionManagementAction::DelegateCgroup { cgroup_object } => {
+                if let Some(pending_session) = pending_sessions.by_management_object.get_mut(object)
+                {
+                    if pending_session.cgroup.is_some() {
+                        cgroup_object.error(
+                            session_management_v2::ErrorCode::Io as u32,
+                            "session cgroup has already been created",
+                        );
+                        continue;
+                    }
+
+                    let Some(user) = uzers::get_user_by_uid(pending_session.uid) else {
+                        object.send_error(
+                            SessionManagementError::NotFound,
+                            format!("user {} does not exist", pending_session.uid),
+                        );
+                        continue;
+                    };
+
+                    let cgroup = match cgroup_manager
+                        .create_delegated_cgroup(&user, pending_session.id)
+                    {
+                        Ok(cgroup) => cgroup,
+                        Err(error) => {
+                            log::error!(session_id = pending_session.id.as_raw(), error = error.to_string().as_str(); "failed to create session cgroup");
+                            object.send_error(
+                                SessionManagementError::Io,
+                                format!("failed to create session cgroup: {error}"),
+                            );
+                            continue;
+                        }
+                    };
+
+                    cgroup_object.send_path(cgroup.path.0.join("supervisor").to_string_lossy());
+
+                    log::info!(
+                        session_id = pending_session.id.as_raw(),
+                        uid = pending_session.uid;
+                        "session cgroup delegation requested"
+                    );
+                    pending_session.cgroup = Some(CgroupControl::Cgroup(cgroup));
                 }
             }
             SessionManagementAction::Commit => {
@@ -917,17 +990,17 @@ pub fn handle_session_management_action(
                             SessionManagementError::NotFound,
                             format!("user {} does not exist", pending_session.uid),
                         );
-                        return;
+                        continue;
                     };
                     let username: sync::Arc<str> = user.name().to_string_lossy().into();
 
-                    let leader = if let Some(pid) = pending_session.leader {
-                        pid
+                    let control = if let Some(control) = pending_session.cgroup {
+                        control
                     } else {
                         let Some(client) = pending_session
                             .manager
                             .as_ref()
-                            .and_then(hyprwire_protocols_sessiond::server::session_management::v2::session_management_v2::session_manager::SessionManager::try_client)
+                            .and_then(session_manager::SessionManager::try_client)
                         else {
                             object.send_error(
                                 SessionManagementError::Io,
@@ -936,37 +1009,23 @@ pub fn handle_session_management_action(
                             continue;
                         };
 
-                        client.creds().pid.as_raw_pid()
-                    };
-
-                    let cgroup = match cgroup_manager.create_session_cgroup(
-                        &user,
-                        pending_session.id,
-                        leader,
-                    ) {
-                        Ok(cgroup) => cgroup,
-                        Err(e) => {
-                            log::error!(session_id = pending_session.id.as_raw(), error = e.to_string().as_str(); "failed to create session cgroup");
+                        let Some(leader) = client
+                            .creds()
+                            .pid
+                            .as_raw_pid()
+                            .try_into()
+                            .ok()
+                            .and_then(num::NonZeroU32::new)
+                        else {
                             object.send_error(
                                 SessionManagementError::Io,
-                                format!("failed to create session cgroup: {e}"),
+                                "invalid session leader PID",
                             );
-                            return;
-                        }
+                            continue;
+                        };
+
+                        CgroupControl::LeaderId(leader)
                     };
-                    if let Err(error) = cgroup::watch_empty(
-                        &cgroup.path,
-                        pending_session.id,
-                        Uid(pending_session.uid),
-                        &loop_handle,
-                    ) {
-                        log::error!(session_id = pending_session.id.as_raw(), error = error.to_string().as_str(); "failed to watch session cgroup");
-                        object.send_error(
-                            SessionManagementError::Io,
-                            "failed to watch session cgroup",
-                        );
-                        return;
-                    }
 
                     let user_config = config.users.get(&username).cloned().unwrap_or_default();
                     user::create_runtime_dir(
@@ -992,22 +1051,80 @@ pub fn handle_session_management_action(
                         .min_by_key(|(session_id, timestamp)| (timestamp.0, session_id.as_raw()))
                         .map_or(pending_session.id, |(session_id, _)| *session_id);
 
-                    spawn(
-                        &mut commands,
-                        pending_session.id,
-                        pending_session.class.unwrap_or_default(),
-                        pending_session.uid,
-                        pending_session.vt.map(num::NonZeroU32::get),
-                        leader,
-                        pending_session.remote_host,
-                        session_state,
-                        object.owned_session(),
-                        matches!(object, SessionManagementTarget::V1(_)),
-                        pending_session.env,
-                        cgroup,
-                        &mut session_registry,
-                        display_session,
-                    );
+                    match control {
+                        CgroupControl::LeaderId(leader) => {
+                            let cgroup = match cgroup_manager
+                                .create_session_cgroup(&user, pending_session.id)
+                            {
+                                Ok(cgroup) => cgroup,
+                                Err(error) => {
+                                    log::error!(session_id = pending_session.id.as_raw(), error = error.to_string().as_str(); "failed to create session cgroup");
+                                    object.send_error(
+                                        SessionManagementError::Io,
+                                        format!("failed to create session cgroup: {error}"),
+                                    );
+                                    continue;
+                                }
+                            };
+
+                            if let Err(error) = cgroup.set_leader(leader) {
+                                log::error!(session_id = pending_session.id.as_raw(), error = error.to_string().as_str(); "failed to set session cgroup leader");
+                                object.send_error(
+                                    SessionManagementError::Io,
+                                    format!("failed to set session cgroup leader: {error}"),
+                                );
+                                continue;
+                            }
+
+                            if let Err(error) = cgroup.watch_empty(&loop_handle) {
+                                log::error!(session_id = pending_session.id.as_raw(), error = error.to_string().as_str(); "failed to watch session cgroup");
+                                object.send_error(
+                                    SessionManagementError::Io,
+                                    "failed to watch session cgroup",
+                                );
+                                continue;
+                            }
+
+                            spawn(
+                                &mut commands,
+                                pending_session.id,
+                                pending_session.class.unwrap_or_default(),
+                                pending_session.uid,
+                                pending_session.vt,
+                                Some(leader),
+                                pending_session.remote_host,
+                                session_state,
+                                object.owned_session(),
+                                matches!(object, SessionManagementTarget::V1(_)),
+                                pending_session.env,
+                                cgroup,
+                                &mut session_registry,
+                                display_session,
+                            );
+                        }
+                        CgroupControl::Cgroup(cgroup) => {
+                            spawn(
+                                &mut commands,
+                                pending_session.id,
+                                pending_session.class.unwrap_or_default(),
+                                pending_session.uid,
+                                pending_session.vt,
+                                None,
+                                pending_session.remote_host,
+                                session_state,
+                                object.owned_session(),
+                                matches!(object, SessionManagementTarget::V1(_)),
+                                pending_session.env,
+                                cgroup,
+                                &mut session_registry,
+                                display_session,
+                            );
+                        }
+                    }
+
+                    for manager in &info_managers.0 {
+                        manager.send_session_added(pending_session.id.as_raw());
+                    }
 
                     object.send_done();
 
@@ -1152,6 +1269,11 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
             }
             session_management_session::Event::Commit => SessionManagementAction::Commit,
             session_management_session::Event::Destroy => SessionManagementAction::Destroy,
+            session_management_session::Event::DelegateCgroup {
+                session_management_cgroup,
+            } => SessionManagementAction::DelegateCgroup {
+                cgroup_object: session_management_cgroup,
+            },
             _ => return,
         };
         self.world.write_message(SessionManagementMessage {
@@ -1284,5 +1406,14 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
             }
             _ => {}
         }
+    }
+}
+
+impl hyprwire::Dispatch<session_management_cgroup::SessionManagementCgroup> for crate::Sessiond {
+    fn event(
+        &mut self,
+        _object: &session_management_cgroup::SessionManagementCgroup,
+        _event: <session_management_cgroup::SessionManagementCgroup as hyprwire::Object>::Event<'_>,
+    ) {
     }
 }

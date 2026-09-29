@@ -8,7 +8,7 @@ use rustix::process;
 use std::collections::HashSet;
 use std::io::{Read, Seek};
 use std::os::unix::fs::PermissionsExt;
-use std::{fs, io, path, sync, time};
+use std::{fs, io, num, path, sync, time};
 
 #[derive(Resource)]
 pub struct CgroupManager {
@@ -78,11 +78,41 @@ impl CgroupManager {
         Ok(user_cgroup_path)
     }
 
+    pub(crate) fn create_delegated_cgroup(
+        &self,
+        user: &uzers::User,
+        session_id: session::SessionId,
+    ) -> anyhow::Result<CgroupBundle> {
+        let session_cgroup = self.create_session_cgroup(user, session_id)?;
+        let supervisor_path = session_cgroup.path.0.join("supervisor");
+        fs::create_dir(&supervisor_path)
+            .with_context(|| format!("failed to create cgroup {}", supervisor_path.display()))?;
+
+        Self::delegate_cgroup(&supervisor_path, user.uid())?;
+        Self::delegate_cgroup(&session_cgroup.path.0, user.uid())?;
+
+        Ok(session_cgroup)
+    }
+
+    fn delegate_cgroup(path: &path::Path, uid: u32) -> anyhow::Result<()> {
+        let owner = rustix::fs::Uid::from_raw(uid);
+
+        for name in ["cgroup.procs", "cgroup.threads", "cgroup.subtree_control"] {
+            let interface = path.join(name);
+            rustix::fs::chown(&interface, Some(owner), None)
+                .with_context(|| format!("failed to delegate {}", interface.display()))?;
+        }
+
+        rustix::fs::chown(path, Some(owner), None)
+            .with_context(|| format!("failed to delegate cgroup {}", path.display()))?;
+
+        Ok(())
+    }
+
     pub(crate) fn create_session_cgroup(
         &self,
         user: &uzers::User,
         session_id: session::SessionId,
-        leader_pid: i32,
     ) -> anyhow::Result<CgroupBundle> {
         let user_cgroup_path = self.ensure_user_cgroup(user.uid())?;
         Self::enable_all_controllers(&self.root_path).with_context(|| {
@@ -111,16 +141,7 @@ impl CgroupManager {
             },
         )?;
 
-        let procs_path = session_cgroup_path.join("cgroup.procs");
-        fs::write(&procs_path, leader_pid.to_string()).with_context(|| {
-            format!(
-                "failed to move PID {} into {}",
-                leader_pid,
-                procs_path.display()
-            )
-        })?;
-
-        log::info!(session_id = session_id.as_raw(), leader_pid = leader_pid, path = session_cgroup_path.to_str(); "cgroup created");
+        log::info!(session_id = session_id.as_raw(), path = session_cgroup_path.to_str(); "cgroup created");
 
         Ok(CgroupBundle {
             marker: Cgroup,
@@ -208,6 +229,63 @@ pub struct CgroupBundle {
     pub session_id: session::SessionId,
     pub uid: session::Uid,
     pub path: CgroupPath,
+}
+
+impl CgroupBundle {
+    pub fn set_leader(&self, leader: num::NonZeroU32) -> anyhow::Result<()> {
+        let procs_path = self.path.0.join("cgroup.procs");
+        fs::write(&procs_path, leader.get().to_string()).with_context(|| {
+            format!(
+                "failed to move PID {} into {}",
+                leader.get(),
+                procs_path.display()
+            )
+        })?;
+
+        Ok(())
+    }
+
+    pub fn watch_empty(
+        &self,
+        loop_handle: &calloop::LoopHandle<'static, crate::Sessiond>,
+    ) -> anyhow::Result<()> {
+        let cgroup_path = self.path.0.clone();
+        let mut file = fs::File::open(self.path.0.join("cgroup.events"))?;
+        let fd_wrapper = unsafe { generic::FdWrapper::new(file.try_clone()?) };
+        let source =
+            generic::Generic::new(fd_wrapper, calloop::Interest::EMPTY, calloop::Mode::Level);
+
+        let session_id = self.session_id;
+        let uid = self.uid;
+        loop_handle.insert_source(source, move |_, _, state| {
+            let result = (|| -> anyhow::Result<calloop::PostAction> {
+                file.seek(io::SeekFrom::Start(0))?;
+                let mut contents = String::new();
+                file.read_to_string(&mut contents)?;
+
+                if contents.contains("populated 0") {
+                    remove_cgroup_tree(&cgroup_path)?;
+                    log::info!(
+                        session_id = session_id.as_raw(),
+                        path = cgroup_path.to_str();
+                        "cgroup destroyed"
+                    );
+
+                    state.world.trigger(CgroupEmpty { session_id, uid });
+
+                    return Ok(calloop::PostAction::Remove);
+                }
+
+                Ok(calloop::PostAction::Continue)
+            })();
+
+            result.or_else(|error| {
+                log::error!(error = error.to_string().as_str(); "cgroup poll error");
+                Ok(calloop::PostAction::Remove)
+            })
+        })?;
+        Ok(())
+    }
 }
 
 #[derive(Component)]
@@ -343,45 +421,4 @@ pub fn handle_cgroup_empty(
     if *shutdown_state == crate::ShutdownState::Stopping && cgroups.iter().next().is_none() {
         loop_signal.0.stop();
     }
-}
-
-pub fn watch_empty(
-    path: &CgroupPath,
-    session_id: session::SessionId,
-    uid: session::Uid,
-    loop_handle: &calloop::LoopHandle<'static, crate::Sessiond>,
-) -> anyhow::Result<()> {
-    let cgroup_path = path.0.clone();
-    let mut file = fs::File::open(path.0.join("cgroup.events"))?;
-    let fd_wrapper = unsafe { generic::FdWrapper::new(file.try_clone()?) };
-    let source = generic::Generic::new(fd_wrapper, calloop::Interest::EMPTY, calloop::Mode::Level);
-
-    loop_handle.insert_source(source, move |_, _, state| {
-        let result = (|| -> anyhow::Result<calloop::PostAction> {
-            file.seek(io::SeekFrom::Start(0))?;
-            let mut contents = String::new();
-            file.read_to_string(&mut contents)?;
-
-            if contents.contains("populated 0") {
-                remove_cgroup_tree(&cgroup_path)?;
-                log::info!(
-                    session_id = session_id.as_raw(),
-                    path = cgroup_path.to_str();
-                    "cgroup destroyed"
-                );
-
-                state.world.trigger(CgroupEmpty { session_id, uid });
-
-                return Ok(calloop::PostAction::Remove);
-            }
-
-            Ok(calloop::PostAction::Continue)
-        })();
-
-        result.or_else(|error| {
-            log::error!(error = error.to_string().as_str(); "cgroup poll error");
-            Ok(calloop::PostAction::Remove)
-        })
-    })?;
-    Ok(())
 }

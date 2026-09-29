@@ -18,7 +18,7 @@ env_logger = "0.11.8"
 hyprwire = "0.5.1"
 hyprwire-protocols-sessiond = { path = "../hyprwire-protocols-sessiond", version = "0.2.0" }
 log = { version = "0.4.28", features = ["kv"] }
-rustix = "1.1.4"
+rustix = { version = "1.1.4", features = ["process", "thread"] }
 syslog = "7.0.0"
 uzers = "0.12.2"
 serde = { version = "1.0.228", features = ["derive", "rc"] }

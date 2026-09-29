@@ -25,6 +25,8 @@ in
     type = internal
   '';
 
+  environment.etc."systemd/user".source = "${pkgs.systemd}/example/systemd/user";
+
   programs.doas.enable = true;
   providers.privileges.rules = [
     {
@@ -80,18 +82,30 @@ in
     sessiond-hooks = {
       package = sessiond-hooks;
       debug = true;
-      hooks.dinit.settings = {
-        on_start = {
-          exec = lib.getExe' pkgs.dinit "dinit";
-          args = [
-            "--user"
-            "--services-dir"
-            "/etc/dinit.d/user"
-          ];
+      hooks = {
+        systemd.settings = {
+          on_start = {
+            exec = "${pkgs.systemd}/lib/systemd/systemd";
+            args = [ "--user" ];
+          };
+          restart = {
+            on = "Always";
+            delay = 5;
+          };
         };
-        restart = {
-          on = "Failure";
-          delay = 5;
+        dinit.settings = {
+          on_start = {
+            exec = lib.getExe' pkgs.dinit "dinit";
+            args = [
+              "--user"
+              "--services-dir"
+              "/etc/dinit.d/user"
+            ];
+          };
+          restart = {
+            on = "Failure";
+            delay = 5;
+          };
         };
       };
     };
@@ -159,6 +173,8 @@ in
 
   finit.tmpfiles.rules = [
     "d /var/log 0755 root root -"
+    # Allow systemd --user to pass its sd_booted() check under Finit.
+    "d /run/systemd/system 0755 root root -"
   ];
 
   environment.systemPackages = [

@@ -123,7 +123,7 @@
    <arg name="vt" type="uint" summary="virtual terminal number"/>
   </s2c>
   <s2c name="leader">
-   <arg name="leader" type="uint" summary="PID of the session-creating process"/>
+   <arg name="leader" type="uint" summary="PID of the session-creating process, or 0 if unknown"/>
   </s2c>
   <s2c name="timestamp">
    <arg name="timestamp" type="uint" summary="session start time (seconds since Unix epoch)"/>

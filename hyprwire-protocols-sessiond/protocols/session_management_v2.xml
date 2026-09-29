@@ -102,6 +102,8 @@
     done on success or error on failure. Both leader and delegate_cgroup are
     optional. If neither is set, the PID from the client's peer credentials
     (ucreds) is used as the session leader. Sending both is a protocol error.
+    When delegate_cgroup is set, the client must place the session leader PID
+    in the delegated cgroup before committing.
     Commit consumes the staged session even on
     failure; retrying requires a new session object. No fields may be changed
     after commit, and committing an already-created session is a protocol error.
@@ -115,6 +117,33 @@
     order, is a protocol error.
    </description>
    <arg name="leader_pid" type="uint" summary="process ID of the session leader"/>
+  </c2s>
+  <c2s name="delegate_cgroup">
+   <description summary="stage session cgroup delegation">
+    Optional. Must be sent while staged. Creates the session cgroup and
+    returns a cgroup handle immediately. The client must place the session
+    leader PID in the cgroup before committing. Sending both delegate_cgroup
+    and leader for the same session, in either order, is a protocol error.
+   </description>
+   <returns iface="session_management_cgroup"/>
+  </c2s>
+ </object>
+
+ <object name="session_management_cgroup" version="1">
+  <description summary="delegated session cgroup">
+   Handle for the cgroup delegated to a staged session. The client may use
+   the reported path to manage the cgroup directly.
+  </description>
+  <s2c name="path">
+   <description summary="delegated cgroup path">
+    Reports the absolute path of the delegated cgroup before the owning
+    session is committed. The client may place the session leader PID in
+    this cgroup through its cgroup.procs file.
+   </description>
+   <arg name="path" type="varchar" summary="delegated cgroup path"/>
+  </s2c>
+  <c2s name="destroy" destructor="true">
+   <description summary="release the cgroup handle"/>
   </c2s>
  </object>
 

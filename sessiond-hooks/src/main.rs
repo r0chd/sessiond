@@ -9,12 +9,12 @@ use hyprwire_protocols_sessiond::client::session_core::v1::session_core_v1;
 use hyprwire_protocols_sessiond::client::session_core::v1::session_core_v1::session_core_manager;
 use hyprwire_protocols_sessiond::client::session_management::v2::session_management_v2;
 use hyprwire_protocols_sessiond::client::session_management::v2::session_management_v2::{
-    session_management_session, session_manager,
+    session_management_cgroup, session_management_session, session_manager,
 };
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::os::unix::process::CommandExt;
-use std::{env, io, mem, path, process, time};
+use std::{env, fs, io, path, process, time};
 use uzers::os::unix::UserExt;
 
 #[derive(Parser)]
@@ -38,23 +38,23 @@ enum LogTarget {
 
 struct Hook {
     uid: u32,
-    envs: BTreeMap<String, String>,
     restarts: u32,
     state: HookState,
 }
 
 enum HookState {
     Stopped,
-    AwaitingEnv {
+    WaitingForEnv {
         object: session_management_session::SessionManagementSession,
     },
-    AwaitingCommit {
+    WaitingForCgroup {
+        envs: BTreeMap<String, String>,
         object: session_management_session::SessionManagementSession,
-        child: process::Child,
-        gate: process::ChildStdin,
+        cgroup_object: session_management_cgroup::SessionManagementCgroup,
     },
     Running {
         _object: session_management_session::SessionManagementSession,
+        _cgroup_object: session_management_cgroup::SessionManagementCgroup,
         child: process::Child,
     },
 }
@@ -74,19 +74,18 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for SessiondHo
     ) {
         match event {
             session_core_manager::Event::UserAdded { uid } => {
-                println!("new user {uid}");
+                log::info!(uid; "new user received");
                 if !self.hooks.iter().any(|hook| hook.uid == uid)
                     && let Some(session_manager) = self.session_manager.as_ref()
                     && let Some(session) = session_manager.send_create_session::<Self>(uid)
                 {
-                    println!("new user hook {uid}");
+                    log::info!(uid; "creating user hook session");
 
                     session.send_class(session_management_v2::SessionClass::Manager);
 
                     self.hooks.push(Hook {
                         uid,
-                        envs: BTreeMap::new(),
-                        state: HookState::AwaitingEnv { object: session },
+                        state: HookState::WaitingForEnv { object: session },
                         restarts: 0,
                     });
                 }
@@ -107,20 +106,24 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
             '_,
         >,
     ) {
-        match event {
-            session_management_session::Event::Env { env } => {
-                let Some(hook) = self.hooks.iter_mut().find(|hook| {
-                    matches!(
-                        &hook.state,
-                        HookState::AwaitingEnv {
-                            object: hook_object,
-                        } if object == hook_object
-                    )
-                }) else {
-                    return;
-                };
+        if let session_management_session::Event::Env { env } = event {
+            let Some(hook) = self.hooks.iter_mut().find(|hook| {
+                matches!(
+                    &hook.state,
+                    HookState::WaitingForEnv {
+                        object: hook_object,
+                    } if object == hook_object
+                )
+            }) else {
+                return;
+            };
 
-                hook.envs = env
+            let HookState::WaitingForEnv { object } = &hook.state else {
+                return;
+            };
+
+            if let Some(cgroup_object) = object.send_delegate_cgroup::<Self>() {
+                let envs = env
                     .iter()
                     .filter_map(|entry| {
                         let (name, value) = entry.split_once('=')?;
@@ -128,209 +131,242 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
                     })
                     .collect();
 
-                let uid = hook.uid;
-
-                let Some(hook) = self.hooks.iter_mut().find(|hook| hook.uid == uid) else {
-                    return;
+                hook.state = HookState::WaitingForCgroup {
+                    envs,
+                    object: object.clone(),
+                    cgroup_object,
                 };
+            }
+        }
+    }
+}
 
-                let Some(user) = uzers::get_user_by_uid(hook.uid) else {
-                    log::error!(uid = hook.uid; "cannot start hook for unknown uid");
-                    return;
-                };
+impl hyprwire::Dispatch<session_management_cgroup::SessionManagementCgroup> for SessiondHooks {
+    fn event(
+        &mut self,
+        object: &session_management_cgroup::SessionManagementCgroup,
+        event: <session_management_cgroup::SessionManagementCgroup as hyprwire::Object>::Event<'_>,
+    ) {
+        if let session_management_cgroup::Event::Path { path } = event {
+            let Some(hook) = self.hooks.iter_mut().find(|hook| {
+                matches!(
+                    &hook.state,
+                    HookState::WaitingForCgroup {
+                        object: _,
+                        envs,
+                        cgroup_object,
+                    } if object == cgroup_object
+                )
+            }) else {
+                return;
+            };
 
-                let command = self
-                    .config
-                    .on_start
-                    .expand_home(user.home_dir().to_string_lossy().as_ref());
-                let mut cmd = process::Command::new("/bin/sh");
-                cmd.arg("-c")
-                    .arg(
-                        r#"
-                    IFS= read -r ready || exit 1
-                    [ "$ready" = "hydropiekłowstąpienie" ] || exit 1
-                    exec </dev/null
+            let HookState::WaitingForCgroup {
+                envs,
+                object,
+                cgroup_object,
+            } = &hook.state
+            else {
+                return;
+            };
 
+            let Some(user) = uzers::get_user_by_uid(hook.uid) else {
+                log::error!(uid = hook.uid; "cannot start hook for unknown uid");
+                return;
+            };
+
+            let procs = path::PathBuf::from(path).join("cgroup.procs");
+            let uid = rustix::thread::Uid::from_raw(hook.uid);
+            let gid = rustix::thread::Gid::from_raw(user.primary_group_id());
+            let groups = user
+                .groups()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|group| rustix::thread::Gid::from_raw(group.gid()))
+                .collect::<Vec<_>>();
+
+            let command = self
+                .config
+                .on_start
+                .expand_home(user.home_dir().to_string_lossy().as_ref());
+            let mut cmd = process::Command::new("/bin/sh");
+            unsafe {
+                cmd.pre_exec(move || {
+                    let pid = process::id().to_string();
+
+                    let mut file =
+                        fs::OpenOptions::new()
+                            .write(true)
+                            .open(&procs)
+                            .map_err(|error| {
+                                io::Error::new(
+                                    error.kind(),
+                                    format!("failed to open {}: {error}", procs.display()),
+                                )
+                            })?;
+                    file.write_all(pid.as_bytes()).map_err(|error| {
+                        io::Error::new(
+                            error.kind(),
+                            format!("failed to write {}: {error}", procs.display()),
+                        )
+                    })?;
+
+                    rustix::thread::set_thread_groups(&groups)?;
+                    rustix::thread::set_thread_gid(gid)?;
+                    rustix::thread::set_thread_uid(uid)?;
+
+                    Ok(())
+                })
+            };
+            cmd.arg("-c")
+                .arg(
+                    r#"
                     [ -r /etc/profile ] && . /etc/profile
                     exec "$@"
                     "#,
-                    )
-                    .arg("sessiond-hook");
+                )
+                .arg("sessiond-hook");
 
-                for (key, value) in &hook.envs {
-                    cmd.env(key, value);
-                }
-
-                cmd.arg(&command.exec);
-                for arg in &command.args {
-                    cmd.arg(arg);
-                }
-                cmd.uid(hook.uid).gid(user.primary_group_id());
-                cmd.stdin(process::Stdio::piped());
-
-                match cmd.spawn() {
-                    Ok(mut child) => {
-                        let gate = child.stdin.take().expect("stdin was configured as piped");
-                        object.send_leader(child.id());
-                        object.send_commit();
-
-                        hook.state = HookState::AwaitingCommit {
-                            object: object.clone(),
-                            child,
-                            gate,
-                        };
-                    }
-                    Err(e) => {
-                        log::error!(
-                            exec:? = command.exec,
-                            uid = hook.uid,
-                            error:% = e;
-                            "failed to spawn hook"
-                        );
-                    }
-                }
+            for (key, value) in envs {
+                cmd.env(key, value);
             }
-            session_management_session::Event::Done => {
-                let Some(hook) = self.hooks.iter_mut().find(|hook| {
-                    matches!(
-                        &hook.state,
-                        HookState::AwaitingCommit {
-                            object: hook_object,
-                            ..
-                        } if object == hook_object
-                    )
-                }) else {
-                    return;
-                };
 
-                let HookState::AwaitingCommit {
-                    object,
-                    mut child,
-                    mut gate,
-                } = mem::replace(&mut hook.state, HookState::Stopped)
-                else {
-                    return;
-                };
+            cmd.arg(&command.exec);
+            for arg in &command.args {
+                cmd.arg(arg);
+            }
+            cmd.stdin(process::Stdio::piped());
 
-                let Some(pid) = i32::try_from(child.id())
-                    .ok()
-                    .and_then(rustix::process::Pid::from_raw)
-                else {
-                    log::error!(pid = child.id(); "cannot supervise hook with invalid pid");
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return;
-                };
-                let pidfd =
-                    match rustix::process::pidfd_open(pid, rustix::process::PidfdFlags::empty()) {
-                        Ok(pidfd) => pidfd,
-                        Err(err) => {
-                            log::error!(
-                               pid = child.id(),
-                               error:% = err;
-                               "cannot open pidfd for hook"
-                            );
-                            let _ = child.kill();
-                            let _ = child.wait();
-                            return;
-                        }
-                    };
+            let mut child = match cmd.spawn() {
+                Ok(child) => {
+                    object.send_commit();
 
-                let fd_wrapper = unsafe { generic::FdWrapper::new(pidfd) };
-                let source = generic::Generic::new(
-                    fd_wrapper,
-                    calloop::Interest {
-                        readable: true,
-                        writable: false,
-                    },
-                    calloop::Mode::Level,
-                );
-
-                let uid = hook.uid;
-                if let Err(err) = self.loop_handle.insert_source(source, move |_, _, state| {
-                    let Some(hook) = state.hooks.iter_mut().find(|hook| hook.uid == uid) else {
-                        return Ok(calloop::PostAction::Remove);
-                    };
-                    let HookState::Running { child, .. } = &mut hook.state else {
-                        return Ok(calloop::PostAction::Reregister);
-                    };
-                    let Ok(Some(status)) = child.try_wait() else {
-                        return Ok(calloop::PostAction::Reregister);
-                    };
-
-                    match (state.config.restart.on, status.success()) {
-                        (config::RestartPolicy::Never, _)
-                        | (config::RestartPolicy::Failure, true) => {
-                            hook.state = HookState::Stopped;
-                        }
-                        (config::RestartPolicy::Always, _)
-                        | (config::RestartPolicy::Failure, false) => {
-                            let restart_delay = state.config.restart.delay;
-                            let restart = timer::Timer::from_duration(time::Duration::from_secs(
-                                restart_delay,
-                            ));
-                            if let Err(error) =
-                                state
-                                    .loop_handle
-                                    .insert_source(restart, move |_, (), state| {
-                                        if let Some(hook) =
-                                            state.hooks.iter_mut().find(|hook| hook.uid == uid)
-                                        {
-                                            hook.restarts += 1;
-
-                                            log::info!(
-                                                uid,
-                                                delay_seconds = restart_delay,
-                                                failures = hook.restarts;
-                                                "restarting hook"
-                                            );
-
-                                            if let Some(session_manager) =
-                                                state.session_manager.as_ref()
-                                                && let Some(session) =
-                                                    session_manager.send_create_session::<Self>(uid)
-                                            {
-                                                session.send_class(
-                                                    session_management_v2::SessionClass::Manager,
-                                                );
-                                                hook.state =
-                                                    HookState::AwaitingEnv { object: session };
-                                            }
-                                        }
-
-                                        timer::TimeoutAction::Drop
-                                    })
-                            {
-                                log::error!(
-                                    uid,
-                                    error:% = error;
-                                    "failed to schedule restart"
-                                );
-                            }
-                        }
-                    }
-
-                    Ok(calloop::PostAction::Remove)
-                }) {
+                    child
+                }
+                Err(e) => {
                     log::error!(
+                        exec:? = command.exec,
                         uid = hook.uid,
-                        error:% = err;
-                        "failed to supervise hook"
+                        error:% = e;
+                        "failed to spawn hook"
+                    );
+                    return;
+                }
+            };
+
+            let Some(pid) = i32::try_from(child.id())
+                .ok()
+                .and_then(rustix::process::Pid::from_raw)
+            else {
+                log::error!(pid = child.id(); "cannot supervise hook with invalid pid");
+                let _ = child.kill();
+                let _ = child.wait();
+                return;
+            };
+            let pidfd = match rustix::process::pidfd_open(pid, rustix::process::PidfdFlags::empty())
+            {
+                Ok(pidfd) => pidfd,
+                Err(err) => {
+                    log::error!(
+                       pid = child.id(),
+                       error:% = err;
+                       "cannot open pidfd for hook"
                     );
                     let _ = child.kill();
                     let _ = child.wait();
                     return;
                 }
+            };
 
-                _ = gate.write_all("hydropiekłowstąpienie\n".as_bytes());
-                drop(gate);
+            let fd_wrapper = unsafe { generic::FdWrapper::new(pidfd) };
+            let source = generic::Generic::new(
+                fd_wrapper,
+                calloop::Interest {
+                    readable: true,
+                    writable: false,
+                },
+                calloop::Mode::Level,
+            );
 
-                hook.state = HookState::Running {
-                    _object: object,
-                    child,
+            let uid = hook.uid;
+            if let Err(err) = self.loop_handle.insert_source(source, move |_, _, state| {
+                let Some(hook) = state.hooks.iter_mut().find(|hook| hook.uid == uid) else {
+                    return Ok(calloop::PostAction::Remove);
+                };
+                let HookState::Running { child, .. } = &mut hook.state else {
+                    return Ok(calloop::PostAction::Reregister);
+                };
+                let Ok(Some(status)) = child.try_wait() else {
+                    return Ok(calloop::PostAction::Reregister);
+                };
+
+                match (state.config.restart.on, status.success()) {
+                    (config::RestartPolicy::Never, _) | (config::RestartPolicy::Failure, true) => {
+                        hook.state = HookState::Stopped;
+                    }
+                    (config::RestartPolicy::Always, _)
+                    | (config::RestartPolicy::Failure, false) => {
+                        let restart_delay = state.config.restart.delay;
+                        let restart =
+                            timer::Timer::from_duration(time::Duration::from_secs(restart_delay));
+                        if let Err(error) =
+                            state
+                                .loop_handle
+                                .insert_source(restart, move |_, (), state| {
+                                    if let Some(hook) =
+                                        state.hooks.iter_mut().find(|hook| hook.uid == uid)
+                                    {
+                                        hook.restarts += 1;
+
+                                        log::info!(
+                                            uid,
+                                            delay_seconds = restart_delay,
+                                            failures = hook.restarts;
+                                            "restarting hook"
+                                        );
+
+                                        if let Some(session_manager) =
+                                            state.session_manager.as_ref()
+                                            && let Some(session) =
+                                                session_manager.send_create_session::<Self>(uid)
+                                        {
+                                            session.send_class(
+                                                session_management_v2::SessionClass::Manager,
+                                            );
+                                            hook.state =
+                                                HookState::WaitingForEnv { object: session };
+                                        }
+                                    }
+
+                                    timer::TimeoutAction::Drop
+                                })
+                        {
+                            log::error!(
+                                uid,
+                                error:% = error;
+                                "failed to schedule restart"
+                            );
+                        }
+                    }
                 }
+
+                Ok(calloop::PostAction::Remove)
+            }) {
+                log::error!(
+                    uid = hook.uid,
+                    error:% = err;
+                    "failed to supervise hook"
+                );
+                let _ = child.kill();
+                let _ = child.wait();
+                return;
             }
-            _ => {}
+
+            hook.state = HookState::Running {
+                _object: object.clone(),
+                _cgroup_object: cgroup_object.clone(),
+                child,
+            }
         }
     }
 }
@@ -400,6 +436,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
 
     sessiond_hooks.session_manager =
         Some(socket.bind::<session_manager::SessionManager, _>(&eq, &mut sessiond_hooks, 1)?);
+    log::info!("session manager connected");
     let _session_core_manager =
         socket.bind::<session_core_manager::SessionCoreManager, _>(&eq, &mut sessiond_hooks, 1)?;
 

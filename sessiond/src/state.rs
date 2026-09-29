@@ -51,7 +51,7 @@ pub fn write_state(
             &session::Uid,
             &session::SessionClass,
             Option<&session::Vt>,
-            &session::Leader,
+            Option<&session::Leader>,
             Option<&session::RemoteHost>,
             &session::Timestamp,
             &session::SessionEnv,
@@ -107,8 +107,8 @@ pub fn write_state(
             Session {
                 uid: uid.0,
                 class,
-                vt: vt.map(|vt| vt.0.get()),
-                leader: leader.0,
+                vt: vt.map(|vt| vt.0),
+                leader: leader.map(|leader| leader.0),
                 remote_host: remote_host.map(|host| sync::Arc::clone(&host.0)),
                 timestamp,
                 env: env
@@ -207,12 +207,7 @@ pub fn load_state(
                         continue;
                     }
                 };
-                if let Err(error) = cgroup::watch_empty(
-                    &cgroup.path,
-                    session_id,
-                    session::Uid(saved_session.uid),
-                    &loop_handle,
-                ) {
+                if let Err(error) = cgroup.watch_empty(&loop_handle) {
                     log::warn!(session_id = raw_id, error = error.to_string().as_str(); "failed to watch recovered session cgroup");
                     continue;
                 }

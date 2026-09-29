@@ -1,0 +1,69 @@
+input_dir = "src"
+output_dir = "build"
+title = "sessiond"
+highlight_code = true
+generate_anchors = true
+
+[search]
+enable = true
+
+[sidebar]
+ordering = "custom"
+group_by_dir = true
+show_group_counts = false
+
+[[sidebar.matches]]
+path = "index.md"
+new_title = "Introduction"
+position = 1
+
+[[sidebar.matches]]
+path = "installation/overview.md"
+new_title = "Overview and source builds"
+position = 2
+
+[[sidebar.matches]]
+path = "installation/finix.md"
+position = 3
+
+[[sidebar.matches]]
+path = "installation/nixos.md"
+position = 4
+
+[[sidebar.matches]]
+path = "configuration.md"
+position = 5
+
+[[sidebar.matches]]
+path = "polkit.md"
+position = 6
+
+[[sidebar.matches]]
+path = "clients.md"
+position = 7
+
+[[sidebar.matches]]
+path = "client-hooks.md"
+position = 8
+
+[[sidebar.matches]]
+path = "client-backlight.md"
+position = 9
+
+[[sidebar.matches]]
+path = "client-uaccess.md"
+position = 10
+
+[[sidebar.matches]]
+path = "client-power.md"
+position = 11
+
+[[sidebar.matches]]
+path = "writing-a-client.md"
+new_title = "Writing a Client"
+position = 12
+
+[[sidebar.matches]]
+path = "libsession.md"
+new_title = "libsession"
+position = 13

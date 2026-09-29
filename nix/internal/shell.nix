@@ -15,8 +15,7 @@ craneLib.devShell {
       pkg-config
       udev
       acl
-      mdbook
-      mdbook-plugins
+      ndg
       systemdLibs
       ;
   };

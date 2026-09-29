@@ -1,0 +1,44 @@
+when:
+  - event: ["push", "manual"]
+    branch: ["master"]
+
+engine: nixery
+
+dependencies:
+  nixpkgs/nixpkgs-unstable:
+    - ndg
+    - git
+    - openssh
+
+steps:
+  - name: Build documentation
+    command: |
+      cd docs
+      ndg html --input-dir src --output-dir build
+
+  - name: Publish documentation
+    command: |
+      export HOME="${HOME:-/tmp/ci-home}"
+      mkdir -p "$HOME"
+      grep -q ':0:0:' /etc/passwd 2>/dev/null || \
+        echo "root:x:0:0:root:$HOME:/bin/sh" >> /etc/passwd
+
+      install -dm700 ~/.ssh
+      printf '%s\n' "$DOCS_DEPLOY_KEY" > ~/.ssh/id_ed25519
+      chmod 600 ~/.ssh/id_ed25519
+      ssh-keyscan -T 10 -H tangled.org >> ~/.ssh/known_hosts
+      export GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10"
+
+      git config user.name "Tangled Docs"
+      git config user.email "docs@tangled.org"
+      git remote set-url origin git@tangled.org:did:plc:vj3bxta3i3cp26nn46yideoh
+
+      site=$(mktemp -d)
+      cp -a docs/build/. "$site/"
+      git fetch origin pages || true
+      git checkout --orphan pages
+      git rm -rf . 2>/dev/null || true
+      cp -a "$site/." .
+      git add .
+      git commit -m "docs: publish generated site"
+      git push --force origin pages

@@ -1,5 +1,6 @@
 /target
-/docs/book
+/docs/build
+/docs/.ndg-cache
 /seat/target
 .direnv
 result*

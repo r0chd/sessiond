@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<protocol name="session_core_v1" version="3">
+<protocol name="session_core_v1" version="1">
  <copyright>
   Copyright (c) 2026 Oskar Rochowiak
 
@@ -28,8 +28,8 @@
   </description>
   <s2c name="session_added">
    <description summary="a new session was created">
-    Broadcast to all connected clients when any session is created. Sent
-    once for each already-active session when the manager is first created.
+    Sent when a session is created, and once for each existing active session
+    when the manager is created.
    </description>
    <arg name="session_id" type="uint" summary="new session identifier"/>
   </s2c>
@@ -41,21 +41,21 @@
    <arg name="code" type="enum" interface="error_code" summary="error kind"/>
    <arg name="message" type="varchar" summary="human-readable error detail"/>
   </s2c>
-  <s2c name="user_added" since="2">
+  <s2c name="user_added">
    <description summary="a user became known">
-    Broadcast to all connected clients when a user is created. Sent once for
-    each already-known user when the manager is first created, including users
-    that are lingering without an active session.
+    Sent when a user becomes known, and once for each known user when the
+    manager is created. Includes users that are lingering without an active
+    session.
    </description>
    <arg name="uid" type="uint" summary="user identifier"/>
   </s2c>
-  <s2c name="inhibitor_added" since="2">
+  <s2c name="inhibitor_added">
    <arg name="inhibitor_id" type="uint" summary="inhibitor identifier"/>
   </s2c>
-  <s2c name="inhibitor_removed" since="2">
+  <s2c name="inhibitor_removed">
    <arg name="inhibitor_id" type="uint" summary="inhibitor identifier"/>
   </s2c>
-  <c2s name="get_session">
+  <c2s name="get_session_by_id">
    <description summary="create a per-session info object">
     Initial fields are followed by done. If the session does not exist,
     destroyed is sent instead.
@@ -71,7 +71,7 @@
    <arg name="pid" type="uint" summary="process PID of the session to query"/>
    <returns iface="session_core_session"/>
   </c2s>
-  <c2s name="get_current_session" since="3">
+  <c2s name="get_session">
    <description summary="create a per-session info object for the calling process">
     Selects the session containing the connecting client, identified from the
     connection's peer credentials rather than a client-supplied PID. Initial
@@ -100,7 +100,7 @@
    <returns iface="session_core_user"/>
   </c2s>
   <c2s name="destroy" destructor="true"></c2s>
-  <c2s name="get_inhibitor" since="2">
+  <c2s name="get_inhibitor">
    <arg name="inhibitor_id" type="uint" summary="inhibitor identifier"/>
    <returns iface="session_core_inhibitor"/>
   </c2s>
@@ -148,10 +148,7 @@
    <description summary="initial field dump complete"/>
   </s2c>
   <s2c name="destroyed">
-   <description summary="session has ended or did not exist">
-    Sent when the session is destroyed or if the `session_id` passed to
-    `get_session` was not found.
-   </description>
+   <description summary="session has ended or did not exist"/>
   </s2c>
   <s2c name="ok">
    <description summary="last operation completed successfully"/>

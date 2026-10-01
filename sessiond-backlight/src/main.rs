@@ -219,7 +219,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for SessiondBa
         event: <session_core_manager::SessionCoreManager as hyprwire::Object>::Event<'_>,
     ) {
         if let session_core_manager::Event::SessionAdded { session_id } = event {
-            if let Some(session) = object.send_get_session::<Self>(session_id) {
+            if let Some(session) = object.send_get_session_by_id::<Self>(session_id) {
                 self.sessions.push(Session::new(session_id, session));
             } else {
                 log::error!("failed to request session {session_id}");

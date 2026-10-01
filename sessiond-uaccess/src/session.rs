@@ -9,7 +9,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
         event: <session_core_manager::SessionCoreManager as hyprwire::Object>::Event<'_>,
     ) {
         if let session_core_manager::Event::SessionAdded { session_id } = event
-            && let Some(session) = object.send_get_session::<Self>(session_id)
+            && let Some(session) = object.send_get_session_by_id::<Self>(session_id)
         {
             ecs::insert_session(&mut self.world, session);
             log::debug!(session_id; "session added");

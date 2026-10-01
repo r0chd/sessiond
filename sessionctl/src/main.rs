@@ -154,7 +154,7 @@ impl State {
         if self.sessions.iter().any(|s| s.id == id) {
             return;
         }
-        if let Some(object) = manager.send_get_session::<Self>(id) {
+        if let Some(object) = manager.send_get_session_by_id::<Self>(id) {
             let s = Session {
                 object: Some(object),
                 id,

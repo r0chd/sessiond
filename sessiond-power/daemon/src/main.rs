@@ -290,7 +290,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for SessiondPo
         match event {
             session_core_manager::Event::SessionAdded { session_id } => {
                 if !self.sessions.iter().any(|session| session.id == session_id) {
-                    if let Some(session) = object.send_get_session::<Self>(session_id) {
+                    if let Some(session) = object.send_get_session_by_id::<Self>(session_id) {
                         self.sessions.push(Session {
                             id: session_id,
                             object: session,

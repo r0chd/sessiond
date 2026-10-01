@@ -68,3 +68,20 @@ position = 12
 path = "libsession.md"
 new_title = "libsession"
 position = 13
+
+[[sidebar.matches]]
+path = "release-notes/index.md"
+new_title = "Changelogs"
+position = 1001
+
+[[sidebar.matches]]
+path = "release-notes/sessiond.md"
+position = 1002
+
+[[sidebar.matches]]
+path = "release-notes/sessiond-hooks.md"
+position = 1003
+
+[[sidebar.matches]]
+path = "release-notes/sessiond-uaccess.md"
+position = 1004

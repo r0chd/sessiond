@@ -1171,7 +1171,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
             return;
         };
         match event {
-            session_core_manager::Event::GetCurrentSession {
+            session_core_manager::Event::GetSession {
                 session_core_session,
             } => {
                 let pid = client.creds().pid.as_raw_pid().cast_unsigned();
@@ -1180,7 +1180,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                     .resource::<cgroup::CgroupManager>()
                     .find_session_by_pid(pid)
                 else {
-                    log::warn!(pid; "get_current_session: no session found for pid");
+                    log::warn!(pid; "get_session: no session found for current process");
                     session_core_session.send_destroyed();
                     return;
                 };
@@ -1191,7 +1191,7 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                     creds: *client.creds(),
                 });
             }
-            session_core_manager::Event::GetSession {
+            session_core_manager::Event::GetSessionById {
                 session_core_session,
                 session_id,
             } => {

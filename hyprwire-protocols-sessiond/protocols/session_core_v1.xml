@@ -134,9 +134,9 @@
   <s2c name="remote_host">
    <arg name="remote_host" type="varchar" summary="remote host name, empty for local sessions"/>
   </s2c>
-  <s2c name="active">
-   <description summary="session active state"/>
-   <arg name="state" type="enum" interface="active_state" summary="session active state"/>
+  <s2c name="state">
+   <description summary="session state"/>
+   <arg name="state" type="enum" interface="session_state" summary="session state"/>
   </s2c>
   <s2c name="locked">
    <description summary="session is locked"/>
@@ -275,7 +275,7 @@
   <value idx="4" name="closing" summary="has sessions, all of them closing"/>
  </enum>
 
- <enum name="active_state">
+ <enum name="session_state">
   <value idx="0" name="online" summary="session is logged in but not in the foreground"/>
   <value idx="1" name="active" summary="session is in the foreground"/>
   <value idx="2" name="closing" summary="session is being destroyed"/>

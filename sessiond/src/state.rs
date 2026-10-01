@@ -1,7 +1,7 @@
 use crate::{cgroup, config, session, user};
 use bevy_ecs::prelude::*;
 use hyprwire_protocols_sessiond::server::session_core::v1::session_core_v1;
-use sessiond_state::{ActiveState, Session, SessionClass, State, UserState};
+use sessiond_state::{Session, SessionClass, SessionState, State, UserState};
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::{fs, path, sync, time};
@@ -9,7 +9,7 @@ use std::{fs, path, sync, time};
 trait SessionExt {
     fn class(&self) -> session::SessionClass;
     fn timestamp(&self) -> time::SystemTime;
-    fn active_state(&self) -> session_core_v1::ActiveState;
+    fn session_state(&self) -> session_core_v1::SessionState;
 }
 
 impl SessionExt for Session {
@@ -30,12 +30,12 @@ impl SessionExt for Session {
             + time::Duration::from_micros(u64::try_from(self.timestamp).unwrap_or(u64::MAX))
     }
 
-    fn active_state(&self) -> session_core_v1::ActiveState {
-        match self.active {
-            ActiveState::Active => session_core_v1::ActiveState::Active,
-            ActiveState::Closing => session_core_v1::ActiveState::Closing,
-            ActiveState::Opening => session_core_v1::ActiveState::Opening,
-            ActiveState::Online | ActiveState::Unknown => session_core_v1::ActiveState::Online,
+    fn session_state(&self) -> session_core_v1::SessionState {
+        match self.state {
+            SessionState::Active => session_core_v1::SessionState::Active,
+            SessionState::Closing => session_core_v1::SessionState::Closing,
+            SessionState::Opening => session_core_v1::SessionState::Opening,
+            SessionState::Online | SessionState::Unknown => session_core_v1::SessionState::Online,
         }
     }
 }
@@ -55,7 +55,7 @@ pub fn write_state(
             Option<&session::RemoteHost>,
             &session::Timestamp,
             &session::SessionEnv,
-            &session::ActiveState,
+            &session::SessionState,
             &session::DisplaySession,
             Option<&session::Recoverable>,
         ),
@@ -76,7 +76,7 @@ pub fn write_state(
         remote_host,
         timestamp,
         env,
-        active_state,
+        session_state,
         display,
         recoverable,
     ) in &sessions
@@ -95,11 +95,11 @@ pub fn write_state(
             session::SessionClass::Manager => SessionClass::Manager,
             session::SessionClass::ManagerEarly => SessionClass::ManagerEarly,
         };
-        let active = match active_state.0 {
-            session_core_v1::ActiveState::Active => ActiveState::Active,
-            session_core_v1::ActiveState::Closing => ActiveState::Closing,
-            session_core_v1::ActiveState::Opening => ActiveState::Opening,
-            _ => ActiveState::Online,
+        let state = match session_state.0 {
+            session_core_v1::SessionState::Active => SessionState::Active,
+            session_core_v1::SessionState::Closing => SessionState::Closing,
+            session_core_v1::SessionState::Opening => SessionState::Opening,
+            _ => SessionState::Online,
         };
 
         saved_state.sessions.insert(
@@ -116,7 +116,7 @@ pub fn write_state(
                     .iter()
                     .map(|(name, value)| (sync::Arc::clone(name), sync::Arc::clone(value)))
                     .collect(),
-                active,
+                state,
                 recoverable: recoverable.is_some(),
                 display: display.0.as_raw(),
             },
@@ -225,7 +225,7 @@ pub fn load_state(
                     .runtime_dir(saved_session.uid);
                 user::create_runtime_dir(saved_session.uid, &runtime_dir);
 
-                let active_state = saved_session.active_state();
+                let session_state = saved_session.session_state();
 
                 let display_session = sessions
                     .iter()
@@ -241,7 +241,7 @@ pub fn load_state(
                     saved_session.vt,
                     saved_session.leader,
                     saved_session.remote_host.as_ref().map(sync::Arc::clone),
-                    active_state,
+                    session_state,
                     None,
                     true,
                     saved_session.env.clone(),

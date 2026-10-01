@@ -25,7 +25,7 @@ pub enum SessionClass {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum ActiveState {
+pub enum SessionState {
     #[default]
     Online,
     Active,
@@ -75,7 +75,8 @@ pub struct Session {
     pub remote_host: Option<sync::Arc<str>>,
     pub timestamp: u128,
     pub env: BTreeMap<sync::Arc<str>, sync::Arc<str>>,
-    pub active: ActiveState,
+    #[serde(alias = "active")]
+    pub state: SessionState,
     pub recoverable: bool,
     pub display: u32,
 }

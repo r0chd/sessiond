@@ -24,14 +24,14 @@ fn revoke_stale_grants(
     mut commands: Commands,
     grants: Query<(Entity, &ecs::DeviceEntity, &ecs::AccessMode, &ecs::Uid), With<ecs::Grant>>,
     devices: Query<(&ecs::Syspath, &ecs::Devnode), With<ecs::Device>>,
-    sessions: Query<(&ecs::Uid, &ecs::Done, &ecs::IsLocal, &ecs::ActiveState), With<ecs::Session>>,
+    sessions: Query<(&ecs::Uid, &ecs::Done, &ecs::IsLocal, &ecs::SessionState), With<ecs::Session>>,
 ) {
     for (grant_entity, device_entity, access_mode, grant_uid) in &grants {
-        if sessions.iter().any(|(uid, done, is_local, active)| {
+        if sessions.iter().any(|(uid, done, is_local, state)| {
             uid.0 == grant_uid.0
                 && done.0
                 && is_local.0
-                && active.0 == session_core_v1::ActiveState::Active
+                && state.0 == session_core_v1::SessionState::Active
         }) {
             continue;
         }
@@ -83,11 +83,11 @@ fn revoke_stale_grants(
 fn apply_missing_grants(
     mut commands: Commands,
     devices: Query<(Entity, &ecs::Syspath, &ecs::Devnode, &ecs::AccessMode), With<ecs::Device>>,
-    sessions: Query<(&ecs::Uid, &ecs::Done, &ecs::IsLocal, &ecs::ActiveState), With<ecs::Session>>,
+    sessions: Query<(&ecs::Uid, &ecs::Done, &ecs::IsLocal, &ecs::SessionState), With<ecs::Session>>,
     grants: Query<(&ecs::DeviceEntity, &ecs::Uid), With<ecs::Grant>>,
 ) {
-    for (uid, done, is_local, active) in &sessions {
-        if !done.0 || !is_local.0 || active.0 != session_core_v1::ActiveState::Active {
+    for (uid, done, is_local, state) in &sessions {
+        if !done.0 || !is_local.0 || state.0 != session_core_v1::SessionState::Active {
             continue;
         }
 

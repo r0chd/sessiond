@@ -32,7 +32,7 @@ struct Session {
     vt: u32,
     leader: u32,
     timestamp: u32,
-    active: session_core_v1::ActiveState,
+    state: session_core_v1::SessionState,
     can_modify: bool,
     done: bool,
 }
@@ -164,7 +164,7 @@ impl State {
                 vt: 0,
                 leader: 0,
                 timestamp: 0,
-                active: session_core_v1::ActiveState::Online,
+                state: session_core_v1::SessionState::Online,
                 can_modify: false,
                 done: false,
             };
@@ -528,7 +528,7 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for State {
             session_core_session::Event::Vt { vt } => s.vt = vt,
             session_core_session::Event::Leader { leader } => s.leader = leader,
             session_core_session::Event::Timestamp { timestamp } => s.timestamp = timestamp,
-            session_core_session::Event::Active { state } => s.active = state,
+            session_core_session::Event::State { state } => s.state = state,
             session_core_session::Event::CanModify { can_modify } => s.can_modify = can_modify != 0,
             session_core_session::Event::Done | session_core_session::Event::Destroyed => {
                 s.done = true;
@@ -802,12 +802,12 @@ struct Cli {
     command: Command,
 }
 
-const fn active_name(s: session_core_v1::ActiveState) -> &'static str {
-    match s {
-        session_core_v1::ActiveState::Online => "online",
-        session_core_v1::ActiveState::Active => "active",
-        session_core_v1::ActiveState::Closing => "closing",
-        session_core_v1::ActiveState::Opening => "opening",
+const fn session_state_name(state: session_core_v1::SessionState) -> &'static str {
+    match state {
+        session_core_v1::SessionState::Online => "online",
+        session_core_v1::SessionState::Active => "active",
+        session_core_v1::SessionState::Closing => "closing",
+        session_core_v1::SessionState::Opening => "opening",
         _ => "unknown",
     }
 }
@@ -1325,7 +1325,7 @@ fn main() -> anyhow::Result<()> {
     queue.wait_for_handshake(&mut state)?;
 
     let manager =
-        socket.bind::<session_core_manager::SessionCoreManager, _>(&queue, &mut state, 2)?;
+        socket.bind::<session_core_manager::SessionCoreManager, _>(&queue, &mut state, 1)?;
 
     queue.roundtrip(&mut state)?;
 
@@ -1384,7 +1384,7 @@ fn main() -> anyhow::Result<()> {
                                 "tty": session.vt.checked_sub(1).map(|_| format!("tty{}", session.vt)),
                                 "leader": session.leader,
                                 "timestamp": session.timestamp,
-                                "active": active_name(session.active),
+                                "state": session_state_name(session.state),
                                 "can_modify": session.can_modify,
                             });
                             if let Some((seat_state, object)) = seat_state.as_ref().zip(value.as_object_mut()) {
@@ -1430,7 +1430,10 @@ fn main() -> anyhow::Result<()> {
                             .to_owned(),
                     );
                 }
-                row.extend([active_name(s.active).to_owned(), format_since(s.timestamp)]);
+                row.extend([
+                    session_state_name(s.state).to_owned(),
+                    format_since(s.timestamp),
+                ]);
                 table.add_row(row);
             }
             println!("{table}");

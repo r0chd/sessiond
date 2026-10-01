@@ -13,7 +13,7 @@ pub fn refresh_current_vt(
         (
             &session::Vt,
             Option<&session::IsLocal>,
-            &mut session::ActiveState,
+            &mut session::SessionState,
         ),
         With<session::Session>,
     >,
@@ -22,19 +22,19 @@ pub fn refresh_current_vt(
         return;
     };
 
-    for (vt, is_local, mut active_state) in &mut sessions {
-        if *active_state == session::ActiveState::CLOSING {
+    for (vt, is_local, mut state) in &mut sessions {
+        if *state == session::SessionState::CLOSING {
             continue;
         }
 
         let desired = match (is_local, vt.0 == current_vt) {
-            (Some(_), true) => session::ActiveState::ACTIVE,
-            (Some(_), false) => session::ActiveState::ONLINE,
+            (Some(_), true) => session::SessionState::ACTIVE,
+            (Some(_), false) => session::SessionState::ONLINE,
             _ => continue,
         };
 
-        if *active_state != desired {
-            *active_state = desired;
+        if *state != desired {
+            *state = desired;
         }
     }
 }

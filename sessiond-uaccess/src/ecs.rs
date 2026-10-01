@@ -34,7 +34,7 @@ pub struct Uid(pub u32);
 pub struct AccessMode(pub config::AccessMode);
 
 #[derive(Component)]
-pub struct ActiveState(pub session_core_v1::ActiveState);
+pub struct SessionState(pub session_core_v1::SessionState);
 
 #[derive(Component)]
 pub struct IsLocal(pub bool);

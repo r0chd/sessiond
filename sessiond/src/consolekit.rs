@@ -22,7 +22,7 @@ pub struct SessionInfo {
     pub uid: u32,
     pub timestamp: time::SystemTime,
     pub is_local: bool,
-    pub active: session_core_v1::ActiveState,
+    pub state: session_core_v1::SessionState,
 }
 
 #[derive(Resource)]
@@ -437,8 +437,8 @@ fn append_user_groups(database: &mut String, sessions: &[SessionInfo]) {
 
 pub const fn is_active(session: &SessionInfo) -> bool {
     matches!(
-        session.active,
-        session_core_v1::ActiveState::Active | session_core_v1::ActiveState::Online
+        session.state,
+        session_core_v1::SessionState::Active | session_core_v1::SessionState::Online
     )
 }
 

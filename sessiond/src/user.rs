@@ -95,7 +95,7 @@ pub fn remove_runtime_dir(path: &str) -> io::Result<()> {
 pub fn ensure_session_users(
     mut commands: Commands,
     sessions: Query<
-        (&session::Uid, &session::ActiveState),
+        (&session::Uid, &session::SessionState),
         (With<session::Session>, Added<session::Session>),
     >,
     mut user_registry: ResMut<UserRegistry>,
@@ -107,8 +107,8 @@ pub fn ensure_session_users(
         }
 
         let state = match session_state.0 {
-            session_core_v1::ActiveState::Active => UserState::ACTIVE,
-            session_core_v1::ActiveState::Closing => UserState::CLOSING,
+            session_core_v1::SessionState::Active => UserState::ACTIVE,
+            session_core_v1::SessionState::Closing => UserState::CLOSING,
             _ => UserState::ONLINE,
         };
 
@@ -126,7 +126,7 @@ pub fn ensure_session_users(
 pub fn reconcile_user_states(
     users: Query<(&session::Uid, Option<&Lingering>, &mut UserState), With<User>>,
     sessions: Query<
-        (&session::Uid, &session::SessionClass, &session::ActiveState),
+        (&session::Uid, &session::SessionClass, &session::SessionState),
         With<session::Session>,
     >,
 ) {
@@ -143,12 +143,12 @@ pub fn reconcile_user_states(
             .map(|(_, _, state)| state)
             .collect();
 
-        let desired = if states.contains(&&session::ActiveState::ACTIVE) {
+        let desired = if states.contains(&&session::SessionState::ACTIVE) {
             UserState::ACTIVE
         } else if !states.is_empty()
             && states
                 .iter()
-                .all(|state| **state == session::ActiveState::CLOSING)
+                .all(|state| **state == session::SessionState::CLOSING)
         {
             UserState::CLOSING
         } else if !states.is_empty() {

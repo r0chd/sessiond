@@ -32,10 +32,10 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for crate::Ses
                 self.world.entity_mut(entity).insert(ecs::Uid(uid));
                 log::debug!(uid; "session UID changed");
             }
-            session_core_session::Event::Active { state } => {
+            session_core_session::Event::State { state } => {
                 self.world
                     .entity_mut(entity)
-                    .insert(ecs::ActiveState(state));
+                    .insert(ecs::SessionState(state));
                 log::debug!(state:? = state; "session active state changed");
             }
             session_core_session::Event::IsLocal { is_local } => {

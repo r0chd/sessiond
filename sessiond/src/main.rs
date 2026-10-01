@@ -145,7 +145,7 @@ fn run(args: Args) -> anyhow::Result<()> {
             .after(vt::refresh_current_vt)
             .before(user::reconcile_user_states)
             .before(state::write_state)
-            .before(reconcile::notify_session_active_states)
+            .before(reconcile::notify_session_states)
             .before(reconcile::send_done),
     );
     schedule.add_systems(
@@ -163,12 +163,12 @@ fn run(args: Args) -> anyhow::Result<()> {
     schedule.add_systems(
         user::reconcile_user_states
             .before(state::write_state)
-            .before(reconcile::notify_session_active_states)
+            .before(reconcile::notify_session_states)
             .before(reconcile::send_done),
     );
     schedule.add_systems(
         (
-            reconcile::notify_session_active_states,
+            reconcile::notify_session_states,
             #[cfg(feature = "consolekit")]
             reconcile::sync_consolekit_sessions,
         )
@@ -202,7 +202,7 @@ fn run(args: Args) -> anyhow::Result<()> {
 
     socket.add_implementation::<session_management_v1::SessionManagementV1, _>(&mut sessiond, 1);
     socket.add_implementation::<session_management_v2::SessionManagementV2, _>(&mut sessiond, 1);
-    socket.add_implementation::<session_core_v1::SessionCoreV1, _>(&mut sessiond, 3);
+    socket.add_implementation::<session_core_v1::SessionCoreV1, _>(&mut sessiond, 1);
     socket.add_implementation::<session_inhibit_v1::SessionInhibitV1, _>(&mut sessiond, 1);
 
     let fd_wrapper =

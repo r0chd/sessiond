@@ -99,12 +99,12 @@ impl super::Backend for Sessiond {
 
         let session = self.state.sessions.get(session_id.to_str().ok()?)?;
 
-        match session.active {
-            sessiond_state::ActiveState::Online => Some(crate::LibsessionSessionState::Online),
-            sessiond_state::ActiveState::Closing => Some(crate::LibsessionSessionState::Closing),
-            sessiond_state::ActiveState::Opening => Some(crate::LibsessionSessionState::Opening),
-            sessiond_state::ActiveState::Active => Some(crate::LibsessionSessionState::Active),
-            sessiond_state::ActiveState::Unknown => Some(crate::LibsessionSessionState::Unkown),
+        match session.state {
+            sessiond_state::SessionState::Online => Some(crate::LibsessionSessionState::Online),
+            sessiond_state::SessionState::Closing => Some(crate::LibsessionSessionState::Closing),
+            sessiond_state::SessionState::Opening => Some(crate::LibsessionSessionState::Opening),
+            sessiond_state::SessionState::Active => Some(crate::LibsessionSessionState::Active),
+            sessiond_state::SessionState::Unknown => Some(crate::LibsessionSessionState::Unkown),
         }
     }
 

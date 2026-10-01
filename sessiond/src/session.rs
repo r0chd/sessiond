@@ -14,16 +14,16 @@ use std::{convert, num, sync, time};
 use uzers::os::unix::UserExt;
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ActiveState(pub session_core_v1::ActiveState);
+pub struct SessionState(pub session_core_v1::SessionState);
 
-impl ActiveState {
-    pub const ONLINE: Self = Self(session_core_v1::ActiveState::Online);
-    pub const ACTIVE: Self = Self(session_core_v1::ActiveState::Active);
-    pub const CLOSING: Self = Self(session_core_v1::ActiveState::Closing);
+impl SessionState {
+    pub const ONLINE: Self = Self(session_core_v1::SessionState::Online);
+    pub const ACTIVE: Self = Self(session_core_v1::SessionState::Active);
+    pub const CLOSING: Self = Self(session_core_v1::SessionState::Closing);
 }
 
-impl From<session_core_v1::ActiveState> for ActiveState {
-    fn from(state: session_core_v1::ActiveState) -> Self {
+impl From<session_core_v1::SessionState> for SessionState {
+    fn from(state: session_core_v1::SessionState) -> Self {
         Self(state)
     }
 }
@@ -161,7 +161,7 @@ pub struct SessionBundle {
     pub timestamp: Timestamp,
     pub leader: Leader,
     pub env: SessionEnv,
-    pub active_state: ActiveState,
+    pub state: SessionState,
     pub objects: Objects,
     pub display: DisplaySession,
 }
@@ -275,7 +275,7 @@ pub fn spawn(
     vt: Option<u32>,
     leader: i32,
     remote_host: Option<sync::Arc<str>>,
-    active_state: session_core_v1::ActiveState,
+    session_state: session_core_v1::SessionState,
     session_object: Option<session_management_session::SessionManagementSession>,
     recoverable: bool,
     env: BTreeMap<sync::Arc<str>, sync::Arc<str>>,
@@ -291,7 +291,7 @@ pub fn spawn(
         timestamp: Timestamp(time::SystemTime::now()),
         leader: Leader(leader),
         env: SessionEnv(env),
-        active_state: active_state.into(),
+        state: session_state.into(),
         objects: Objects::default(),
         display: DisplaySession(display),
     });
@@ -343,7 +343,7 @@ pub fn handle_session_control(
         (
             &SessionId,
             &Uid,
-            &mut ActiveState,
+            &mut SessionState,
             Option<&Vt>,
             &mut Objects,
         ),
@@ -355,7 +355,7 @@ pub fn handle_session_control(
     for action in actions.read() {
         match action.action {
             SessionControlAction::Terminate { creds } => {
-                let Ok((session_id, uid, mut active_state, vt, _)) =
+                let Ok((session_id, uid, mut state, vt, _)) =
                     sessions.get_mut(action.entity)
                 else {
                     continue;
@@ -370,7 +370,7 @@ pub fn handle_session_control(
                     continue;
                 }
                 log::info!(session_id = session_id.as_raw(); "terminate requested");
-                *active_state = ActiveState::CLOSING;
+                *state = SessionState::CLOSING;
                 log::info!(session_id = session_id.0, vt = vt.map_or(0, |vt| vt.0.get()); "session state changed");
                 let Ok((_, cgroup_path)) = cgroups.get(action.entity) else {
                     continue;
@@ -380,7 +380,7 @@ pub fn handle_session_control(
                 }
             }
             SessionControlAction::Kill { creds } => {
-                let Ok((session_id, uid, mut active_state, vt, _)) =
+                let Ok((session_id, uid, mut state, vt, _)) =
                     sessions.get_mut(action.entity)
                 else {
                     continue;
@@ -395,7 +395,7 @@ pub fn handle_session_control(
                     continue;
                 }
                 log::info!(session_id = session_id.as_raw(); "kill requested");
-                *active_state = ActiveState::CLOSING;
+                *state = SessionState::CLOSING;
                 log::info!(session_id = session_id.0, vt = vt.map_or(0, |vt| vt.0.get()); "session state changed");
                 let Ok((_, cgroup_path)) = cgroups.get(action.entity) else {
                     continue;
@@ -538,7 +538,7 @@ pub fn handle_add_object(
             &Uid,
             Option<&Vt>,
             &SessionClass,
-            &ActiveState,
+            &SessionState,
             &Leader,
             &Timestamp,
             Option<&IsLocal>,
@@ -576,7 +576,7 @@ pub fn handle_add_object(
         request.object.send_uid(uid.0);
         request.object.send_class((*class).into());
         request.object.send_vt(vt.map_or(0, |vt| vt.0.get()));
-        request.object.send_active(state.0);
+        request.object.send_state(state.0);
         request.object.send_leader(leader.0.cast_unsigned());
         let timestamp_secs = timestamp
             .0
@@ -975,14 +975,14 @@ pub fn handle_session_management_action(
                     );
 
                     let is_local = pending_session.remote_host.is_none();
-                    let active_state = if pending_session
+                    let session_state = if pending_session
                         .vt
                         .is_some_and(|vt| vt::current_vt().ok() == Some(vt))
                         && is_local
                     {
-                        session_core_v1::ActiveState::Active
+                        session_core_v1::SessionState::Active
                     } else {
-                        session_core_v1::ActiveState::Online
+                        session_core_v1::SessionState::Online
                     };
 
                     let display_session = sessions
@@ -1000,7 +1000,7 @@ pub fn handle_session_management_action(
                         pending_session.vt.map(num::NonZeroU32::get),
                         leader,
                         pending_session.remote_host,
-                        active_state,
+                        session_state,
                         object.owned_session(),
                         matches!(object, SessionManagementTarget::V1(_)),
                         pending_session.env,
@@ -1236,8 +1236,8 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for crate::Ses
                             .is_some_and(|class| *class == SessionClass::User)
                             && self
                                 .world
-                                .get::<ActiveState>(*entity)
-                                .is_some_and(|state| *state == ActiveState::ACTIVE)
+                                .get::<SessionState>(*entity)
+                                .is_some_and(|state| *state == SessionState::ACTIVE)
                     })
                     .filter_map(|entity| {
                         let timestamp = self.world.get::<Timestamp>(entity)?.0;

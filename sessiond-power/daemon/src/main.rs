@@ -466,7 +466,7 @@ fn run(args: Args) -> anyhow::Result<()> {
     let session_manager = session_socket.bind::<session_core_manager::SessionCoreManager, _>(
         &session_queue,
         &mut sessiond_power,
-        2,
+        1,
     )?;
     sessiond_power.session_manager = Some(session_manager);
 

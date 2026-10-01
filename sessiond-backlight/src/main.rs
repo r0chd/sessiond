@@ -128,7 +128,7 @@ struct Session {
     object: session_core_session::SessionCoreSession,
     local: bool,
     uid: u32,
-    active: session_core_v1::ActiveState,
+    state: session_core_v1::SessionState,
     done: bool,
 }
 
@@ -140,7 +140,7 @@ impl Session {
             local: false,
             uid: 0,
             done: false,
-            active: session_core_v1::ActiveState::Opening,
+            state: session_core_v1::SessionState::Opening,
         }
     }
 }
@@ -150,7 +150,7 @@ struct SessionAccess {
     id: u32,
     local: bool,
     uid: u32,
-    active: session_core_v1::ActiveState,
+    state: session_core_v1::SessionState,
     done: bool,
 }
 
@@ -160,7 +160,7 @@ impl From<&Session> for SessionAccess {
             id: session.id,
             local: session.local,
             uid: session.uid,
-            active: session.active,
+            state: session.state,
             done: session.done,
         }
     }
@@ -200,7 +200,7 @@ impl SessionAccessState {
             session.done
                 && session.local
                 && session.uid == uid
-                && matches!(session.active, session_core_v1::ActiveState::Active)
+                && matches!(session.state, session_core_v1::SessionState::Active)
         })
     }
 }
@@ -243,7 +243,7 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for SessiondBa
         };
 
         match event {
-            session_core_session::Event::Active { state } => session.active = state,
+            session_core_session::Event::State { state } => session.state = state,
             session_core_session::Event::Uid { uid } => session.uid = uid,
             session_core_session::Event::IsLocal { is_local } => session.local = is_local != 0,
             session_core_session::Event::Done => session.done = true,

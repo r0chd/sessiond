@@ -401,7 +401,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     sessiond_hooks.session_manager =
         Some(socket.bind::<session_manager::SessionManager, _>(&eq, &mut sessiond_hooks, 1)?);
     let _session_core_manager =
-        socket.bind::<session_core_manager::SessionCoreManager, _>(&eq, &mut sessiond_hooks, 2)?;
+        socket.bind::<session_core_manager::SessionCoreManager, _>(&eq, &mut sessiond_hooks, 1)?;
 
     eq.roundtrip(&mut sessiond_hooks)?;
 

@@ -37,30 +37,30 @@ pub fn sync_consolekit_sessions(
             &session::Uid,
             &session::Timestamp,
             Option<&session::IsLocal>,
-            &session::ActiveState,
+            &session::SessionState,
         ),
         (
             With<session::Session>,
-            Or<(Added<session::Session>, Changed<session::ActiveState>)>,
+            Or<(Added<session::Session>, Changed<session::SessionState>)>,
         ),
     >,
 ) {
-    for (session_id, uid, timestamp, is_local, active_state) in &sessions {
+    for (session_id, uid, timestamp, is_local, state) in &sessions {
         consolekit.upsert_session(consolekit::SessionInfo {
             id: *session_id,
             uid: uid.0,
             timestamp: timestamp.0,
             is_local: is_local.is_some(),
-            active: active_state.0,
+            state: state.0,
         });
     }
 }
 
-pub fn notify_session_active_states(
+pub fn notify_session_states(
     mut batch: ResMut<NotifyBatch>,
     sessions: Query<
-        (Entity, &session::ActiveState, &session::Objects),
-        (With<session::Session>, Changed<session::ActiveState>),
+        (Entity, &session::SessionState, &session::Objects),
+        (With<session::Session>, Changed<session::SessionState>),
     >,
     users: Query<
         (Entity, &user::UserState, &user::Objects),
@@ -69,7 +69,7 @@ pub fn notify_session_active_states(
 ) {
     for (entity, state, objects) in &sessions {
         for object in &objects.0 {
-            object.send_active(state.0);
+            object.send_state(state.0);
         }
         batch.session(entity);
     }

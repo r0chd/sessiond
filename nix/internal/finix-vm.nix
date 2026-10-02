@@ -173,7 +173,6 @@ in
 
   finit.tmpfiles.rules = [
     "d /var/log 0755 root root -"
-    # Allow systemd --user to pass its sd_booted() check under Finit.
     "d /run/systemd/system 0755 root root -"
   ];
 

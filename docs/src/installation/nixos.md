@@ -114,26 +114,49 @@ service runs to the `seat` group. Also ensure that `greetd` starts after both
 }
 ```
 
-## Known issues
+### switch-to-configuration
 
-The following problems remain unresolved in this setup.
+With `sessiond`, you have two options when applying a NixOS configuration:
 
-### Switching configurations
+- Use `nixos-rebuild boot` and reboot.
+- Use [my fork of `switch-to-configuration-ng`](https://tangled.org/r0chd.pl/switch-to-configuration-ng) to switch without rebooting.
 
-`switch-to-configuration` does not currently work with this setup for two reasons:
+  ```nix
+  # In your flake's inputs:
+  inputs.switch-to-configuration.url =
+    "git+https://tangled.org/r0chd.pl/switch-to-configuration-ng";
 
-- It uses `logind` to list active users.
-- It relies on per-user systemd service managers to start
-  `nixos-activation.service`.
+  # In a NixOS module:
+  { inputs, ... }: {
+    nixpkgs.overlays = [
+      (final: prev: {
+        switch-to-configuration-ng = inputs.switch-to-configuration.packages.default;
+      })
+    ];
+  }
+  ```
 
-Both dependencies need to be addressed for configuration switching to work
-with `sessiond` in place of `logind`.
+To use `switch-to-configuration-ng`, the user systemd service manager needs to
+be running. The recommended way is to use `sessiond-hooks` to start and
+supervise it:
 
-For now, use `nixos-rebuild boot` instead of `nixos-rebuild switch` to build the
-configuration and make it the default for the next boot, then reboot to apply
-it. Include your usual flake or configuration arguments:
+```nix
+{ inputs, pkgs, ... }: {
+  imports = [ inputs.sessiond.nixosModules.sessiond-hooks ];
 
-```bash
-sudo nixos-rebuild boot --flake .#myHost
-sudo reboot
+  services.sessiond-hooks = {
+    package = inputs.sessiond.packages.sessiond-hooks;
+    debug = true;
+    hooks.systemd.settings = {
+      on_start = {
+        exec = "${pkgs.systemd}/lib/systemd/systemd";
+        args = [ "--user" ];
+      };
+      restart = {
+        on = "Always";
+        delay = 5;
+      };
+    };
+  };
+}
 ```

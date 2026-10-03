@@ -59,6 +59,31 @@ enum HookState {
     },
 }
 
+fn uid_range() -> io::Result<(u32, u32)> {
+    let contents = fs::read_to_string("/etc/login.defs")?;
+    let mut min = None;
+    let mut max = None;
+
+    for line in contents.lines() {
+        let line = line.split('#').next().unwrap_or("").trim();
+        let mut fields = line.split_whitespace();
+
+        match fields.next() {
+            Some("UID_MIN") => min = fields.next().and_then(|v| v.parse().ok()),
+            Some("UID_MAX") => max = fields.next().and_then(|v| v.parse().ok()),
+            _ => {}
+        }
+    }
+
+    match (min, max) {
+        (Some(min), Some(max)) if min <= max => Ok((min, max)),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "UID_MIN or UID_MAX missing or invalid in /etc/login.defs",
+        )),
+    }
+}
+
 struct SessiondHooks {
     config: config::Config,
     loop_handle: calloop::LoopHandle<'static, Self>,
@@ -74,10 +99,16 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for SessiondHo
     ) {
         match event {
             session_core_manager::Event::UserAdded { uid } => {
+                let Ok((uid_min, uid_max)) = uid_range() else {
+                    return;
+                };
+
                 log::info!(uid; "new user received");
                 if !self.hooks.iter().any(|hook| hook.uid == uid)
                     && let Some(session_manager) = self.session_manager.as_ref()
                     && let Some(session) = session_manager.send_create_session::<Self>(uid)
+                    && uid >= uid_min
+                    && uid <= uid_max
                 {
                     log::info!(uid; "creating user hook session");
 

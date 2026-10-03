@@ -105,10 +105,10 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for SessiondHo
 
                 log::info!(uid; "new user received");
                 if !self.hooks.iter().any(|hook| hook.uid == uid)
-                    && let Some(session_manager) = self.session_manager.as_ref()
-                    && let Some(session) = session_manager.send_create_session::<Self>(uid)
                     && uid >= uid_min
                     && uid <= uid_max
+                    && let Some(session_manager) = self.session_manager.as_ref()
+                    && let Some(session) = session_manager.send_create_session::<Self>(uid)
                 {
                     log::info!(uid; "creating user hook session");
 

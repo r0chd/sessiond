@@ -29,11 +29,6 @@ enum LogTarget {
     Syslog,
 }
 
-enum BrightnessError {
-    InvalidArgs(String),
-    Failed(String),
-}
-
 struct Device {
     object: session_backlight_device::SessionBacklightDevice,
     pub subsystem: String,
@@ -43,55 +38,42 @@ struct Device {
 }
 
 impl Device {
-    fn validate_component(kind: &str, value: &str) -> Result<(), BrightnessError> {
-        let mut components = path::Path::new(value).components();
-        if value.is_empty()
-            || !matches!(components.next(), Some(path::Component::Normal(_)))
-            || components.next().is_some()
-        {
-            return Err(BrightnessError::InvalidArgs(format!(
-                "invalid brightness {kind} {value}"
-            )));
-        }
-
-        Ok(())
-    }
-
     fn open(
         session_backlight_device: session_backlight_device::SessionBacklightDevice,
         subsystem: String,
         name: String,
-    ) -> Result<Self, BrightnessError> {
+    ) -> anyhow::Result<Self> {
         if !matches!(subsystem.as_str(), "backlight" | "leds") {
-            return Err(BrightnessError::InvalidArgs(format!(
+            return Err(anyhow::anyhow!(
                 "unsupported brightness subsystem {subsystem}"
-            )));
+            ));
         }
-        Self::validate_component("device name", &name)?;
+
+        let mut components = path::Path::new(&name).components();
+        if name.is_empty()
+            || !matches!(components.next(), Some(path::Component::Normal(_)))
+            || components.next().is_some()
+        {
+            return Err(anyhow::anyhow!("invalid brightness device name {name}"));
+        }
 
         let path = path::Path::new("/sys/class").join(&subsystem).join(&name);
 
         let max_brightness = fs::read_to_string(path.join("max_brightness"))
             .map_err(|err| {
-                BrightnessError::Failed(format!(
-                    "failed to read {subsystem}/{name} max_brightness: {err}"
-                ))
+                anyhow::anyhow!("failed to read {subsystem}/{name} max_brightness: {err}")
             })?
             .trim()
             .parse::<u32>()
             .map_err(|err| {
-                BrightnessError::Failed(format!(
-                    "failed to parse {subsystem}/{name} max_brightness: {err}"
-                ))
+                anyhow::anyhow!("failed to parse {subsystem}/{name} max_brightness: {err}")
             })?;
 
         let brightness = fs::OpenOptions::new()
             .write(true)
             .open(path.join("brightness"))
             .map_err(|err| {
-                BrightnessError::Failed(format!(
-                    "failed to open {subsystem}/{name} brightness: {err}"
-                ))
+                anyhow::anyhow!("failed to open {subsystem}/{name} brightness: {err}")
             })?;
 
         log::debug!("opened {subsystem}/{name} with max_brightness={max_brightness}");
@@ -277,15 +259,8 @@ impl hyprwire::Dispatch<session_backlight_manager::SessionBacklightManager> for 
             match Device::open(session_backlight_device, subsystem, name) {
                 Ok(device) => self.devices.push(device),
                 Err(error) => {
-                    let (code, message) = match error {
-                        BrightnessError::InvalidArgs(message) => {
-                            (session_backlight_v1::ErrorCode::InvalidArgs, message)
-                        }
-                        BrightnessError::Failed(message) => {
-                            (session_backlight_v1::ErrorCode::Io, message)
-                        }
-                    };
-                    object.send_error(code, message);
+                    log::warn!(message:% = error; "failed to open backlight device");
+                    object.send_failed();
                 }
             }
         }
@@ -321,20 +296,16 @@ impl hyprwire::Dispatch<session_backlight_device::SessionBacklightDevice> for Se
 
                 if !self.access.has_active_local_session(creds.uid.as_raw()) && !creds.uid.is_root()
                 {
-                    object.send_error(
-                        session_backlight_v1::ErrorCode::PermissionDenied,
-                        format!(
-                            "caller uid {} has no active local session",
-                            creds.uid.as_raw()
-                        ),
-                    );
+                    log::warn!(uid = creds.uid.as_raw(); "backlight request denied: caller has no active local session");
+                    object.send_set_brightness_failed();
                     return;
                 }
 
                 match device.set(brightness) {
                     Ok(()) => object.send_done(),
                     Err(message) => {
-                        object.send_error(session_backlight_v1::ErrorCode::Io, message.to_string());
+                        log::error!(message:% = message; "failed to set backlight brightness");
+                        object.send_set_brightness_failed();
                     }
                 }
             }
@@ -401,8 +372,7 @@ fn run() -> anyhow::Result<()> {
         devices: Vec::new(),
     };
 
-    let sessiond_runtime_dir: path::PathBuf = env::var_os("SESSIOND_RUNTIME_DIR")
-        .map_or_else(|| path::PathBuf::from("/run/sessiond"), path::PathBuf::from);
+    let sessiond_runtime_dir = path::Path::new("/run/sessiond");
     let backlight_socket_path = sessiond_runtime_dir.join("backlight.sock");
 
     let mut server = server::Server::bind(&backlight_socket_path)?;

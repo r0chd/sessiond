@@ -39,7 +39,7 @@ in
     finit.services.sessiond = {
       description = "daemon for power management";
       conditions = "service/dbus/ready";
-      command = "${lib.getExe' cfg.package "sessiond"} --config ${configFile} --runtime-dir ${lib.escapeShellArg cfg.runtimeDir} --log-target syslog";
+      command = "${lib.getExe' cfg.package "sessiond"} --config ${configFile} --log-target syslog";
       notify = "systemd";
       cgroup.delegate = true;
       environment =

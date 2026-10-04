@@ -179,6 +179,16 @@ impl SessiondPower {
     }
 }
 
+fn send_action_failed(object: &session_power_manager::SessionPowerManager, action: PowerAction) {
+    match action {
+        PowerAction::Reboot => object.send_reboot_failed(),
+        PowerAction::Poweroff => object.send_poweroff_failed(),
+        PowerAction::Suspend => object.send_suspend_failed(),
+        PowerAction::Hibernate => object.send_hibernate_failed(),
+        PowerAction::HybridSleep => object.send_hybrid_sleep_failed(),
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PowerDenial {
     StateUnavailable,
@@ -252,10 +262,8 @@ impl hyprwire::Dispatch<session_power_manager::SessionPowerManager> for Sessiond
         if let Some(action) = action {
             let command = self.command(action);
             if command.is_empty() {
-                object.send_error(
-                    session_power_v1::ErrorCode::Io,
-                    format!("{} command is not configured", action.name()),
-                );
+                log::error!(action = action.name(); "power command is not configured");
+                send_action_failed(object, action);
                 return;
             }
 
@@ -266,16 +274,17 @@ impl hyprwire::Dispatch<session_power_manager::SessionPowerManager> for Sessiond
                     PowerDenial::ActiveSessions => "another user has an active session",
                     PowerDenial::Inhibited => "an active inhibitor blocks the operation",
                 };
-                object.send_error(
-                    session_power_v1::ErrorCode::PermissionDenied,
-                    format!("cannot {}: {reason}", action.name()),
-                );
+                log::warn!(action = action.name(), uid = uid.as_raw(), reason; "power request denied");
+                send_action_failed(object, action);
                 return;
             }
 
             match run_power_command(command, action.name()) {
                 Ok(()) => object.send_done(),
-                Err(message) => object.send_error(session_power_v1::ErrorCode::Io, message),
+                Err(message) => {
+                    log::error!(action = action.name(), message:% = message; "power command failed");
+                    send_action_failed(object, action);
+                }
             }
         }
     }
@@ -329,7 +338,6 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for SessiondPo
                     .retain(|inhibitor| inhibitor.id != inhibitor_id);
             }
             session_core_manager::Event::Done => self.session_manager_done = true,
-            session_core_manager::Event::Error { message, .. } => self.error = Some(message),
             _ => {}
         }
         self.notify_capabilities();
@@ -454,8 +462,7 @@ fn run(args: Args) -> anyhow::Result<()> {
         error: None,
     };
 
-    let sessiond_runtime_dir: path::PathBuf = env::var_os("SESSIOND_RUNTIME_DIR")
-        .map_or_else(|| path::PathBuf::from("/run/sessiond"), path::PathBuf::from);
+    let sessiond_runtime_dir = path::Path::new("/run/sessiond");
     let sessiond_socket_path = sessiond_runtime_dir.join("sessiond.sock");
 
     let mut session_socket = client::Client::connect(&sessiond_socket_path)

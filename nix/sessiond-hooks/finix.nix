@@ -30,7 +30,6 @@ in
         "${configFile}"
       ];
       environment = {
-        SESSIOND_RUNTIME_DIR = config.services.sessiond.runtimeDir;
         LOG_LEVEL = if cfg.debug then "debug" else lib.mkDefault "info";
       };
     }

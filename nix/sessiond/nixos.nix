@@ -1,7 +1,6 @@
 {
   lib,
   pkgs,
-  utils,
   config,
   ...
 }:
@@ -22,9 +21,7 @@ in
       wantedBy = [ "default.target" ];
 
       serviceConfig = {
-        ExecStart = "${cfg.package}/bin/sessiond --config ${sessiondConfig} --runtime-dir ${
-          utils.escapeSystemdExecArgs [ cfg.runtimeDir ]
-        }";
+        ExecStart = "${cfg.package}/bin/sessiond --config ${sessiondConfig}";
         Environment = if cfg.debug then "LOG_LEVEL=debug" else "LOG_LEVEL=info";
         Type = "notify";
         Delegate = true;

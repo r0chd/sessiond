@@ -31,7 +31,7 @@ impl hyprwire::Dispatch<session_manager::SessionManager> for Session {
             session_manager::Event::Done => {
                 self.done = true;
             }
-            session_manager::Event::Error { .. } => {
+            session_manager::Event::Failed => {
                 self.id = None;
                 self.done = true;
             }

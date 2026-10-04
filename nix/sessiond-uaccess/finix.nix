@@ -37,7 +37,6 @@ in
         "${lib.getExe cfg.package} --log-target syslog --rules-dirs ${cfg.package}/share/sessiond-uaccess/rules "
         + lib.optionalString (cfg.extraConfig != "") "--rules-dirs ${configFile}";
       environment = {
-        SESSIOND_RUNTIME_DIR = config.services.sessiond.runtimeDir;
         LOG_LEVEL = if cfg.debug then "debug" else lib.mkDefault "info";
       };
     };

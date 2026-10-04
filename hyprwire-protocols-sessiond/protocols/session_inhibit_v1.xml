@@ -43,10 +43,11 @@
   <s2c name="active">
    <description summary="the inhibitor is active"/>
   </s2c>
-  <s2c name="error">
-   <description summary="the inhibitor could not be created"/>
-   <arg name="code" type="enum" interface="error_code" summary="error kind"/>
-   <arg name="message" type="varchar" summary="human-readable error detail"/>
+  <s2c name="failed">
+   <description summary="the inhibitor could not be created">
+    Registration fails if `what` is zero or contains unknown bits.
+    No inhibitor is created, and the client should destroy this object.
+   </description>
   </s2c>
   <c2s name="destroy" destructor="true">
    <description summary="release the inhibitor"/>
@@ -70,8 +71,4 @@
   <value idx="2" name="delay" summary="delay the operation"/>
  </enum>
 
- <enum name="error_code">
-  <value idx="0" name="invalid_what" summary="what is zero or contains unknown bits"/>
-  <value idx="1" name="unsupported" summary="one or more requested inhibitor types are unsupported"/>
- </enum>
 </protocol>

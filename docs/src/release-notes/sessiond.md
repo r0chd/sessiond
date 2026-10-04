@@ -46,7 +46,6 @@ Initial public release of `sessiond`.
 - `get_session` Hyprwire method for the current process; use `get_session_by_id` for ID lookups
 - generic session library `libsession`
 - Save unrecoverable sessions to the state file
-- `SESSIOND_RUNTIME_DIR` environment variable
 
 **Changed**
 - Require an explicit leader PID when creating a session; default to Unix credentials when no leader is sent

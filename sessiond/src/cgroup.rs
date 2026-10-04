@@ -205,7 +205,7 @@ impl CgroupManager {
     }
 }
 
-fn remove_cgroup_tree(path: &path::Path) -> anyhow::Result<()> {
+pub fn remove_cgroup_tree(path: &path::Path) -> anyhow::Result<()> {
     for entry in fs::read_dir(path)? {
         let entry = entry?;
         let child = entry.path();
@@ -226,6 +226,11 @@ pub struct CgroupBundle {
 }
 
 impl CgroupBundle {
+    pub fn is_populated(&self) -> anyhow::Result<bool> {
+        let events = fs::read_to_string(self.path.0.join("cgroup.events"))?;
+        Ok(events.lines().any(|line| line == "populated 1"))
+    }
+
     pub fn set_leader(&self, leader: num::NonZeroU32) -> anyhow::Result<()> {
         let procs_path = self.path.0.join("cgroup.procs");
         fs::write(&procs_path, leader.get().to_string()).with_context(|| {

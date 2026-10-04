@@ -25,6 +25,3 @@ termtree = "1.0.0"
 uzers = "0.12.2"
 hyprwire = "0.5.1"
 hyprwire-protocols-sessiond = { path = "../hyprwire-protocols-sessiond", version = "0.2.0" }
-
-[build-dependencies]
-hyprwire-scanner = "0.5.1"

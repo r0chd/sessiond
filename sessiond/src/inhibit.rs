@@ -163,10 +163,7 @@ impl hyprwire::Dispatch<session_inhibit_manager::SessionInhibitManager> for crat
         };
 
         if what == 0 || what & !KNOWN_WHAT != 0 {
-            session_inhibitor.send_error(
-                session_inhibit_v1::ErrorCode::InvalidWhat,
-                "what is zero or contains unknown bits",
-            );
+            session_inhibitor.send_failed();
             return;
         }
 

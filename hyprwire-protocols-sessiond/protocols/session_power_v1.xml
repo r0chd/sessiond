@@ -73,10 +73,37 @@
   <s2c name="done">
    <description summary="last operation completed successfully"/>
   </s2c>
-  <s2c name="error">
-   <description summary="last operation failed"/>
-   <arg name="code" type="enum" interface="error_code" summary="error kind"/>
-   <arg name="message" type="varchar" summary="human-readable error detail"/>
+  <s2c name="reboot_failed">
+   <description summary="reboot request failed">
+    Sent when session or inhibitor state is unavailable, another user's
+    session is active, an inhibitor blocks reboot, no reboot command is
+    configured, or the command fails.
+   </description>
+  </s2c>
+  <s2c name="poweroff_failed">
+   <description summary="poweroff request failed">
+    Sent when session or inhibitor state is unavailable, another user's
+    session is active, an inhibitor blocks poweroff, no poweroff command is
+    configured, or the command fails.
+   </description>
+  </s2c>
+  <s2c name="suspend_failed">
+   <description summary="suspend request failed">
+    Sent when session or inhibitor state is unavailable, an inhibitor blocks
+    suspend, no suspend command is configured, or the command fails.
+   </description>
+  </s2c>
+  <s2c name="hibernate_failed">
+   <description summary="hibernate request failed">
+    Sent when session or inhibitor state is unavailable, an inhibitor blocks
+    hibernate, no hibernate command is configured, or the command fails.
+   </description>
+  </s2c>
+  <s2c name="hybrid_sleep_failed">
+   <description summary="hybrid sleep request failed">
+    Sent when session or inhibitor state is unavailable, an inhibitor blocks
+    hybrid sleep, no hybrid sleep command is configured, or the command fails.
+   </description>
   </s2c>
   <c2s name="reboot">
    <description summary="reboot the system"/>
@@ -96,8 +123,4 @@
   <c2s name="destroy" destructor="true"></c2s>
  </object>
 
- <enum name="error_code">
-  <value idx="0" name="permission_denied" summary="power operation is not currently allowed"/>
-  <value idx="1" name="io" summary="power command failed or is not configured"/>
- </enum>
 </protocol>

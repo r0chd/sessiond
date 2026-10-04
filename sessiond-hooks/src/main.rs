@@ -96,34 +96,26 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for SessiondHo
         _object: &session_core_manager::SessionCoreManager,
         event: <session_core_manager::SessionCoreManager as hyprwire::Object>::Event<'_>,
     ) {
-        match event {
-            session_core_manager::Event::UserAdded { uid } => {
-                let Ok((uid_min, uid_max)) = uid_range() else {
-                    return;
-                };
+        if let session_core_manager::Event::UserAdded { uid } = event
+            && let Ok((uid_min, uid_max)) = uid_range()
+        {
+            log::info!(uid; "new user received");
+            if !self.hooks.iter().any(|hook| hook.uid == uid)
+                && uid >= uid_min
+                && uid <= uid_max
+                && let Some(session_manager) = self.session_manager.as_ref()
+                && let Some(session) = session_manager.send_create_session::<Self>(uid)
+            {
+                log::info!(uid; "creating user hook session");
 
-                log::info!(uid; "new user received");
-                if !self.hooks.iter().any(|hook| hook.uid == uid)
-                    && uid >= uid_min
-                    && uid <= uid_max
-                    && let Some(session_manager) = self.session_manager.as_ref()
-                    && let Some(session) = session_manager.send_create_session::<Self>(uid)
-                {
-                    log::info!(uid; "creating user hook session");
+                session.send_class(session_management_v2::SessionClass::Manager);
 
-                    session.send_class(session_management_v2::SessionClass::Manager);
-
-                    self.hooks.push(Hook {
-                        uid,
-                        state: HookState::WaitingForEnv { object: session },
-                        restarts: 0,
-                    });
-                }
+                self.hooks.push(Hook {
+                    uid,
+                    state: HookState::WaitingForEnv { object: session },
+                    restarts: 0,
+                });
             }
-            session_core_manager::Event::Error { code, message } => {
-                log::error!(code:? = code, message:% = message; "session_core_manager error");
-            }
-            _ => {}
         }
     }
 }
@@ -436,9 +428,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
 
     let mut event_loop = calloop::EventLoop::try_new()?;
 
-    let sessiond_runtime_dir: path::PathBuf = env::var_os("SESSIOND_RUNTIME_DIR")
-        .map_or_else(|| path::PathBuf::from("/run/sessiond"), path::PathBuf::from);
-    let mut socket = client::Client::connect(sessiond_runtime_dir.join("sessiond.sock"))?;
+    let mut socket = client::Client::connect("/run/sessiond/sessiond.sock")?;
     let eq = socket.new_event_queue();
 
     let mut sessiond_hooks = SessiondHooks {

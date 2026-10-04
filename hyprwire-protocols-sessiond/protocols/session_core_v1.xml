@@ -36,11 +36,6 @@
   <s2c name="done">
    <description summary="initial field dump complete"/>
   </s2c>
-  <s2c name="error">
-   <description summary="last operation failed"/>
-   <arg name="code" type="enum" interface="error_code" summary="error kind"/>
-   <arg name="message" type="varchar" summary="human-readable error detail"/>
-  </s2c>
   <s2c name="user_added">
    <description summary="a user became known">
     Sent when a user becomes known, and once for each known user when the
@@ -93,8 +88,8 @@
   </c2s>
   <c2s name="get_user">
    <description summary="create a per-user info object">
-    Initial fields are followed by done. If the uid is unknown, not_found is
-    sent instead.
+    Initial fields are followed by done. If the UID does not correspond to a
+    known user, failed is sent and no user fields follow.
    </description>
    <arg name="uid" type="uint" summary="user ID to query"/>
    <returns iface="session_core_user"/>
@@ -150,13 +145,25 @@
   <s2c name="destroyed">
    <description summary="session has ended or did not exist"/>
   </s2c>
-  <s2c name="ok">
-   <description summary="last operation completed successfully"/>
+  <s2c name="terminate_failed">
+   <description summary="session termination request failed">
+    Sent when the caller does not have permission to terminate this session.
+   </description>
   </s2c>
-  <s2c name="error">
-   <description summary="last operation failed"/>
-   <arg name="code" type="enum" interface="error_code" summary="error kind"/>
-   <arg name="message" type="varchar" summary="human-readable error detail"/>
+  <s2c name="kill_failed">
+   <description summary="session kill request failed">
+    Sent when the caller does not have permission to kill this session.
+   </description>
+  </s2c>
+  <s2c name="lock_failed">
+   <description summary="session lock request failed">
+    Sent when the caller does not have permission to lock this session.
+   </description>
+  </s2c>
+  <s2c name="unlock_failed">
+   <description summary="session unlock request failed">
+    Sent when the caller does not have permission to unlock this session.
+   </description>
   </s2c>
   <c2s name="lock">
    <description summary="lock the session"/>
@@ -239,18 +246,22 @@
   <s2c name="done">
    <description summary="initial field dump complete"/>
   </s2c>
-  <s2c name="not_found">
-   <description summary="no such user">
-    Sent when the uid passed to get_user does not correspond to a known user.
+  <s2c name="failed">
+   <description summary="user lookup failed">
+    Sent when the UID passed to get_user does not correspond to a known user.
+
+    No further events will be sent.
    </description>
   </s2c>
-  <s2c name="ok">
-   <description summary="last operation completed successfully"/>
+  <s2c name="terminate_failed">
+   <description summary="user termination request failed">
+    Sent when the caller does not have permission to terminate this user.
+   </description>
   </s2c>
-  <s2c name="error">
-   <description summary="last operation failed"/>
-   <arg name="code" type="enum" interface="error_code" summary="error kind"/>
-   <arg name="message" type="varchar" summary="human-readable error detail"/>
+  <s2c name="kill_failed">
+   <description summary="user kill request failed">
+    Sent when the caller does not have permission to kill this user.
+   </description>
   </s2c>
   <c2s name="terminate">
    <description summary="terminate the user"/>
@@ -290,13 +301,6 @@
   <value idx="4" name="background_light" summary="lightweight background session excluded from idle shutdown accounting"/>
   <value idx="5" name="manager" summary="per-user service manager session"/>
   <value idx="6" name="manager_early" summary="early per-user service manager session created before a regular login"/>
- </enum>
-
- <enum name="error_code">
-  <value idx="0" name="not_found" summary="session or cgroup not found"/>
-  <value idx="1" name="permission_denied" summary="insufficient permissions to signal processes"/>
-  <value idx="2" name="io" summary="generic I/O error"/>
-  <value idx="3" name="active_sessions" summary="other sessions are active"/>
  </enum>
 
  <enum name="inhibitor_mode">

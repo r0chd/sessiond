@@ -36,12 +36,6 @@ pub enum SessionManagementTarget {
     V2(session_management_session::SessionManagementSession),
 }
 
-#[derive(Clone, Copy)]
-enum SessionManagementError {
-    NotFound,
-    Io,
-}
-
 impl SessionManagementTarget {
     fn owned_session(&self) -> Option<session_management_session::SessionManagementSession> {
         match self {
@@ -83,23 +77,10 @@ impl SessionManagementTarget {
         }
     }
 
-    fn send_error(&self, code: SessionManagementError, message: impl AsRef<str>) {
-        let message = message.as_ref();
+    fn send_failed(&self) {
         match self {
-            Self::V1(object) => object.send_error(
-                match code {
-                    SessionManagementError::NotFound => session_management_v1::ErrorCode::NotFound,
-                    SessionManagementError::Io => session_management_v1::ErrorCode::Io,
-                },
-                message,
-            ),
-            Self::V2(object) => object.send_error(
-                match code {
-                    SessionManagementError::NotFound => session_management_v2::ErrorCode::NotFound,
-                    SessionManagementError::Io => session_management_v2::ErrorCode::Io,
-                },
-                message,
-            ),
+            Self::V1(object) => object.send_failed(),
+            Self::V2(object) => object.send_failed(),
         }
     }
 }
@@ -377,10 +358,7 @@ pub fn handle_session_control(
                 };
                 if !creds.uid.is_root() && creds.uid.as_raw() != uid.0 {
                     if let Some(object) = &action.object {
-                        object.send_error(
-                            session_core_v1::ErrorCode::PermissionDenied,
-                            "permission denied",
-                        );
+                        object.send_terminate_failed();
                     }
                     continue;
                 }
@@ -401,10 +379,7 @@ pub fn handle_session_control(
                 };
                 if !creds.uid.is_root() && creds.uid.as_raw() != uid.0 {
                     if let Some(object) = &action.object {
-                        object.send_error(
-                            session_core_v1::ErrorCode::PermissionDenied,
-                            "permission denied",
-                        );
+                        object.send_kill_failed();
                     }
                     continue;
                 }
@@ -424,16 +399,12 @@ pub fn handle_session_control(
                 };
                 if !creds.uid.is_root() && creds.uid.as_raw() != uid.0 {
                     if let Some(object) = &action.object {
-                        object.send_error(
-                            session_core_v1::ErrorCode::PermissionDenied,
-                            "permission denied",
-                        );
+                        object.send_lock_failed();
                     }
                     continue;
                 }
                 for object in &objects.0 {
                     object.send_locked();
-                    object.send_ok();
                 }
                 log::info!(session_id = session_id.as_raw(); "lock requested");
             }
@@ -443,16 +414,12 @@ pub fn handle_session_control(
                 };
                 if !creds.uid.is_root() && creds.uid.as_raw() != uid.0 {
                     if let Some(object) = &action.object {
-                        object.send_error(
-                            session_core_v1::ErrorCode::PermissionDenied,
-                            "permission denied",
-                        );
+                        object.send_unlock_failed();
                     }
                     continue;
                 }
                 for object in &objects.0 {
                     object.send_unlocked();
-                    object.send_ok();
                 }
                 log::info!(session_id = session_id.as_raw(); "unlock requested");
             }
@@ -767,7 +734,6 @@ pub fn handle_session_management_action(
     sessions: Query<(&SessionId, &SessionEnv, &Uid, &Timestamp), With<Session>>,
     config: Res<config::Config>,
     loop_handle: NonSend<'_, calloop::LoopHandle<'static, crate::Sessiond>>,
-    sessiond_runtime_dir: Res<crate::SessiondRuntimeDir>,
 ) {
     for action in actions.read() {
         if let SessionManagementAction::ManagerDestroy { management_object } = &action.action {
@@ -803,8 +769,8 @@ pub fn handle_session_management_action(
                 }
                 _ => {
                     management_object.error(
-                        session_management_v2::ErrorCode::Io as u32,
-                        "session is no longer pending",
+                        session_management_v2::ProtocolError::AlreadyCommitted as u32,
+                        "request sent after the session was committed",
                     );
                 }
             }
@@ -818,7 +784,9 @@ pub fn handle_session_management_action(
                 uid,
             } => {
                 let Some(user) = uzers::get_user_by_uid(*uid) else {
-                    return;
+                    log::warn!(uid; "cannot create session: user does not exist");
+                    object.send_failed();
+                    continue;
                 };
 
                 let user_config = config
@@ -841,10 +809,6 @@ pub fn handle_session_management_action(
                 let runtime_dir = user_config.runtime_dir(*uid);
                 let mut env: BTreeMap<sync::Arc<str>, sync::Arc<str>> = BTreeMap::from([
                     (sync::Arc::from("XDG_RUNTIME_DIR"), runtime_dir),
-                    (
-                        sync::Arc::from("SESSIOND_RUNTIME_DIR"),
-                        sync::Arc::clone(&sessiond_runtime_dir.0),
-                    ),
                     #[cfg(not(feature = "consolekit"))]
                     (
                         sync::Arc::from("XDG_SESSION_ID"),
@@ -919,42 +883,62 @@ pub fn handle_session_management_action(
                 }
             }
             SessionManagementAction::Leader { leader_pid } => {
-                if let Some(pending_session) = pending_sessions.by_management_object.get_mut(object)
+                if let Some(leader_pid) = num::NonZeroU32::new(*leader_pid)
+                    && let Some(pending_session) =
+                        pending_sessions.by_management_object.get_mut(object)
                 {
-                    if pending_session.cgroup.is_some() {
-                        object.error(
-                            session_management_v2::ErrorCode::Io as u32,
-                            "session cgroup has already been created",
-                        );
-                        continue;
+                    match pending_session.cgroup.as_ref() {
+                        Some(CgroupControl::LeaderId(_)) => {
+                            object.error(
+                                session_management_v2::ProtocolError::LeaderAlreadySet as u32,
+                                "session leader has already been set",
+                            );
+                            continue;
+                        }
+                        Some(CgroupControl::Cgroup(_)) => {
+                            object.error(
+                                session_management_v2::ProtocolError::LeaderConflict as u32,
+                                "cannot set session leader after delegating the cgroup",
+                            );
+                            continue;
+                        }
+                        None => {}
                     }
-
-                    let Some(leader_pid) = num::NonZeroU32::new(*leader_pid) else {
-                        object.send_error(SessionManagementError::Io, "invalid leader PID");
-                        continue;
-                    };
 
                     pending_session.cgroup = Some(CgroupControl::LeaderId(leader_pid));
 
                     continue;
                 }
+
+                log::warn!(leader_pid; "invalid session leader request");
+                object.send_failed();
+                pending_sessions.by_management_object.remove(object);
+                continue;
             }
             SessionManagementAction::DelegateCgroup { cgroup_object } => {
                 if let Some(pending_session) = pending_sessions.by_management_object.get_mut(object)
                 {
-                    if pending_session.cgroup.is_some() {
-                        cgroup_object.error(
-                            session_management_v2::ErrorCode::Io as u32,
-                            "session cgroup has already been created",
-                        );
-                        continue;
+                    match pending_session.cgroup.as_ref() {
+                        Some(CgroupControl::LeaderId(_)) => {
+                            object.error(
+                                session_management_v2::ProtocolError::LeaderConflict as u32,
+                                "cannot delegate cgroup after setting the session leader",
+                            );
+                            continue;
+                        }
+                        Some(CgroupControl::Cgroup(_)) => {
+                            object.error(
+                                session_management_v2::ProtocolError::CgroupAlreadyDelegated as u32,
+                                "session cgroup has already been delegated",
+                            );
+                            continue;
+                        }
+                        None => {}
                     }
 
                     let Some(user) = uzers::get_user_by_uid(pending_session.uid) else {
-                        object.send_error(
-                            SessionManagementError::NotFound,
-                            format!("user {} does not exist", pending_session.uid),
-                        );
+                        log::warn!(uid = pending_session.uid; "cannot delegate session cgroup: user does not exist");
+                        object.send_failed();
                         continue;
                     };
 
@@ -964,10 +948,7 @@ pub fn handle_session_management_action(
                         Ok(cgroup) => cgroup,
                         Err(error) => {
                             log::error!(session_id = pending_session.id.as_raw(), error = error.to_string().as_str(); "failed to create session cgroup");
-                            object.send_error(
-                                SessionManagementError::Io,
-                                format!("failed to create session cgroup: {error}"),
-                            );
+                            object.send_failed();
                             continue;
                         }
                     };
@@ -980,16 +961,15 @@ pub fn handle_session_management_action(
                         "session cgroup delegation requested"
                     );
                     pending_session.cgroup = Some(CgroupControl::Cgroup(cgroup));
+                    continue;
                 }
             }
             SessionManagementAction::Commit => {
                 if let Some(pending_session) = pending_sessions.by_management_object.remove(object)
                 {
                     let Some(user) = uzers::get_user_by_uid(pending_session.uid) else {
-                        object.send_error(
-                            SessionManagementError::NotFound,
-                            format!("user {} does not exist", pending_session.uid),
-                        );
+                        log::warn!(uid = pending_session.uid; "cannot commit session: user does not exist");
+                        object.send_failed();
                         continue;
                     };
                     let username: sync::Arc<str> = user.name().to_string_lossy().into();
@@ -1002,10 +982,8 @@ pub fn handle_session_management_action(
                             .as_ref()
                             .and_then(session_manager::SessionManager::try_client)
                         else {
-                            object.send_error(
-                                SessionManagementError::Io,
-                                "cannot determine session leader",
-                            );
+                            log::error!(session_id = pending_session.id.as_raw(); "cannot determine session leader");
+                            object.send_failed();
                             continue;
                         };
 
@@ -1017,10 +995,8 @@ pub fn handle_session_management_action(
                             .ok()
                             .and_then(num::NonZeroU32::new)
                         else {
-                            object.send_error(
-                                SessionManagementError::Io,
-                                "invalid session leader PID",
-                            );
+                            log::error!(session_id = pending_session.id.as_raw(); "invalid session leader PID in client credentials");
+                            object.send_failed();
                             continue;
                         };
 
@@ -1059,29 +1035,20 @@ pub fn handle_session_management_action(
                                 Ok(cgroup) => cgroup,
                                 Err(error) => {
                                     log::error!(session_id = pending_session.id.as_raw(), error = error.to_string().as_str(); "failed to create session cgroup");
-                                    object.send_error(
-                                        SessionManagementError::Io,
-                                        format!("failed to create session cgroup: {error}"),
-                                    );
+                                    object.send_failed();
                                     continue;
                                 }
                             };
 
                             if let Err(error) = cgroup.set_leader(leader) {
                                 log::error!(session_id = pending_session.id.as_raw(), error = error.to_string().as_str(); "failed to set session cgroup leader");
-                                object.send_error(
-                                    SessionManagementError::Io,
-                                    format!("failed to set session cgroup leader: {error}"),
-                                );
+                                object.send_failed();
                                 continue;
                             }
 
                             if let Err(error) = cgroup.watch_empty(&loop_handle) {
                                 log::error!(session_id = pending_session.id.as_raw(), error = error.to_string().as_str(); "failed to watch session cgroup");
-                                object.send_error(
-                                    SessionManagementError::Io,
-                                    "failed to watch session cgroup",
-                                );
+                                object.send_failed();
                                 continue;
                             }
 
@@ -1103,12 +1070,26 @@ pub fn handle_session_management_action(
                             );
                         }
                         CgroupControl::Cgroup(cgroup) => {
+                            match cgroup.is_populated() {
+                                Ok(true) => {}
+                                Ok(false) => {
+                                    log::warn!(session_id = pending_session.id.as_raw(); "delegated cgroup is empty at commit");
+                                    object.send_failed();
+                                    if let Err(error) = cgroup::remove_cgroup_tree(&cgroup.path.0) {
+                                        log::error!(session_id = pending_session.id.as_raw(), error = error.to_string().as_str(); "failed to remove empty delegated cgroup after rejected commit");
+                                    }
+                                    continue;
+                                }
+                                Err(error) => {
+                                    log::error!(session_id = pending_session.id.as_raw(), error = error.to_string().as_str(); "failed to inspect delegated session cgroup");
+                                    object.send_failed();
+                                    continue;
+                                }
+                            }
+
                             if let Err(error) = cgroup.watch_empty(&loop_handle) {
                                 log::error!(session_id = pending_session.id.as_raw(), error = error.to_string().as_str(); "failed to watch session cgroup");
-                                object.send_error(
-                                    SessionManagementError::Io,
-                                    "failed to watch session cgroup",
-                                );
+                                object.send_failed();
                                 continue;
                             }
 
@@ -1146,7 +1127,15 @@ pub fn handle_session_management_action(
             }
         }
 
-        object.send_error(SessionManagementError::Io, "session is no longer pending");
+        match object {
+            SessionManagementTarget::V1(_) => {
+                object.send_failed();
+            }
+            SessionManagementTarget::V2(session) => session.error(
+                session_management_v2::ProtocolError::SessionNotPending as u32,
+                "session is no longer pending",
+            ),
+        }
     }
 }
 

@@ -93,8 +93,8 @@ sessiondTest {
     machine.wait_until_succeeds("sessionctl session list --json > /tmp/sessions.json && jq -e '.sessions | length == 1' /tmp/sessions.json >/dev/null")
     machine.wait_until_succeeds("test -d /tmp/1000")
     machine.succeed("test \"$(stat -c %U:%G:%a /tmp/1000)\" = user_1:root:700")
-    machine.succeed("jq -e '[.sessions[] | select(.active == \"active\")] | length == 1' /tmp/sessions.json >/dev/null")
-    machine.succeed("jq -e '.sessions[] | select(.active == \"active\" and .vt == 1 and .tty == \"tty1\")' /tmp/sessions.json >/dev/null")
+    machine.succeed("jq -e '[.sessions[] | select(.state == \"active\")] | length == 1' /tmp/sessions.json >/dev/null")
+    machine.succeed("jq -e '.sessions[] | select(.state == \"active\" and .vt == 1 and .tty == \"tty1\")' /tmp/sessions.json >/dev/null")
     machine.succeed("jq -e 'all(.sessions[]; .uid == 1000 and .username == \"user_1\" and .leader > 0 and .timestamp > 0)' /tmp/sessions.json >/dev/null")
 
     machine.succeed("test -d /sys/fs/cgroup/system/sessiond/user-1000")

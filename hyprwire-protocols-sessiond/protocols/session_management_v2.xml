@@ -88,10 +88,13 @@
     release the leader to execute the session command.
    </description>
   </s2c>
-  <s2c name="error">
-   <description summary="session creation failed"/>
-   <arg name="code" type="enum" interface="error_code" summary="error kind"/>
-   <arg name="message" type="varchar" summary="human-readable error detail"/>
+  <s2c name="failed">
+   <description summary="session operation failed">
+    An operation can fail if the UID has no user account, the session leader
+    is invalid or cannot be placed in the session cgroup, or the session
+    cgroup cannot be created or monitored. Commit also fails if a delegated
+    cgroup is empty. A failed commit consumes the staged session.
+   </description>
   </s2c>
   <c2s name="destroy" destructor="true">
    <description summary="tear down the session"/>
@@ -99,7 +102,7 @@
   <c2s name="commit">
    <description summary="commit staged fields and create the session">
     Finalizes the staged configuration and creates the session, replying with
-    done on success or error on failure. Both leader and delegate_cgroup are
+    done on success or failed on failure. Both leader and delegate_cgroup are
     optional. If neither is set, the PID from the client's peer credentials
     (ucreds) is used as the session leader. Sending both is a protocol error.
     When delegate_cgroup is set, the client must place the session leader PID
@@ -112,7 +115,9 @@
   <c2s name="leader">
    <description summary="stage the session leader PID">
     Optional. Must be sent while staged. Supplies the process
-    ID of the leader to place in the session cgroup when committed.
+    ID of the leader to place in the session cgroup when committed. PID 0 is
+    invalid: the server sends an invalid_args error and destroys the staged
+    session.
     Sending both leader and delegate_cgroup for the same session, in either
     order, is a protocol error.
    </description>
@@ -147,9 +152,12 @@
   </c2s>
  </object>
 
- <enum name="error_code">
-  <value idx="0" name="not_found" summary="session or cgroup not found"/>
-  <value idx="1" name="io" summary="generic I/O error"/>
+ <enum name="protocol_error">
+  <value idx="0" name="already_committed" summary="request sent after the session was committed"/>
+  <value idx="1" name="leader_conflict" summary="leader PID and delegated cgroup were both selected"/>
+  <value idx="2" name="leader_already_set" summary="leader PID was selected more than once"/>
+  <value idx="3" name="cgroup_already_delegated" summary="delegated cgroup was requested more than once"/>
+  <value idx="4" name="session_not_pending" summary="request sent without a pending session transaction"/>
  </enum>
 
  <enum name="session_class">

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::{env, fs, io, num, path, result, sync};
+use std::{fs, io, num, path, result, sync};
 use toml::{de, ser};
 
 #[cfg(feature = "monitor")]
@@ -109,12 +109,10 @@ impl State {
         Monitor::new(self.path.as_ref())
     }
 
+    #[must_use]
     pub fn new() -> Self {
-        let runtime_dir = env::var_os("SESSIOND_RUNTIME_DIR")
-            .map_or_else(|| path::PathBuf::from("/run/sessiond"), path::PathBuf::from);
-
         Self {
-            path: runtime_dir.join("state.toml").into(),
+            path: path::PathBuf::from("/run/sessiond/state.toml").into(),
             ..Default::default()
         }
     }

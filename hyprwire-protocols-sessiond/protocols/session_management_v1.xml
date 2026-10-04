@@ -58,10 +58,15 @@
   <s2c name="done">
    <description summary="unsafe session created, initial field dump complete"/>
   </s2c>
-  <s2c name="error">
-   <description summary="session creation failed"/>
-   <arg name="code" type="enum" interface="error_code" summary="error kind"/>
-   <arg name="message" type="varchar" summary="human-readable error detail"/>
+  <s2c name="failed">
+   <description summary="session creation failed">
+    Creation can fail if the supplied UID has no user account, the caller's
+    leader PID is invalid or cannot be placed in the session cgroup, or the
+    session cgroup cannot be created or monitored.
+
+    No session was registered. No further session information will be sent
+    for this request.
+   </description>
   </s2c>
   <c2s name="destroy_session">
    <description summary="[unsafe: paired with create_session] deregister a session by id">
@@ -72,11 +77,6 @@
   </c2s>
   <c2s name="destroy" destructor="true"></c2s>
  </object>
-
- <enum name="error_code">
-  <value idx="0" name="not_found" summary="session or cgroup not found"/>
-  <value idx="1" name="io" summary="generic I/O error"/>
- </enum>
 
  <enum name="session_class">
   <value idx="0" name="user" summary="interactive login session owned by a user"/>

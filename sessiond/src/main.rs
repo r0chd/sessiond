@@ -26,15 +26,12 @@ use hyprwire_protocols_sessiond::server::session_management::v2::session_managem
 use rustix::net;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
-use std::{env, fs, path, process, sync};
+use std::{env, fs, path, process};
 
-#[derive(Resource)]
-pub struct SessiondRuntimeDir(sync::Arc<str>);
+const RUNTIME_DIR: &str = "/run/sessiond";
 
 #[derive(Parser)]
 struct Args {
-    #[arg(long, default_value = "/run/sessiond")]
-    runtime_dir: path::PathBuf,
     #[arg(short, long, help = "Path to configuration file")]
     config: Option<path::PathBuf>,
     #[arg(long, value_enum, default_value_t = LogTarget::Stderr)]
@@ -100,7 +97,7 @@ fn handle_shutdown(
 fn run(args: Args) -> anyhow::Result<()> {
     log::info!("sessiond daemon starting");
 
-    let runtime_dir = args.runtime_dir;
+    let runtime_dir = path::Path::new(RUNTIME_DIR);
     let config = config::Config::load(args.config)?;
     let mut event_loop = calloop::EventLoop::try_new()?;
     let signals = signals::Signals::new(&[
@@ -124,7 +121,6 @@ fn run(args: Args) -> anyhow::Result<()> {
     world.insert_resource(inhibit::NextInhibitorId(inhibit::InhibitorId::from_raw(1)));
     world.init_resource::<session::SessionInfoManagers>();
     world.init_resource::<ShutdownState>();
-    world.insert_resource(SessiondRuntimeDir(runtime_dir.to_string_lossy().into()));
     world.init_resource::<reconcile::NotifyBatch>();
     world.init_resource::<session::SessionRegistry>();
     world.init_resource::<user::UserRegistry>();
@@ -193,8 +189,8 @@ fn run(args: Args) -> anyhow::Result<()> {
 
     sessiond.world.clear_trackers();
 
-    fs::create_dir_all(&runtime_dir)?;
-    fs::set_permissions(&runtime_dir, fs::Permissions::from_mode(0o755))?;
+    fs::create_dir_all(runtime_dir)?;
+    fs::set_permissions(runtime_dir, fs::Permissions::from_mode(0o755))?;
 
     let socket_path = runtime_dir.join("sessiond.sock");
     let mut socket = server::Server::bind(&socket_path)?;

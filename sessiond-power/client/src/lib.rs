@@ -29,8 +29,24 @@ impl hyprwire::Dispatch<session_power_manager::SessionPowerManager> for State {
     ) {
         match event {
             session_power_manager::Event::Done => self.done = true,
-            session_power_manager::Event::Error { message, .. } => {
-                self.error = Some(message);
+            session_power_manager::Event::RebootFailed => {
+                self.error = Some("reboot request failed".to_string());
+                self.done = true;
+            }
+            session_power_manager::Event::PoweroffFailed => {
+                self.error = Some("poweroff request failed".to_string());
+                self.done = true;
+            }
+            session_power_manager::Event::SuspendFailed => {
+                self.error = Some("suspend request failed".to_string());
+                self.done = true;
+            }
+            session_power_manager::Event::HibernateFailed => {
+                self.error = Some("hibernate request failed".to_string());
+                self.done = true;
+            }
+            session_power_manager::Event::HybridSleepFailed => {
+                self.error = Some("hybrid sleep request failed".to_string());
                 self.done = true;
             }
             _ => {}

@@ -85,7 +85,7 @@ pub fn create_runtime_dir(uid: u32, path: &str) {
 }
 
 pub fn remove_runtime_dir(path: &str) -> io::Result<()> {
-    match fs::remove_dir(path) {
+    match fs::remove_dir_all(path) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e),
@@ -196,7 +196,7 @@ pub fn handle_add_object(
             .find(|(_, uid, _, _, _)| uid.0 == request.uid)
         else {
             log::warn!(uid = request.uid; "get_user requested for unknown user");
-            request.object.send_not_found();
+            request.object.send_failed();
             continue;
         };
 
@@ -250,10 +250,7 @@ pub fn handle_user_control(
                     continue;
                 };
                 if !creds.uid.is_root() && uid.0 != creds.uid.as_raw() {
-                    action.object.send_error(
-                        session_core_v1::ErrorCode::PermissionDenied,
-                        "permission denied",
-                    );
+                    action.object.send_terminate_failed();
                     continue;
                 }
 
@@ -267,18 +264,13 @@ pub fn handle_user_control(
                         action: session::SessionControlAction::Terminate { creds },
                     });
                 }
-
-                action.object.send_ok();
             }
             UserControlAction::Kill { creds } => {
                 let Ok((uid, _)) = users.get(user_entity) else {
                     continue;
                 };
                 if !creds.uid.is_root() && uid.0 != creds.uid.as_raw() {
-                    action.object.send_error(
-                        session_core_v1::ErrorCode::PermissionDenied,
-                        "permission denied",
-                    );
+                    action.object.send_kill_failed();
                     continue;
                 }
 
@@ -292,8 +284,6 @@ pub fn handle_user_control(
                         action: session::SessionControlAction::Kill { creds },
                     });
                 }
-
-                action.object.send_ok();
             }
             UserControlAction::Destroy => {
                 user_registry.by_object.remove(&action.object);

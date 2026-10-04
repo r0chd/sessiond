@@ -18,8 +18,6 @@ in
       after = [ "sessiond.service" ];
       wantedBy = [ "default.target" ];
 
-      environment.SESSIOND_RUNTIME_DIR = config.services.sessiond.runtimeDir;
-
       serviceConfig = {
         ExecStart =
           "${lib.getExe cfg.package} --rules-dirs ${cfg.package}/share/sessiond-uaccess/rules "

@@ -27,10 +27,11 @@
    Interface for creating objects for backlight and LED devices. A client may
    only create or modify an object while it owns an active local session.
    </description>
-  <s2c name="error">
-   <description summary="device object creation failed"/>
-   <arg name="code" type="enum" interface="error_code" summary="error kind"/>
-   <arg name="message" type="varchar" summary="human-readable error detail"/>
+  <s2c name="failed">
+   <description summary="device object creation failed">
+    Sent when get_device receives an unsupported subsystem or an invalid
+    device name, or when the requested device cannot be opened.
+   </description>
   </s2c>
   <c2s name="get_device">
    <description summary="create a device object">
@@ -51,15 +52,16 @@
    Interface for changing the brightness of one device selected by the
    subsystem and name passed to `get_device`. A client may only perform an
    operation while it owns an active local session. The result of each
-   operation is reported with done or error.
+    operation is reported with done or set_brightness_failed.
   </description>
   <s2c name="done">
    <description summary="last operation completed successfully"/>
   </s2c>
-  <s2c name="error">
-   <description summary="last operation failed"/>
-   <arg name="code" type="enum" interface="error_code" summary="error kind"/>
-   <arg name="message" type="varchar" summary="human-readable error detail"/>
+  <s2c name="set_brightness_failed">
+   <description summary="brightness change failed">
+    Sent when the caller does not have permission to change brightness or
+    writing the requested brightness fails.
+   </description>
   </s2c>
   <c2s name="set_brightness">
    <description summary="set this device brightness">
@@ -73,9 +75,4 @@
   </c2s>
  </object>
 
- <enum name="error_code">
-  <value idx="0" name="permission_denied" summary="client has no active local session"/>
-  <value idx="1" name="invalid_args" summary="unsupported subsystem or brightness value"/>
-  <value idx="2" name="io" summary="device could not be opened or written"/>
- </enum>
 </protocol>

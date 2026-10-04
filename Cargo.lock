@@ -1564,7 +1564,6 @@ dependencies = [
  "comfy-table",
  "hyprwire",
  "hyprwire-protocols-sessiond",
- "hyprwire-scanner",
  "owo-colors",
  "serde_json",
  "termtree",

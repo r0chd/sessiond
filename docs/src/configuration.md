@@ -15,5 +15,3 @@ User entries are keyed by login name. Supported fields are:
 
 - `linger`: create user state before an active session exists.
 - `runtime-dir`: runtime directory template; defaults to `/run/user/{uid}`.
-
-The `{uid}` placeholder is available in `runtime-dir` and `env` values.

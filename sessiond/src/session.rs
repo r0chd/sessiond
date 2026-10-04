@@ -1103,6 +1103,15 @@ pub fn handle_session_management_action(
                             );
                         }
                         CgroupControl::Cgroup(cgroup) => {
+                            if let Err(error) = cgroup.watch_empty(&loop_handle) {
+                                log::error!(session_id = pending_session.id.as_raw(), error = error.to_string().as_str(); "failed to watch session cgroup");
+                                object.send_error(
+                                    SessionManagementError::Io,
+                                    "failed to watch session cgroup",
+                                );
+                                continue;
+                            }
+
                             spawn(
                                 &mut commands,
                                 pending_session.id,

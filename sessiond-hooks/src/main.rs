@@ -256,15 +256,13 @@ impl hyprwire::Dispatch<session_management_cgroup::SessionManagementCgroup> for 
                 cmd.env(key, value);
             }
 
-            cmd.stdin(process::Stdio::piped());
-
             let mut child = match cmd.spawn() {
                 Ok(child) => {
                     object.send_commit();
-
                     child
                 }
                 Err(e) => {
+                    hook.state = HookState::Stopped;
                     log::error!(
                         exec:? = self.config.on_start,
                         uid = hook.uid,

@@ -972,7 +972,7 @@ pub fn handle_session_management_action(
                         }
                     };
 
-                    cgroup_object.send_path(cgroup.path.0.join("supervisor").to_string_lossy());
+                    cgroup_object.send_path(cgroup.path.0.to_string_lossy());
 
                     log::info!(
                         session_id = pending_session.id.as_raw(),

@@ -27,34 +27,8 @@ impl Default for Restart {
 
 #[derive(Deserialize)]
 pub struct Config {
-    pub on_start: Command,
+    pub on_start: String,
     pub restart: Restart,
-}
-
-#[derive(Clone, Deserialize)]
-pub struct Command {
-    pub exec: String,
-    pub args: Vec<String>,
-}
-
-impl Command {
-    pub fn expand_home(&self, home: &str) -> Self {
-        fn expand(value: &str, home: &str) -> String {
-            if value == "~" {
-                return home.to_owned();
-            }
-
-            value.strip_prefix("~/").map_or_else(
-                || value.to_owned(),
-                |relative| format!("{}/{relative}", home.trim_end_matches('/')),
-            )
-        }
-
-        Self {
-            exec: expand(&self.exec, home),
-            args: self.args.iter().map(|arg| expand(arg, home)).collect(),
-        }
-    }
 }
 
 impl Config {

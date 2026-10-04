@@ -216,10 +216,6 @@ impl hyprwire::Dispatch<session_management_cgroup::SessionManagementCgroup> for 
                 .map(|group| rustix::thread::Gid::from_raw(group.gid()))
                 .collect::<Vec<_>>();
 
-            let command = self
-                .config
-                .on_start
-                .expand_home(user.home_dir().to_string_lossy().as_ref());
             let mut cmd = process::Command::new("/bin/sh");
             unsafe {
                 cmd.pre_exec(move || {
@@ -262,10 +258,9 @@ impl hyprwire::Dispatch<session_management_cgroup::SessionManagementCgroup> for 
                 cmd.env(key, value);
             }
 
-            cmd.arg(&command.exec);
-            for arg in &command.args {
+            self.config.on_start.split(' ').for_each(|arg| {
                 cmd.arg(arg);
-            }
+            });
             cmd.stdin(process::Stdio::piped());
 
             let mut child = match cmd.spawn() {
@@ -276,7 +271,7 @@ impl hyprwire::Dispatch<session_management_cgroup::SessionManagementCgroup> for 
                 }
                 Err(e) => {
                     log::error!(
-                        exec:? = command.exec,
+                        exec:? = self.config.on_start,
                         uid = hook.uid,
                         error:% = e;
                         "failed to spawn hook"

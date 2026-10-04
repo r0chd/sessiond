@@ -84,29 +84,23 @@ impl CgroupManager {
         session_id: session::SessionId,
     ) -> anyhow::Result<CgroupBundle> {
         let session_cgroup = self.create_session_cgroup(user, session_id)?;
-        let supervisor_path = session_cgroup.path.0.join("supervisor");
-        fs::create_dir(&supervisor_path)
-            .with_context(|| format!("failed to create cgroup {}", supervisor_path.display()))?;
 
-        Self::delegate_cgroup(&supervisor_path, user.uid())?;
-        Self::delegate_cgroup(&session_cgroup.path.0, user.uid())?;
-
-        Ok(session_cgroup)
-    }
-
-    fn delegate_cgroup(path: &path::Path, uid: u32) -> anyhow::Result<()> {
-        let owner = rustix::fs::Uid::from_raw(uid);
+        let owner = rustix::fs::Uid::from_raw(user.uid());
 
         for name in ["cgroup.procs", "cgroup.threads", "cgroup.subtree_control"] {
-            let interface = path.join(name);
+            let interface = session_cgroup.path.0.join(name);
             rustix::fs::chown(&interface, Some(owner), None)
                 .with_context(|| format!("failed to delegate {}", interface.display()))?;
         }
 
-        rustix::fs::chown(path, Some(owner), None)
-            .with_context(|| format!("failed to delegate cgroup {}", path.display()))?;
+        rustix::fs::chown(&session_cgroup.path.0, Some(owner), None).with_context(|| {
+            format!(
+                "failed to delegate cgroup {}",
+                session_cgroup.path.0.display()
+            )
+        })?;
 
-        Ok(())
+        Ok(session_cgroup)
     }
 
     pub(crate) fn create_session_cgroup(

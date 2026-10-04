@@ -61,10 +61,7 @@ in
       debug = true;
       hooks = {
         systemd.settings = {
-          on_start = {
-            exec = "${pkgs.systemd}/lib/systemd/systemd";
-            args = [ "--user" ];
-          };
+          on_start = "${pkgs.systemd}/lib/systemd/systemd --user";
           restart = {
             on = "Always";
             delay = 5;

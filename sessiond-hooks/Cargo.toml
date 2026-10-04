@@ -8,7 +8,6 @@ repository = "https://tangled.org/r0chd.pl/sessiond"
 version = "0.0.0"
 publish = false
 description = "Launch and supervise per-user session hooks with sessiond"
-readme = "README.md"
 
 [dependencies]
 anyhow = "1.0.103"

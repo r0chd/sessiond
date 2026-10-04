@@ -84,24 +84,14 @@ in
       debug = true;
       hooks = {
         systemd.settings = {
-          on_start = {
-            exec = "${pkgs.systemd}/lib/systemd/systemd";
-            args = [ "--user" ];
-          };
+          on_start = "${pkgs.systemd}/lib/systemd/systemd --user";
           restart = {
             on = "Always";
             delay = 5;
           };
         };
         dinit.settings = {
-          on_start = {
-            exec = lib.getExe' pkgs.dinit "dinit";
-            args = [
-              "--user"
-              "--services-dir"
-              "/etc/dinit.d/user"
-            ];
-          };
+          on_start = "${lib.getExe' pkgs.dinit "dinit"} --user --services-dir /etc/dinit.d/user";
           restart = {
             on = "Failure";
             delay = 5;

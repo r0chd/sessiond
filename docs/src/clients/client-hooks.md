@@ -7,9 +7,7 @@ manager such as `dinit --user` or `runsvdir`.
 ## Configuration
 
 ```toml
-[on_start]
-exec = "/usr/bin/dinit"
-args = ["--user", "--services-dir", "~/.config/dinit.d"]
+on_start = "/usr/bin/dinit"
 
 [restart]
 on = "Failure"

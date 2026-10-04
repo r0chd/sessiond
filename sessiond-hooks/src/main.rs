@@ -15,7 +15,6 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::os::unix::process::CommandExt;
 use std::{env, fs, io, path, process, time};
-use uzers::os::unix::UserExt;
 
 #[derive(Parser)]
 #[command(version, about = "Launch and supervise a per-user session hook")]
@@ -246,21 +245,17 @@ impl hyprwire::Dispatch<session_management_cgroup::SessionManagementCgroup> for 
                 })
             };
             cmd.arg("-c")
-                .arg(
-                    r#"
-                    [ -r /etc/profile ] && . /etc/profile
-                    exec "$@"
-                    "#,
-                )
+                .arg(format!(
+                    "
+                    [ -r /etc/profile ] && . /etc/profile\n{}",
+                    self.config.on_start
+                ))
                 .arg("sessiond-hook");
 
             for (key, value) in envs {
                 cmd.env(key, value);
             }
 
-            self.config.on_start.split(' ').for_each(|arg| {
-                cmd.arg(arg);
-            });
             cmd.stdin(process::Stdio::piped());
 
             let mut child = match cmd.spawn() {

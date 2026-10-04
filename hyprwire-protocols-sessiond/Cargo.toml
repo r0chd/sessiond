@@ -7,7 +7,6 @@ license = "MIT"
 repository.workspace = true
 version = "0.2.0"
 description = "Common Hyprwire protocols for sessiond"
-readme = "README.md"
 
 [dependencies]
 hyprwire = "0.5.1"

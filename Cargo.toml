@@ -35,7 +35,6 @@ edition = "2024"
 license = "GPL-3.0-only"
 repository = "https://tangled.org/r0chd.pl/sessiond"
 description = "session management daemon"
-readme = "README.md"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }

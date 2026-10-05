@@ -40,16 +40,16 @@ Initial public release of `sessiond`.
 **Fixed**
 - `XDG_VTNR` env parsing in pam module
 
-## UNRELEASED
+## v0.3.0 - 2026-10-06
 
 **Added**
 - `get_session` Hyprwire method for the current process; use `get_session_by_id` for ID lookups
-- generic session library `libsession`
 - Save unrecoverable sessions to the state file
+- concept of display session (oldest local user session)
 
 **Changed**
-- Require an explicit leader PID when creating a session; default to Unix credentials when no leader is sent
-- Unset `XDG_SESSION_ID` when the ConsoleKit feature is enabled
+- Require an explicit leader PID when creating a session, default to Unix credentials when no leader is sent
+- Stop exporting `XDG_SESSION_ID` when the ConsoleKit feature is enabled
 
 **Removed**
 - power management in favor of power client

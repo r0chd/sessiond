@@ -4,7 +4,7 @@
 
 Initial public release of `sessiond-hooks`.
 
-## UNRELEASED
+## v0.2.0 - 2026-10-06
 
 ### Fixed
 - Pass hook pid as cgroup leader instead of `sessiond-hooks` pid

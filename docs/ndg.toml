@@ -85,3 +85,11 @@ position = 1003
 [[sidebar.matches]]
 path = "release-notes/sessiond-uaccess.md"
 position = 1004
+
+[[sidebar.matches]]
+path = "release-notes/sessiond-backlight.md"
+position = 1005
+
+[[sidebar.matches]]
+path = "release-notes/sessiond-power.md"
+position = 1006

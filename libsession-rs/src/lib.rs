@@ -17,12 +17,24 @@ impl Session {
         ptr::NonNull::new(libsession_sys::libsession_new()).map(Self)
     }
 
+    /// Retrieves the session ID for the current process.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::Failed` if the backend cannot resolve the session or
+    /// returns a null session ID.
     pub fn id(&self) -> Result<String> {
         let mut id = ptr::null_mut();
         result(unsafe { libsession_sys::libsession_get_session(self.0.as_ptr(), &raw mut id) })?;
         unsafe { take_session_id(id) }
     }
 
+    /// Retrieves the session ID for a process.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::Failed` if `pid` is outside the platform's process ID
+    /// range, the backend cannot resolve the session, or it returns a null ID.
     pub fn id_for_pid(&self, pid: u32) -> Result<String> {
         let pid = pid.try_into().map_err(|_| Error::Failed)?;
         let mut id = ptr::null_mut();
@@ -32,6 +44,11 @@ impl Session {
         unsafe { take_session_id(id) }
     }
 
+    /// Creates a monitor for session changes.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::Failed` if the backend cannot create a monitor.
     pub fn monitor(&mut self) -> Result<Monitor> {
         ptr::NonNull::new(libsession_sys::libsession_monitor_new(self.0.as_ptr()))
             .map(Monitor)

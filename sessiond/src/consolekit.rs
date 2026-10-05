@@ -282,10 +282,6 @@ fn apply_command(connection: Option<&blocking::Connection>, state: &SharedState,
             if should_register && let Some(connection) = connection {
                 register_session(connection, state, id);
             }
-
-            if let Err(err) = write_database(state) {
-                log::warn!(error = err.to_string().as_str(); "failed to write ConsoleKit database");
-            }
         }
         Command::Remove(id) => {
             if let Ok(mut state) = state.write() {
@@ -298,11 +294,11 @@ fn apply_command(connection: Option<&blocking::Connection>, state: &SharedState,
                     log::debug!(session_id = id, error = err.to_string().as_str(); "failed to unregister ConsoleKit session object");
                 }
             }
-
-            if let Err(err) = write_database(state) {
-                log::warn!(error = err.to_string().as_str(); "failed to write ConsoleKit database");
-            }
         }
+    }
+
+    if let Err(err) = write_database(state) {
+        log::warn!(error = err.to_string().as_str(); "failed to write ConsoleKit database");
     }
 }
 

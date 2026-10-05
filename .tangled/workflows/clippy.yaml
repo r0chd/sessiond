@@ -8,36 +8,29 @@ engine: nixery
 
 environment:
   PKG_CONFIG_PATH: /lib/pkgconfig:/share/pkgconfig
+  LIBRARY_PATH: /lib
+  RUSTFLAGS: "-L native=/lib"
+  RUSTDOCFLAGS: "-L native=/lib"
+  LD_LIBRARY_PATH: /lib
 
 dependencies:
   nixpkgs:
     - rustup
     - gcc
-    - linux-pam
     - pkg-config
-    - libudev-zero
-    - acl
+    - linux-pam.out
+    - udev.out
+    - udev.dev
+    - acl.out
+    - acl.dev
 
 steps:
   - name: cargo clippy
     command: |
+      set -eu
       rustup toolchain install stable
       rustup default stable
       rustup component add clippy
+      pkg-config --libs --cflags pam libudev libsystemd libacl
 
-      cargo build -p libsession
-
-      mkdir -p target/pkgconfig
-      sed \
-        -e "s|@PREFIX@|$(pwd)|" \
-        -e "s|@INCLUDE@|$(pwd)/libsession/include|" \
-        -e "s|@LIBDIR@|$(pwd)/target/debug|" \
-        -e 's|@LIBSESSION_VERSION@|0.0.0|' \
-        libsession/libsession.pc.in > target/pkgconfig/libsession.pc
-      export PKG_CONFIG_PATH="$(pwd)/target/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-      pkg-config --libs --cflags libudev
-
-      cargo clippy --workspace --all-features -- -D warnings
-      cargo clippy --manifest-path sessiond-backlight/Cargo.toml -- -D warnings
-      cargo clippy --manifest-path sessiond-hooks/Cargo.toml -- -D warnings
-      cargo clippy --manifest-path sessiond-uaccess/Cargo.toml -- -D warnings
+      cargo clippy --locked --workspace --all-targets --all-features -- -D warnings

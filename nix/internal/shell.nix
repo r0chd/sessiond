@@ -10,7 +10,7 @@ craneLib.devShell {
     inherit (pkgs)
       rust-analyzer-unwrapped
       nixd
-      npins
+      lon
       linux-pam
       pkg-config
       udev

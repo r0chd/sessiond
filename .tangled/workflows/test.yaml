@@ -8,43 +8,29 @@ engine: nixery
 
 environment:
   PKG_CONFIG_PATH: /lib/pkgconfig:/share/pkgconfig
+  LIBRARY_PATH: /lib
+  RUSTFLAGS: "-L native=/lib"
+  RUSTDOCFLAGS: "-L native=/lib"
+  LD_LIBRARY_PATH: /lib
 
 dependencies:
   nixpkgs:
     - rustup
     - gcc
-    - linux-pam
     - pkg-config
-    - nix
-    - libudev-zero
-    - acl
+    - linux-pam.out
+    - udev.out
+    - udev.dev
+    - acl.out
+    - acl.dev
 
 steps:
   - name: cargo test
     command: |
+      set -eu
       rustup toolchain install stable
       rustup default stable
-      pkg-config --libs --cflags libudev
-      cargo build --package sessiond
-      cargo test --package sessiond
-      cargo test --manifest-path sessiond-backlight/Cargo.toml
-      cargo test --manifest-path sessiond-hooks/Cargo.toml
-      cargo test --manifest-path sessiond-uaccess/Cargo.toml
-      cargo test --package sessiond-power
-      cargo test --package sessiond-power-client
-      cargo test --package sessiond-rebootctl
-      cargo test --package sessiond-poweroffctl
-      cargo test --package sessiond-suspendctl
-      cargo test --package sessiond-hibernatectl
+      pkg-config --libs --cflags pam libudev libsystemd libacl
 
-  - name: finix vm tests
-    command: |
-      nix --extra-experimental-features 'nix-command flakes' --option system-features 'benchmark big-parallel nixos-test uid-range kvm' build -L .#checks.x86_64-linux.finix-basic
-      nix --extra-experimental-features 'nix-command flakes' --option system-features 'benchmark big-parallel nixos-test uid-range kvm' build -L .#checks.x86_64-linux.finix-vt-switch
-      nix --extra-experimental-features 'nix-command flakes' --option system-features 'benchmark big-parallel nixos-test uid-range kvm' build -L .#checks.x86_64-linux.finix-termination
-      nix --extra-experimental-features 'nix-command flakes' --option system-features 'benchmark big-parallel nixos-test uid-range kvm' build -L .#checks.x86_64-linux.finix-linger
-      nix --extra-experimental-features 'nix-command flakes' --option system-features 'benchmark big-parallel nixos-test uid-range kvm' build -L .#checks.x86_64-linux.finix-state-recovery
-
-  - name: nixos vm tests
-    command: |
-      nix --extra-experimental-features 'nix-command flakes' --option system-features 'benchmark big-parallel nixos-test uid-range kvm' build -L .#checks.x86_64-linux.nixos-basic
+      cargo test --locked --workspace --exclude libsession-sys --exclude libsession-rs --no-default-features
+      cargo test --locked --workspace --exclude libsession-sys --exclude libsession-rs --all-features

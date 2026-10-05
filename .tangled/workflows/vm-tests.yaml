@@ -1,0 +1,35 @@
+when:
+  - event: ["push", "manual"]
+    branch: ["*"]
+  - event: ["pull_request"]
+    branch: ["master"]
+
+engine: nixery
+
+environment:
+  NIX_CONFIG: |
+    experimental-features = nix-command flakes
+    system-features = benchmark big-parallel nixos-test uid-range kvm
+
+dependencies:
+  nixpkgs:
+    - nix
+
+steps:
+  - name: finix basic
+    command: nix build --no-link -L .#checks.x86_64-linux.finix-basic
+
+  - name: finix vt switch
+    command: nix build --no-link -L .#checks.x86_64-linux.finix-vt-switch
+
+  - name: finix termination
+    command: nix build --no-link -L .#checks.x86_64-linux.finix-termination
+
+  - name: finix linger
+    command: nix build --no-link -L .#checks.x86_64-linux.finix-linger
+
+  - name: finix state recovery
+    command: nix build --no-link -L .#checks.x86_64-linux.finix-state-recovery
+
+  - name: nixos basic
+    command: nix build --no-link -L .#checks.x86_64-linux.nixos-basic

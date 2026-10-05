@@ -3,7 +3,7 @@
     system = builtins.currentSystem;
   },
   craneLib ? import (import ./nix/internal/flake-parse.nix "crane") { inherit pkgs; },
-  finix ? (import ./npins).finix,
+  finix ? (import ./lon.nix).finix,
 }:
 let
   src = pkgs.lib.cleanSourceWith {

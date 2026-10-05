@@ -5,7 +5,8 @@
 }:
 let
   sessiondPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.sessiond;
-  sessiondTest = test:
+  sessiondTest =
+    test:
     pkgs.testers.nixosTest (
       test
       // {

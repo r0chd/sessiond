@@ -20,6 +20,7 @@ struct Libsession {
 }
 
 #[allow(non_camel_case_types)]
+#[repr(C)]
 pub struct libsession_context {
     _private: [u8; 0],
 }
@@ -338,6 +339,14 @@ pub unsafe extern "C" fn libsession_session_is_active(
     LibsessionStatus::Ok
 }
 
+/// Reports whether a session is local.
+///
+/// # Safety
+///
+/// Non-null `ctx` must be a live context with exclusive access for this call.
+/// Non-null `session` must point to a valid NUL-terminated string for this call.
+/// Non-null `ret_local` must point to writable, aligned storage that does not
+/// overlap the context or session string. It is written only on success.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_session_is_local(
     ctx: *mut libsession_context,
@@ -361,6 +370,7 @@ pub unsafe extern "C" fn libsession_session_is_local(
 }
 
 #[allow(non_camel_case_types)]
+#[repr(C)]
 pub struct libsession_monitor {
     _private: [u8; 0],
 }
@@ -411,6 +421,14 @@ pub extern "C" fn libsession_monitor_fd(monitor: *mut libsession_monitor) -> ffi
 
 pub type LibsessionLogFn = Option<unsafe extern "C" fn(LibsessionLogLevel, *const ffi::c_char)>;
 
+/// Sets the context's logging callback, or disables callbacks with `None`.
+///
+/// # Safety
+///
+/// Non-null `ctx` must be a live context on the thread that created it.
+/// The callback must remain callable until replaced or the context is freed.
+/// It must not unwind, access the context reentrantly, or retain the message
+/// pointer, which is valid only for the duration of the callback.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_set_log_fn(
     ctx: *mut libsession_context,
@@ -438,6 +456,12 @@ pub enum LibsessionLogLevel {
     Trace = 5,
 }
 
+/// Sets the context's logging level.
+///
+/// # Safety
+///
+/// Non-null `ctx` must be a live context on the thread that created it and
+/// remain valid for this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_set_log_level(
     ctx: *mut libsession_context,
@@ -453,6 +477,12 @@ pub unsafe extern "C" fn libsession_set_log_level(
     LibsessionStatus::Ok
 }
 
+/// Retrieves the context's logging level.
+///
+/// # Safety
+///
+/// Non-null `ctx` must be a live context on the thread that created it and
+/// remain valid for this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_get_log_level(
     ctx: *const libsession_context,

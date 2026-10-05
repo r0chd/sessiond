@@ -17,7 +17,7 @@
         "aarch64-linux"
       ];
 
-      sources = import ./npins;
+      sources = import ./lon.nix;
 
       pkgsFor =
         system:
@@ -30,8 +30,8 @@
 
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f (pkgsFor system));
 
-      finix = (import sources.finix.outPath) // {
-        inherit (sources.finix) outPath;
+      finix = (import sources.finix) // {
+        outPath = sources.finix;
       };
     in
     {

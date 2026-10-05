@@ -4,7 +4,6 @@ use std::{ffi, ptr, result};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
-    Unsupported,
     Failed,
 }
 
@@ -78,7 +77,6 @@ unsafe fn take_session_id(id: *mut ffi::c_char) -> Result<String> {
 const fn result(status: libsession_sys::LibsessionStatus) -> Result<()> {
     match status {
         libsession_sys::LibsessionStatus::Ok => Ok(()),
-        libsession_sys::LibsessionStatus::Unsupported => Err(Error::Unsupported),
         libsession_sys::LibsessionStatus::Failed => Err(Error::Failed),
     }
 }

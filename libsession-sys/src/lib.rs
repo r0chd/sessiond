@@ -27,8 +27,7 @@ pub struct libsession_context {
 #[repr(C)]
 pub enum LibsessionStatus {
     Ok = 0,
-    Unsupported = 1,
-    Failed = 2,
+    Failed = 1,
 }
 
 #[repr(C)]

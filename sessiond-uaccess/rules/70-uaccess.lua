@@ -1,3 +1,12 @@
+-- Devices tagged for access by active local sessions
+device {
+  access = "rw",
+  match = function(dev)
+    local tags = dev:property("CURRENT_TAGS") or ""
+    return tags:find(":uaccess:", 1, true) ~= nil
+  end,
+}
+
 -- Sound devices
 device {
   access = "rw",

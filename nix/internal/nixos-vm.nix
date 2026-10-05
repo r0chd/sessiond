@@ -69,6 +69,9 @@ in
         };
       };
     };
+    udev.extraRules = ''
+      SUBSYSTEM=="mem", KERNEL=="null", TAG+="uaccess"
+    '';
   };
 
   security.pam.services.login.rules.session.sessiond = {

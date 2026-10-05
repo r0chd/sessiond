@@ -6,7 +6,9 @@ use calloop::{generic, timer};
 use clap::{Parser, ValueEnum};
 use hyprwire::client;
 use hyprwire_protocols_sessiond::client::session_core::v1::session_core_v1;
-use hyprwire_protocols_sessiond::client::session_core::v1::session_core_v1::session_core_manager;
+use hyprwire_protocols_sessiond::client::session_core::v1::session_core_v1::{
+    session_core_manager, session_core_user,
+};
 use hyprwire_protocols_sessiond::client::session_management::v2::session_management_v2;
 use hyprwire_protocols_sessiond::client::session_management::v2::session_management_v2::{
     session_management_cgroup, session_management_session, session_manager,
@@ -14,7 +16,7 @@ use hyprwire_protocols_sessiond::client::session_management::v2::session_managem
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::os::unix::process::CommandExt;
-use std::{env, fs, io, path, process, time};
+use std::{env, fs, io, mem, path, process, time};
 
 #[derive(Parser)]
 #[command(version, about = "Launch and supervise a per-user session hook")]
@@ -37,7 +39,10 @@ enum LogTarget {
 
 struct Hook {
     uid: u32,
+    user: session_core_user::SessionCoreUser,
+    enabled: bool,
     restarts: u32,
+    restart: Option<calloop::RegistrationToken>,
     state: HookState,
 }
 
@@ -54,6 +59,9 @@ enum HookState {
     Running {
         _object: session_management_session::SessionManagementSession,
         _cgroup_object: session_management_cgroup::SessionManagementCgroup,
+        child: process::Child,
+    },
+    Stopping {
         child: process::Child,
     },
 }
@@ -90,10 +98,98 @@ struct SessiondHooks {
     hooks: Vec<Hook>,
 }
 
+impl SessiondHooks {
+    fn start_hook(&mut self, uid: u32) {
+        let Some(hook) = self.hooks.iter_mut().find(|hook| hook.uid == uid) else {
+            return;
+        };
+        if !hook.enabled || !matches!(hook.state, HookState::Stopped) {
+            return;
+        }
+        if let Some(session_manager) = self.session_manager.as_ref()
+            && let Some(session) = session_manager.send_create_session::<Self>(uid)
+        {
+            log::info!(uid; "creating user hook session");
+            session.send_class(session_management_v2::SessionClass::Manager);
+            hook.state = HookState::WaitingForEnv { object: session };
+        }
+    }
+
+    fn stop_hook(&mut self, uid: u32) {
+        let Some(hook) = self.hooks.iter_mut().find(|hook| hook.uid == uid) else {
+            return;
+        };
+        if let Some(restart) = hook.restart.take() {
+            self.loop_handle.remove(restart);
+        }
+
+        match mem::replace(&mut hook.state, HookState::Stopped) {
+            HookState::Running { child, .. } => {
+                log::info!(uid; "stopping user hook session");
+                hook.state = HookState::Stopping { child };
+            }
+            HookState::Stopping { child } => {
+                hook.state = HookState::Stopping { child };
+            }
+            _ => {}
+        }
+    }
+
+    fn hook_exited(&mut self, uid: u32, status: process::ExitStatus) {
+        let Some(hook) = self.hooks.iter_mut().find(|hook| hook.uid == uid) else {
+            return;
+        };
+        let stopping = matches!(hook.state, HookState::Stopping { .. });
+        hook.state = HookState::Stopped;
+        if stopping {
+            self.start_hook(uid);
+            return;
+        }
+
+        if !hook.enabled
+            || matches!(
+                (self.config.restart.on, status.success()),
+                (config::RestartPolicy::Never, _) | (config::RestartPolicy::Failure, true)
+            )
+        {
+            return;
+        }
+
+        let restart_delay = self.config.restart.delay;
+        let restart = timer::Timer::from_duration(time::Duration::from_secs(restart_delay));
+        match self
+            .loop_handle
+            .insert_source(restart, move |_, (), state| {
+                if let Some(hook) = state.hooks.iter_mut().find(|hook| hook.uid == uid)
+                    && hook.restart.take().is_some()
+                    && hook.enabled
+                    && matches!(hook.state, HookState::Stopped)
+                {
+                    hook.restarts += 1;
+                    log::info!(
+                        uid,
+                        delay_seconds = restart_delay,
+                        failures = hook.restarts;
+                        "restarting hook"
+                    );
+                    state.start_hook(uid);
+                }
+                timer::TimeoutAction::Drop
+            }) {
+            Ok(token) => hook.restart = Some(token),
+            Err(error) => log::error!(
+                uid,
+                error:% = error;
+                "failed to schedule restart"
+            ),
+        }
+    }
+}
+
 impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for SessiondHooks {
     fn event(
         &mut self,
-        _object: &session_core_manager::SessionCoreManager,
+        object: &session_core_manager::SessionCoreManager,
         event: <session_core_manager::SessionCoreManager as hyprwire::Object>::Event<'_>,
     ) {
         if let session_core_manager::Event::UserAdded { uid } = event
@@ -103,19 +199,55 @@ impl hyprwire::Dispatch<session_core_manager::SessionCoreManager> for SessiondHo
             if !self.hooks.iter().any(|hook| hook.uid == uid)
                 && uid >= uid_min
                 && uid <= uid_max
-                && let Some(session_manager) = self.session_manager.as_ref()
-                && let Some(session) = session_manager.send_create_session::<Self>(uid)
+                && let Some(user) = object.send_get_user::<Self>(uid)
             {
-                log::info!(uid; "creating user hook session");
-
-                session.send_class(session_management_v2::SessionClass::Manager);
-
                 self.hooks.push(Hook {
                     uid,
-                    state: HookState::WaitingForEnv { object: session },
+                    user,
+                    enabled: false,
+                    state: HookState::Stopped,
                     restarts: 0,
+                    restart: None,
                 });
             }
+        }
+    }
+}
+
+impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for SessiondHooks {
+    fn event(
+        &mut self,
+        object: &session_core_user::SessionCoreUser,
+        event: <session_core_user::SessionCoreUser as hyprwire::Object>::Event<'_>,
+    ) {
+        let Some(hook) = self.hooks.iter_mut().find(|hook| &hook.user == object) else {
+            return;
+        };
+
+        match event {
+            session_core_user::Event::State { state } => {
+                let uid = hook.uid;
+                match state {
+                    session_core_v1::UserState::Offline => {
+                        self.stop_hook(uid);
+                    }
+                    session_core_v1::UserState::Online
+                    | session_core_v1::UserState::Active
+                    | session_core_v1::UserState::Lingering
+                        if !hook.enabled =>
+                    {
+                        hook.enabled = true;
+                        self.start_hook(uid);
+                    }
+                    _ => {}
+                }
+            }
+            session_core_user::Event::Failed => {
+                let uid = hook.uid;
+                hook.enabled = false;
+                self.stop_hook(uid);
+            }
+            _ => {}
         }
     }
 }
@@ -304,63 +436,16 @@ impl hyprwire::Dispatch<session_management_cgroup::SessionManagementCgroup> for 
                 let Some(hook) = state.hooks.iter_mut().find(|hook| hook.uid == uid) else {
                     return Ok(calloop::PostAction::Remove);
                 };
-                let HookState::Running { child, .. } = &mut hook.state else {
-                    return Ok(calloop::PostAction::Reregister);
+                let (HookState::Running { child, .. } | HookState::Stopping { child }) =
+                    &mut hook.state
+                else {
+                    return Ok(calloop::PostAction::Remove);
                 };
                 let Ok(Some(status)) = child.try_wait() else {
                     return Ok(calloop::PostAction::Reregister);
                 };
 
-                match (state.config.restart.on, status.success()) {
-                    (config::RestartPolicy::Never, _) | (config::RestartPolicy::Failure, true) => {
-                        hook.state = HookState::Stopped;
-                    }
-                    (config::RestartPolicy::Always, _)
-                    | (config::RestartPolicy::Failure, false) => {
-                        let restart_delay = state.config.restart.delay;
-                        let restart =
-                            timer::Timer::from_duration(time::Duration::from_secs(restart_delay));
-                        if let Err(error) =
-                            state
-                                .loop_handle
-                                .insert_source(restart, move |_, (), state| {
-                                    if let Some(hook) =
-                                        state.hooks.iter_mut().find(|hook| hook.uid == uid)
-                                    {
-                                        hook.restarts += 1;
-
-                                        log::info!(
-                                            uid,
-                                            delay_seconds = restart_delay,
-                                            failures = hook.restarts;
-                                            "restarting hook"
-                                        );
-
-                                        if let Some(session_manager) =
-                                            state.session_manager.as_ref()
-                                            && let Some(session) =
-                                                session_manager.send_create_session::<Self>(uid)
-                                        {
-                                            session.send_class(
-                                                session_management_v2::SessionClass::Manager,
-                                            );
-                                            hook.state =
-                                                HookState::WaitingForEnv { object: session };
-                                        }
-                                    }
-
-                                    timer::TimeoutAction::Drop
-                                })
-                        {
-                            log::error!(
-                                uid,
-                                error:% = error;
-                                "failed to schedule restart"
-                            );
-                        }
-                    }
-                }
-
+                state.hook_exited(uid, status);
                 Ok(calloop::PostAction::Remove)
             }) {
                 log::error!(

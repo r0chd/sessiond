@@ -202,7 +202,10 @@ fn sessions_allow(
     ready: bool,
     mut user_uids: impl Iterator<Item = u32>,
 ) -> bool {
-    is_root || (ready && user_uids.all(|owner| owner == uid))
+    is_root
+        || (ready
+            && user_uids.next().is_some_and(|owner| owner == uid)
+            && user_uids.all(|owner| owner == uid))
 }
 
 const fn inhibitor_blocks(

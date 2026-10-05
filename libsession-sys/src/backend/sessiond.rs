@@ -111,7 +111,7 @@ impl super::Backend for Sessiond {
     fn is_local_session(&self, session_id: &ffi::CStr) -> Option<bool> {
         let session = self.state.sessions.get(session_id.to_str().ok()?)?;
 
-        Some(session.remote_host.is_some())
+        Some(session.remote_host.is_none())
     }
 
     fn get_monitor(&self) -> Option<Box<dyn super::BackendMonitor>> {

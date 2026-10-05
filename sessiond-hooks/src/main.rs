@@ -229,6 +229,7 @@ impl hyprwire::Dispatch<session_core_user::SessionCoreUser> for SessiondHooks {
                 let uid = hook.uid;
                 match state {
                     session_core_v1::UserState::Offline => {
+                        hook.enabled = false;
                         self.stop_hook(uid);
                     }
                     session_core_v1::UserState::Online

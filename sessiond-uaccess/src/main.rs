@@ -203,7 +203,6 @@ fn reconcile_devices(
             }
         };
 
-        let started = time::Instant::now();
         let Some(devnode) = device.device.devnode() else {
             log::debug!(syspath:% = syspath.display(); "skipping device without devnode");
             continue;
@@ -291,8 +290,7 @@ fn reconcile_devices(
 
         log::debug!(
             syspath:% = syspath.display(),
-            devnode:% = devnode.display(),
-            duration:? = started.elapsed();
+            devnode:% = devnode.display();
             "reconciled device"
         );
     }
@@ -490,28 +488,14 @@ fn run(args: Args, startup_started: time::Instant) -> anyhow::Result<()> {
         )
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    let wakeup_started = time::Instant::now();
     event_loop.get_signal().wakeup();
     log::debug!(
         duration:? = startup_started.elapsed();
         "queued initial device reconciliation wakeup"
     );
 
-    let mut first_schedule = true;
     event_loop.run(None, &mut sessiond_uaccess, move |state| {
-        let reconciliation_started = time::Instant::now();
         state.reconcile.run(&mut state.world);
-        let reconciliation_duration = reconciliation_started.elapsed();
-
-        if first_schedule {
-            first_schedule = false;
-            log::debug!(
-                startup_duration:? = startup_started.elapsed(),
-                wakeup_duration:? = wakeup_started.elapsed(),
-                reconciliation_duration:? = reconciliation_duration;
-                "completed startup reconciliation"
-            );
-        }
     })?;
 
     Ok(())

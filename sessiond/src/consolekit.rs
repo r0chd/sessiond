@@ -432,10 +432,7 @@ fn append_user_groups(database: &mut String, sessions: &[SessionInfo]) {
 }
 
 pub const fn is_active(session: &SessionInfo) -> bool {
-    matches!(
-        session.state,
-        session_core_v1::SessionState::Active | session_core_v1::SessionState::Online
-    )
+    matches!(session.state, session_core_v1::SessionState::Active)
 }
 
 pub const fn key_file_bool(value: bool) -> &'static str {

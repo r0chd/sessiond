@@ -1,7 +1,7 @@
 use crate::logging;
 use sessiond_state::monitor;
 use std::os::fd::AsRawFd;
-use std::{ffi, fs, path, rc};
+use std::{ffi, fs, io, path, rc};
 
 pub struct Sessiond {
     logger: rc::Rc<logging::Logger>,
@@ -39,13 +39,13 @@ impl super::Backend for Sessiond {
         })
     }
 
-    fn get_owner_uid(&mut self, pid: u32) -> Option<u32> {
+    fn get_owner_uid(&mut self, pid: u32) -> super::Result<u32> {
         let path = path::PathBuf::from("/proc")
             .join(pid.to_string())
             .join("loginuid");
 
-        let owner_uid = fs::read_to_string(path).ok()?;
-        owner_uid.trim().parse().ok()
+        let owner_uid = fs::read_to_string(path)?;
+        owner_uid.trim().parse().map_err(super::Error::ParseUid)
     }
 
     fn get_uid(&mut self, session_id: &ffi::CStr) -> Option<u32> {
@@ -93,19 +93,26 @@ impl super::Backend for Sessiond {
     fn get_session_state(
         &mut self,
         session_id: &ffi::CStr,
-    ) -> Option<crate::LibsessionSessionState> {
-        if self.monitor.has_changed().ok()? {
-            self.state.try_read().ok()?;
+    ) -> super::Result<crate::LibsessionSessionState> {
+        if self.monitor.has_changed()? {
+            self.state.try_read()?;
         }
 
-        let session = self.state.sessions.get(session_id.to_str().ok()?)?;
+        let session_id = session_id
+            .to_str()
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+        let session = self
+            .state
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "session not found"))?;
 
         match session.state {
-            sessiond_state::SessionState::Online => Some(crate::LibsessionSessionState::Online),
-            sessiond_state::SessionState::Closing => Some(crate::LibsessionSessionState::Closing),
-            sessiond_state::SessionState::Opening => Some(crate::LibsessionSessionState::Opening),
-            sessiond_state::SessionState::Active => Some(crate::LibsessionSessionState::Active),
-            sessiond_state::SessionState::Unknown => Some(crate::LibsessionSessionState::Unkown),
+            sessiond_state::SessionState::Online => Ok(crate::LibsessionSessionState::Online),
+            sessiond_state::SessionState::Closing => Ok(crate::LibsessionSessionState::Closing),
+            sessiond_state::SessionState::Opening => Ok(crate::LibsessionSessionState::Opening),
+            sessiond_state::SessionState::Active => Ok(crate::LibsessionSessionState::Active),
+            sessiond_state::SessionState::Unknown => Ok(crate::LibsessionSessionState::Unkown),
         }
     }
 

@@ -7,11 +7,27 @@ pub mod logind;
 #[cfg(feature = "sessiond")]
 pub mod sessiond;
 
-use std::ffi;
 use std::os::fd;
+use std::{ffi, io, num, result};
+
+pub type Result<T> = result::Result<T, Error>;
+
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum Error {
+    #[error("backend I/O failed: {0}")]
+    Io(#[from] io::Error),
+
+    #[error("invalid owner UID: {0}")]
+    ParseUid(#[from] num::ParseIntError),
+
+    #[cfg(feature = "consolekit")]
+    #[error("D-Bus operation failed: {0}")]
+    Dbus(#[from] zbus::Error),
+}
 
 pub trait Backend {
-    fn get_owner_uid(&mut self, pid: u32) -> Option<u32>;
+    fn get_owner_uid(&mut self, pid: u32) -> Result<u32>;
 
     fn get_display(&mut self, uid: u32) -> Option<String>;
 
@@ -24,7 +40,7 @@ pub trait Backend {
     fn get_session_state(
         &mut self,
         session_id: &ffi::CStr,
-    ) -> Option<crate::LibsessionSessionState>;
+    ) -> Result<crate::LibsessionSessionState>;
 
     fn is_local_session(&self, session_id: &ffi::CStr) -> Option<bool>;
 

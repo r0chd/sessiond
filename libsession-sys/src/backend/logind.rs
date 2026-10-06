@@ -1,7 +1,7 @@
 use crate::logging;
 use libsystemd_sys::login;
 use std::os::fd;
-use std::{ffi, ptr, rc};
+use std::{ffi, io, ptr, rc};
 
 fn sd_string(value: *mut ffi::c_char) -> Option<String> {
     let value = ptr::NonNull::new(value)?;
@@ -11,6 +11,7 @@ fn sd_string(value: *mut ffi::c_char) -> Option<String> {
     unsafe { libc::free(value.as_ptr().cast()) };
     Some(result)
 }
+
 pub struct Logind {
     logger: rc::Rc<logging::Logger>,
 }
@@ -40,10 +41,15 @@ impl super::Backend for Logind {
         (result >= 0).then_some(result == 0)
     }
 
-    fn get_owner_uid(&mut self, pid: u32) -> Option<u32> {
+    fn get_owner_uid(&mut self, pid: u32) -> super::Result<u32> {
+        let pid = libc::pid_t::try_from(pid)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "PID is out of range"))?;
         let mut uid = 0;
-        let result = unsafe { login::sd_pid_get_owner_uid(pid.cast_signed(), &raw mut uid) };
-        (result >= 0).then_some(uid)
+        let result = unsafe { login::sd_pid_get_owner_uid(pid, &raw mut uid) };
+        if result < 0 {
+            return Err(io::Error::from_raw_os_error(-result).into());
+        }
+        Ok(uid)
     }
 
     fn get_state(&mut self, uid: u32) -> Option<crate::LibsessionUserState> {
@@ -84,11 +90,22 @@ impl super::Backend for Logind {
     fn get_session_state(
         &mut self,
         session_id: &ffi::CStr,
-    ) -> Option<crate::LibsessionSessionState> {
+    ) -> super::Result<crate::LibsessionSessionState> {
         let mut state = ptr::null_mut();
         let result = unsafe { login::sd_session_get_state(session_id.as_ptr(), &raw mut state) };
-        let state = (result >= 0).then(|| sd_string(state))??;
-        Some(match state.as_str() {
+
+        if result < 0 {
+            return Err(io::Error::from_raw_os_error(-result).into());
+        }
+
+        let state = sd_string(state).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "logind returned a null session state",
+            )
+        })?;
+
+        Ok(match state.as_str() {
             "online" => crate::LibsessionSessionState::Online,
             "active" => crate::LibsessionSessionState::Active,
             "closing" => crate::LibsessionSessionState::Closing,

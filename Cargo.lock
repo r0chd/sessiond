@@ -1052,6 +1052,7 @@ dependencies = [
  "libc",
  "libsystemd-sys",
  "sessiond-state",
+ "thiserror",
  "toml",
  "zbus",
 ]

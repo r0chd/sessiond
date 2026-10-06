@@ -2,14 +2,9 @@ use std::os::fd;
 use std::os::fd::{AsFd, AsRawFd};
 use std::{ffi, ptr, result};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Error {
-    Failed,
-}
+type Result<T> = result::Result<T, libsession_sys::Error>;
 
-type Result<T> = result::Result<T, Error>;
-
-pub struct Session(ptr::NonNull<libsession_sys::libsession_context>);
+pub struct Session(ptr::NonNull<libsession_sys::LibsessionContext>);
 
 impl Session {
     #[must_use]
@@ -21,8 +16,8 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// Returns `Error::Failed` if the backend cannot resolve the session or
-    /// returns a null session ID.
+    /// Returns `Error::NotFound` if the backend cannot resolve the session,
+    /// or `Error::InternalError` if it returns a null session ID.
     pub fn id(&self) -> Result<String> {
         let mut id = ptr::null_mut();
         result(unsafe { libsession_sys::libsession_get_session(self.0.as_ptr(), &raw mut id) })?;
@@ -33,10 +28,13 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// Returns `Error::Failed` if `pid` is outside the platform's process ID
-    /// range, the backend cannot resolve the session, or it returns a null ID.
+    /// Returns `Error::InvalidArgument` if `pid` is outside the platform's
+    /// process ID range, `Error::NotFound` if the backend cannot resolve the
+    /// session, or `Error::InternalError` if it returns a null ID.
     pub fn id_for_pid(&self, pid: u32) -> Result<String> {
-        let pid = pid.try_into().map_err(|_| Error::Failed)?;
+        let pid = pid
+            .try_into()
+            .map_err(|_| libsession_sys::Error::InvalidArgument)?;
         let mut id = ptr::null_mut();
         result(unsafe {
             libsession_sys::libsession_pid_get_session(self.0.as_ptr(), pid, &raw mut id)
@@ -48,11 +46,11 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// Returns `Error::Failed` if the backend cannot create a monitor.
+    /// Returns `Error::Unavailable` if the backend cannot create a monitor.
     pub fn monitor(&mut self) -> Result<Monitor> {
         ptr::NonNull::new(libsession_sys::libsession_monitor_new(self.0.as_ptr()))
             .map(Monitor)
-            .ok_or(Error::Failed)
+            .ok_or(libsession_sys::Error::Unavailable)
     }
 }
 
@@ -83,7 +81,7 @@ impl Drop for Monitor {
 }
 
 unsafe fn take_session_id(id: *mut ffi::c_char) -> Result<String> {
-    let id = ptr::NonNull::new(id).ok_or(Error::Failed)?;
+    let id = ptr::NonNull::new(id).ok_or(libsession_sys::Error::InternalError)?;
     let owned = unsafe { ffi::CStr::from_ptr(id.as_ptr()) }
         .to_string_lossy()
         .into_owned();
@@ -94,7 +92,20 @@ unsafe fn take_session_id(id: *mut ffi::c_char) -> Result<String> {
 const fn result(status: libsession_sys::LibsessionStatus) -> Result<()> {
     match status {
         libsession_sys::LibsessionStatus::Ok => Ok(()),
-        libsession_sys::LibsessionStatus::Failed => Err(Error::Failed),
+        libsession_sys::LibsessionStatus::InvalidArgument => {
+            Err(libsession_sys::Error::InvalidArgument)
+        }
+        libsession_sys::LibsessionStatus::NotFound => Err(libsession_sys::Error::NotFound),
+        libsession_sys::LibsessionStatus::InternalError => {
+            Err(libsession_sys::Error::InternalError)
+        }
+        libsession_sys::LibsessionStatus::PermissionDenied => {
+            Err(libsession_sys::Error::PermissionDenied)
+        }
+        libsession_sys::LibsessionStatus::Unavailable => Err(libsession_sys::Error::Unavailable),
+        libsession_sys::LibsessionStatus::InvalidData => Err(libsession_sys::Error::InvalidData),
+        libsession_sys::LibsessionStatus::IoError => Err(libsession_sys::Error::IoError),
+        libsession_sys::LibsessionStatus::DbusError => Err(libsession_sys::Error::DbusError),
     }
 }
 

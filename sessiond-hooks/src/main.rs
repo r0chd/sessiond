@@ -551,6 +551,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         .handle()
         .insert_source(source, move |_, _, state| {
             eq.dispatch_events(state, false).map_err(io::Error::other)?;
+
             Ok(calloop::PostAction::Continue)
         })?;
 

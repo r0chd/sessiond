@@ -25,6 +25,7 @@ LibsessionLogLevel = "libsession_log_level"
 LibsessionUserState = "libsession_user_state"
 LibsessionSessionState = "libsession_session_state"
 LibsessionLogFn = "libsession_log_fn"
+LibsessionContext = "libsession_context"
 
 [enum]
 rename_variants = "ScreamingSnakeCase"

@@ -1,5 +1,5 @@
 use crate::logging;
-use std::{ffi, path, rc};
+use std::{ffi, io, path, rc};
 use zbus::{blocking, zvariant};
 
 #[zbus::proxy(
@@ -59,14 +59,12 @@ impl super::Backend for ConsoleKit {
         )?))
     }
 
-    fn get_owner_uid(&mut self, pid: u32) -> Option<u32> {
-        let path = self.manager.get_session_for_unix_process(pid).ok()?;
+    fn get_owner_uid(&mut self, pid: u32) -> super::Result<u32> {
+        let path = self.manager.get_session_for_unix_process(pid)?;
         let session = ConsoleKitSessionProxyBlocking::builder(&self.connection)
-            .path(path)
-            .ok()?
-            .build()
-            .ok()?;
-        session.get_unix_user().ok()
+            .path(path)?
+            .build()?;
+        session.get_unix_user().map_err(super::Error::Dbus)
     }
 
     fn get_state(&mut self, uid: u32) -> Option<crate::LibsessionUserState> {
@@ -127,23 +125,22 @@ impl super::Backend for ConsoleKit {
     fn get_session_state(
         &mut self,
         session_id: &ffi::CStr,
-    ) -> Option<crate::LibsessionSessionState> {
+    ) -> super::Result<crate::LibsessionSessionState> {
         let session_id = session_id.to_string_lossy();
-        for path in self.manager.get_sessions().ok()? {
+        for path in self.manager.get_sessions()? {
             let session = ConsoleKitSessionProxyBlocking::builder(&self.connection)
-                .path(path)
-                .ok()?
-                .build()
-                .ok()?;
-            if session.get_id().ok()?.as_str() == session_id {
-                return Some(if session.is_active().ok()? {
+                .path(path)?
+                .build()?;
+            if session.get_id()?.as_str() == session_id {
+                return Ok(if session.is_active()? {
                     crate::LibsessionSessionState::Active
                 } else {
                     crate::LibsessionSessionState::Online
                 });
             }
         }
-        None
+
+        Err(io::Error::new(io::ErrorKind::NotFound, "session not found").into())
     }
 
     fn is_local_session(&self, session_id: &ffi::CStr) -> Option<bool> {

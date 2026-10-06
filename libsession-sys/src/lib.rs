@@ -1,5 +1,6 @@
 mod backend;
 mod logging;
+mod status;
 
 #[cfg(not(any(feature = "sessiond", feature = "logind", feature = "consolekit")))]
 compile_error!(
@@ -19,16 +20,42 @@ struct Libsession {
     logger: rc::Rc<logging::Logger>,
 }
 
-#[allow(non_camel_case_types)]
 #[repr(C)]
-pub struct libsession_context {
+pub struct LibsessionContext {
     _private: [u8; 0],
 }
 
 #[repr(C)]
 pub enum LibsessionStatus {
     Ok = 0,
-    Failed = 1,
+    InvalidArgument = 1,
+    NotFound = 2,
+    InternalError = 3,
+    PermissionDenied = 4,
+    Unavailable = 5,
+    InvalidData = 6,
+    IoError = 7,
+    DbusError = 8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum Error {
+    #[error("invalid argument")]
+    InvalidArgument,
+    #[error("not found")]
+    NotFound,
+    #[error("internal error")]
+    InternalError,
+    #[error("permission denied")]
+    PermissionDenied,
+    #[error("unavailable")]
+    Unavailable,
+    #[error("invalid data")]
+    InvalidData,
+    #[error("I/O error")]
+    IoError,
+    #[error("D-Bus error")]
+    DbusError,
 }
 
 #[repr(C)]
@@ -54,7 +81,7 @@ pub enum LibsessionSessionState {
 
 #[unsafe(no_mangle)]
 #[must_use]
-pub extern "C" fn libsession_new() -> *mut libsession_context {
+pub extern "C" fn libsession_new() -> *mut LibsessionContext {
     let logger = rc::Rc::new(logging::Logger::default());
     if let Ok(backend) = env::var("LIBSESSION_BACKEND") {
         match backend.as_str() {
@@ -65,7 +92,7 @@ pub extern "C" fn libsession_new() -> *mut libsession_context {
                         backend: Box::new(sessiond),
                         logger,
                     }))
-                    .cast::<libsession_context>();
+                    .cast::<LibsessionContext>();
                 }
             }
             #[cfg(feature = "logind")]
@@ -75,7 +102,7 @@ pub extern "C" fn libsession_new() -> *mut libsession_context {
                         backend: Box::new(logind),
                         logger,
                     }))
-                    .cast::<libsession_context>();
+                    .cast::<LibsessionContext>();
                 }
             }
             #[cfg(feature = "consolekit")]
@@ -87,7 +114,7 @@ pub extern "C" fn libsession_new() -> *mut libsession_context {
                         backend: Box::new(consolekit),
                         logger,
                     }))
-                    .cast::<libsession_context>();
+                    .cast::<LibsessionContext>();
                 }
             }
             _ => {}
@@ -100,7 +127,7 @@ pub extern "C" fn libsession_new() -> *mut libsession_context {
             backend: Box::new(sessiond),
             logger,
         }))
-        .cast::<libsession_context>();
+        .cast::<LibsessionContext>();
     }
     #[cfg(feature = "logind")]
     if let Some(logind) = logind::Logind::try_connect(rc::Rc::clone(&logger)) {
@@ -108,7 +135,7 @@ pub extern "C" fn libsession_new() -> *mut libsession_context {
             backend: Box::new(logind),
             logger,
         }))
-        .cast::<libsession_context>();
+        .cast::<LibsessionContext>();
     }
     #[cfg(feature = "consolekit")]
     if let Some(consolekit) = consolekit::ConsoleKit::try_connect(rc::Rc::clone(&logger)) {
@@ -116,14 +143,14 @@ pub extern "C" fn libsession_new() -> *mut libsession_context {
             backend: Box::new(consolekit),
             logger,
         }))
-        .cast::<libsession_context>();
+        .cast::<LibsessionContext>();
     }
 
     ptr::null_mut()
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn libsession_free(ctx: *mut libsession_context) {
+pub extern "C" fn libsession_free(ctx: *mut LibsessionContext) {
     if ctx.is_null() {
         return;
     }
@@ -141,28 +168,29 @@ pub extern "C" fn libsession_free(ctx: *mut libsession_context) {
 /// resulting string with `libsession_session_id_free`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_pid_get_session(
-    ctx: *mut libsession_context,
+    ctx: *mut LibsessionContext,
     pid: libc::pid_t,
     ret_session: *mut *mut ffi::c_char,
 ) -> LibsessionStatus {
     if ctx.is_null() || ret_session.is_null() {
-        return LibsessionStatus::Failed;
+        return LibsessionStatus::InvalidArgument;
     }
 
     let libsession = unsafe { &mut *ctx.cast::<Libsession>() };
 
     let Ok(pid) = pid.try_into() else {
-        return LibsessionStatus::Failed;
+        return LibsessionStatus::InvalidArgument;
     };
     let Some(session_id) = libsession.backend.get_session_id(pid) else {
-        return LibsessionStatus::Failed;
+        return LibsessionStatus::NotFound;
     };
 
     let Ok(session_id) = ffi::CString::new(session_id) else {
-        return LibsessionStatus::Failed;
+        return LibsessionStatus::InternalError;
     };
 
     unsafe { ret_session.write(session_id.into_raw()) };
+
     LibsessionStatus::Ok
 }
 
@@ -173,7 +201,7 @@ pub unsafe extern "C" fn libsession_pid_get_session(
 /// The pointer requirements of `libsession_pid_get_session` apply.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_get_session(
-    ctx: *mut libsession_context,
+    ctx: *mut LibsessionContext,
     ret_session: *mut *mut ffi::c_char,
 ) -> LibsessionStatus {
     let pid = process::id();
@@ -181,7 +209,7 @@ pub unsafe extern "C" fn libsession_get_session(
         return unsafe { libsession_pid_get_session(ctx, pid, ret_session) };
     }
 
-    LibsessionStatus::Failed
+    LibsessionStatus::InvalidArgument
 }
 
 /// Frees a session ID returned by a session ID or display lookup.
@@ -204,34 +232,40 @@ pub unsafe extern "C" fn libsession_session_id_free(id: *mut ffi::c_char) {
 /// # Safety
 /// `ctx` must be a valid context and `ret_uid` must point to writable storage.
 pub unsafe extern "C" fn libsession_pid_get_owner_uid(
-    ctx: *mut libsession_context,
+    ctx: *mut LibsessionContext,
     pid: libc::pid_t,
     ret_uid: *mut libc::uid_t,
 ) -> LibsessionStatus {
     if ctx.is_null() || pid < 0 || ret_uid.is_null() {
-        return LibsessionStatus::Failed;
+        return LibsessionStatus::InvalidArgument;
     }
 
     let libsession = unsafe { &mut *ctx.cast::<Libsession>() };
 
-    if let Some(owner_uid) = libsession.backend.get_owner_uid(pid.cast_unsigned()) {
-        unsafe { ret_uid.write(owner_uid) };
-        return LibsessionStatus::Ok;
+    match libsession.backend.get_owner_uid(pid.cast_unsigned()) {
+        Ok(owner_uid) => {
+            unsafe { ret_uid.write(owner_uid) };
+            LibsessionStatus::Ok
+        }
+        Err(error) => {
+            libsession.logger.log(LibsessionLogLevel::Error, || {
+                format!("failed to get owner UID for process {pid}: {error}")
+            });
+            LibsessionStatus::from(&error)
+        }
     }
-
-    LibsessionStatus::Failed
 }
 
 #[unsafe(no_mangle)]
 /// # Safety
 /// `ctx` must be valid and `ret_session` must point to writable storage.
 pub unsafe extern "C" fn libsession_uid_get_display(
-    ctx: *mut libsession_context,
+    ctx: *mut LibsessionContext,
     uid: libc::uid_t,
     ret_session: *mut *mut ffi::c_char,
 ) -> LibsessionStatus {
     if ctx.is_null() || ret_session.is_null() {
-        return LibsessionStatus::Failed;
+        return LibsessionStatus::InvalidArgument;
     }
 
     let libsession = unsafe { &mut *ctx.cast::<Libsession>() };
@@ -243,24 +277,24 @@ pub unsafe extern "C" fn libsession_uid_get_display(
         return LibsessionStatus::Ok;
     }
 
-    LibsessionStatus::Failed
+    LibsessionStatus::NotFound
 }
 
 #[unsafe(no_mangle)]
 /// # Safety
 /// `ctx` must be valid and `ret_state` must point to writable storage.
 pub unsafe extern "C" fn libsession_uid_get_state(
-    ctx: *mut libsession_context,
+    ctx: *mut LibsessionContext,
     uid: libc::uid_t,
     ret_state: *mut LibsessionUserState,
 ) -> LibsessionStatus {
     if ctx.is_null() || ret_state.is_null() {
-        return LibsessionStatus::Failed;
+        return LibsessionStatus::InvalidArgument;
     }
 
     let libsession = unsafe { &mut *ctx.cast::<Libsession>() };
     let Some(state) = libsession.backend.get_state(uid) else {
-        return LibsessionStatus::Failed;
+        return LibsessionStatus::NotFound;
     };
     unsafe { ret_state.write(state) };
 
@@ -271,12 +305,12 @@ pub unsafe extern "C" fn libsession_uid_get_state(
 /// # Safety
 /// `ctx` and `session` must be valid, and `ret_uid` must point to writable storage.
 pub unsafe extern "C" fn libsession_session_get_uid(
-    ctx: *mut libsession_context,
+    ctx: *mut LibsessionContext,
     session: *const ffi::c_char,
     ret_uid: *mut libc::uid_t,
 ) -> LibsessionStatus {
     if ctx.is_null() || session.is_null() || ret_uid.is_null() {
-        return LibsessionStatus::Failed;
+        return LibsessionStatus::InvalidArgument;
     }
 
     let libsession = unsafe { &mut *ctx.cast::<Libsession>() };
@@ -288,27 +322,28 @@ pub unsafe extern "C" fn libsession_session_get_uid(
         return LibsessionStatus::Ok;
     }
 
-    LibsessionStatus::Failed
+    LibsessionStatus::NotFound
 }
 
 #[unsafe(no_mangle)]
 /// # Safety
 /// `ctx` and `session` must be valid, and `ret_state` must point to writable storage.
 pub unsafe extern "C" fn libsession_session_get_state(
-    ctx: *mut libsession_context,
+    ctx: *mut LibsessionContext,
     session: *const ffi::c_char,
     ret_state: *mut LibsessionSessionState,
 ) -> LibsessionStatus {
     if ctx.is_null() || session.is_null() || ret_state.is_null() {
-        return LibsessionStatus::Failed;
+        return LibsessionStatus::InvalidArgument;
     }
 
     let libsession = unsafe { &mut *ctx.cast::<Libsession>() };
-    let Some(state) = libsession
+    let state = match libsession
         .backend
         .get_session_state(unsafe { ffi::CStr::from_ptr(session) })
-    else {
-        return LibsessionStatus::Failed;
+    {
+        Ok(state) => state,
+        Err(error) => return (&error).into(),
     };
     unsafe { ret_state.write(state) };
 
@@ -319,20 +354,21 @@ pub unsafe extern "C" fn libsession_session_get_state(
 /// # Safety
 /// `ctx` and `session` must be valid, and `ret_active` must point to writable storage.
 pub unsafe extern "C" fn libsession_session_is_active(
-    ctx: *mut libsession_context,
+    ctx: *mut LibsessionContext,
     session: *const ffi::c_char,
     ret_active: *mut bool,
 ) -> LibsessionStatus {
     if ctx.is_null() || session.is_null() || ret_active.is_null() {
-        return LibsessionStatus::Failed;
+        return LibsessionStatus::InvalidArgument;
     }
 
     let libsession = unsafe { &mut *ctx.cast::<Libsession>() };
-    let Some(state) = libsession
+    let state = match libsession
         .backend
         .get_session_state(unsafe { ffi::CStr::from_ptr(session) })
-    else {
-        return LibsessionStatus::Failed;
+    {
+        Ok(state) => state,
+        Err(error) => return (&error).into(),
     };
     unsafe { ret_active.write(state == LibsessionSessionState::Active) };
 
@@ -349,12 +385,12 @@ pub unsafe extern "C" fn libsession_session_is_active(
 /// overlap the context or session string. It is written only on success.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_session_is_local(
-    ctx: *mut libsession_context,
+    ctx: *mut LibsessionContext,
     session: *const ffi::c_char,
     ret_local: *mut bool,
 ) -> LibsessionStatus {
     if ctx.is_null() || session.is_null() || ret_local.is_null() {
-        return LibsessionStatus::Failed;
+        return LibsessionStatus::InvalidArgument;
     }
 
     let libsession = unsafe { &mut *ctx.cast::<Libsession>() };
@@ -362,7 +398,7 @@ pub unsafe extern "C" fn libsession_session_is_local(
         .backend
         .is_local_session(unsafe { ffi::CStr::from_ptr(session) })
     else {
-        return LibsessionStatus::Failed;
+        return LibsessionStatus::NotFound;
     };
     unsafe { ret_local.write(local) };
 
@@ -378,9 +414,7 @@ pub struct libsession_monitor {
 struct Monitor(Box<dyn backend::BackendMonitor>);
 
 #[unsafe(no_mangle)]
-pub extern "C" fn libsession_monitor_new(
-    ctx: *const libsession_context,
-) -> *mut libsession_monitor {
+pub extern "C" fn libsession_monitor_new(ctx: *const LibsessionContext) -> *mut libsession_monitor {
     if ctx.is_null() {
         return ptr::null_mut();
     }
@@ -431,11 +465,11 @@ pub type LibsessionLogFn = Option<unsafe extern "C" fn(LibsessionLogLevel, *cons
 /// pointer, which is valid only for the duration of the callback.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_set_log_fn(
-    ctx: *mut libsession_context,
+    ctx: *mut LibsessionContext,
     callback: LibsessionLogFn,
 ) -> LibsessionStatus {
     if ctx.is_null() {
-        return LibsessionStatus::Failed;
+        return LibsessionStatus::InvalidArgument;
     }
     let libsession = unsafe { &*ctx.cast::<Libsession>() };
 
@@ -464,11 +498,11 @@ pub enum LibsessionLogLevel {
 /// remain valid for this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_set_log_level(
-    ctx: *mut libsession_context,
+    ctx: *mut LibsessionContext,
     log_level: LibsessionLogLevel,
 ) -> LibsessionStatus {
     if ctx.is_null() {
-        return LibsessionStatus::Failed;
+        return LibsessionStatus::InvalidArgument;
     }
     let libsession = unsafe { &*ctx.cast::<Libsession>() };
 
@@ -485,7 +519,7 @@ pub unsafe extern "C" fn libsession_set_log_level(
 /// remain valid for this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_get_log_level(
-    ctx: *const libsession_context,
+    ctx: *const LibsessionContext,
 ) -> LibsessionLogLevel {
     if ctx.is_null() {
         return LibsessionLogLevel::Off;

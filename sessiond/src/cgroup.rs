@@ -5,7 +5,6 @@ use anyhow::Context;
 use bevy_ecs::prelude::*;
 use calloop::{generic, timer};
 use rustix::process;
-use std::collections::HashSet;
 use std::io::{Read, Seek};
 use std::os::unix::fs::PermissionsExt;
 use std::{fs, io, num, path, sync, time};
@@ -109,18 +108,6 @@ impl CgroupManager {
         session_id: session::SessionId,
     ) -> anyhow::Result<CgroupBundle> {
         let user_cgroup_path = self.ensure_user_cgroup(user.uid())?;
-        Self::enable_all_controllers(&self.root_path).with_context(|| {
-            format!(
-                "failed to enable controllers in {}",
-                self.root_path.display()
-            )
-        })?;
-        Self::enable_all_controllers(&user_cgroup_path).with_context(|| {
-            format!(
-                "failed to enable controllers in {}",
-                user_cgroup_path.display()
-            )
-        })?;
 
         let session_cgroup_path = user_cgroup_path.join(format!("session-{}", session_id.as_raw()));
         fs::create_dir(&session_cgroup_path).with_context(|| {
@@ -143,25 +130,6 @@ impl CgroupManager {
             uid: session::Uid(user.uid()),
             path: CgroupPath(session_cgroup_path),
         })
-    }
-
-    fn enable_all_controllers(parent: &path::Path) -> anyhow::Result<()> {
-        let available = fs::read_to_string(parent.join("cgroup.controllers"))?;
-        let available = available.split_whitespace().collect::<HashSet<_>>();
-
-        let enabled = fs::read_to_string(parent.join("cgroup.subtree_control"))?;
-        let enabled = enabled.split_whitespace().collect::<HashSet<_>>();
-        let operations = available
-            .iter()
-            .filter(|controller| !enabled.contains(*controller))
-            .map(|controller| format!("+{controller}"))
-            .collect::<Vec<_>>();
-
-        if !operations.is_empty() {
-            fs::write(parent.join("cgroup.subtree_control"), operations.join(" "))?;
-        }
-
-        Ok(())
     }
 
     pub(crate) fn restore_session_cgroup(

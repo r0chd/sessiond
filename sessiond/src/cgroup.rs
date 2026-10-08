@@ -41,6 +41,10 @@ impl CgroupManager {
         Ok(Self { root_path })
     }
 
+    pub fn root_path(&self) -> path::PathBuf {
+        self.root_path.clone()
+    }
+
     fn user_cgroup_path(&self, uid: u32) -> path::PathBuf {
         self.root_path.join(format!("user-{uid}"))
     }

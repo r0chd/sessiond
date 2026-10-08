@@ -1,7 +1,7 @@
 use crate::logging;
 use sessiond_state::monitor;
 use std::os::fd::AsRawFd;
-use std::{ffi, fs, io, path, rc};
+use std::{fs, io, path, rc};
 
 pub struct Sessiond {
     logger: rc::Rc<logging::Logger>,
@@ -23,6 +23,18 @@ impl Sessiond {
 }
 
 impl super::Backend for Sessiond {
+    fn list_sessions(&mut self) -> super::Result<Vec<String>> {
+        self.logger.log(crate::LibsessionLogLevel::Debug, || {
+            "sessiond: listing all sessions".to_string()
+        });
+
+        if self.monitor.has_changed()? {
+            self.state.try_read()?;
+        }
+
+        Ok(self.state.sessions.keys().cloned().collect())
+    }
+
     fn get_session_id(&mut self, pid: u32) -> Option<String> {
         self.logger.log(crate::LibsessionLogLevel::Debug, || {
             format!("sessiond: looking up session for process {pid}")
@@ -40,23 +52,48 @@ impl super::Backend for Sessiond {
     }
 
     fn get_owner_uid(&mut self, pid: u32) -> super::Result<u32> {
+        if self.monitor.has_changed()? {
+            self.state.try_read()?;
+        }
+
         let path = path::PathBuf::from("/proc")
             .join(pid.to_string())
-            .join("loginuid");
+            .join("cgroup");
 
-        let owner_uid = fs::read_to_string(path)?;
-        owner_uid.trim().parse().map_err(super::Error::ParseUid)
+        let cgroup_path: path::PathBuf = fs::read_to_string(path)?
+            .lines()
+            .find_map(|line| line.strip_prefix("0::"))
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::NotFound, "process has no cgroup v2 entry")
+            })?
+            .into();
+
+        let component = cgroup_path
+            .components()
+            .next()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "process has no user cgroup"))?;
+
+        let name = component.as_os_str().to_str().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "user cgroup name is not UTF-8")
+        })?;
+
+        name.strip_prefix("user-")
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "process is not in a sessiond user cgroup",
+                )
+            })?
+            .parse::<u32>()
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err).into())
     }
 
-    fn get_uid(&mut self, session_id: &ffi::CStr) -> Option<u32> {
+    fn get_uid(&mut self, session_id: &str) -> Option<u32> {
         if self.monitor.has_changed().ok()? {
             self.state.try_read().ok()?;
         }
 
-        let session = self
-            .state
-            .sessions
-            .get(&session_id.to_string_lossy().to_string())?;
+        let session = self.state.sessions.get(session_id)?;
 
         Some(session.uid)
     }
@@ -92,15 +129,12 @@ impl super::Backend for Sessiond {
 
     fn get_session_state(
         &mut self,
-        session_id: &ffi::CStr,
+        session_id: &str,
     ) -> super::Result<crate::LibsessionSessionState> {
         if self.monitor.has_changed()? {
             self.state.try_read()?;
         }
 
-        let session_id = session_id
-            .to_str()
-            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
         let session = self
             .state
             .sessions
@@ -116,8 +150,8 @@ impl super::Backend for Sessiond {
         }
     }
 
-    fn is_local_session(&self, session_id: &ffi::CStr) -> Option<bool> {
-        let session = self.state.sessions.get(session_id.to_str().ok()?)?;
+    fn is_local_session(&self, session_id: &str) -> Option<bool> {
+        let session = self.state.sessions.get(session_id)?;
 
         Some(session.remote_host.is_none())
     }

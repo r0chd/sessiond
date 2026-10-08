@@ -3,7 +3,7 @@ use bevy_ecs::prelude::*;
 use hyprwire_protocols_sessiond::server::session_core::v1::session_core_v1;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
-use std::{fs, path, sync, time};
+use std::{fs, sync, time};
 
 trait SessionExt {
     fn class(&self) -> session::SessionClass;
@@ -43,11 +43,7 @@ impl SessionExt for sessiond_state::Session {
     }
 }
 
-#[derive(Resource)]
-pub struct StateWriter(pub path::PathBuf);
-
 pub fn write_state(
-    writer: Res<StateWriter>,
     sessions: Query<
         (
             &session::SessionId,
@@ -66,9 +62,11 @@ pub fn write_state(
     >,
     next_session_id: Res<session::NextSessionId>,
     users: Query<(&session::Uid, &user::UserState), With<user::User>>,
+    cgroup_manager: Res<cgroup::CgroupManager>,
 ) {
     let mut saved_state = sessiond_state::State::new();
     saved_state.next_session_id = next_session_id.0.as_raw();
+    saved_state.cgroup_root = cgroup_manager.root_path();
 
     for (
         id,
@@ -140,19 +138,18 @@ pub fn write_state(
             .insert(uid.0, sessiond_state::User { state });
     }
 
-    if let Err(error) = saved_state.write(&writer.0) {
+    if let Err(error) = saved_state.write() {
         log::error!(error = error.to_string().as_str(); "failed to write session state");
     }
 }
 
 trait StateExt: Sized {
-    fn write(&self, path: &path::Path) -> anyhow::Result<()>;
+    fn write(&self) -> anyhow::Result<()>;
 }
 
 impl StateExt for sessiond_state::State {
-    fn write(&self, path: &path::Path) -> anyhow::Result<()> {
-        let mut temp_path = path.as_os_str().to_os_string();
-        temp_path.push("~");
+    fn write(&self) -> anyhow::Result<()> {
+        let temp_path = Self::path().join("~");
 
         let mut file = fs::File::create(&temp_path)?;
         fs::set_permissions(&temp_path, fs::Permissions::from_mode(0o644))?;
@@ -161,7 +158,7 @@ impl StateExt for sessiond_state::State {
         file.write_all(toml.as_bytes())?;
         file.sync_all()?;
 
-        fs::rename(&temp_path, path)?;
+        fs::rename(&temp_path, Self::path())?;
 
         Ok(())
     }

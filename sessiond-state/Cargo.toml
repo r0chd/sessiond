@@ -1,6 +1,6 @@
 [package]
 name = "sessiond-state"
-version = "0.1.1"
+publish = false
 edition.workspace = true
 license = "MIT"
 repository.workspace = true

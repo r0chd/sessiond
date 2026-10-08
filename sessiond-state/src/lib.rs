@@ -54,8 +54,7 @@ pub struct User {
 #[derive(Default, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct State {
-    #[serde(skip)]
-    path: sync::Arc<path::PathBuf>,
+    pub cgroup_root: path::PathBuf,
     pub next_session_id: u32,
     #[serde(default)]
     pub users: BTreeMap<u32, User>,
@@ -95,6 +94,10 @@ pub enum Error {
 }
 
 impl State {
+    pub fn path() -> path::PathBuf {
+        path::PathBuf::from("/run/sessiond/state.toml")
+    }
+
     /// Watches this state's file without reading or modifying the snapshot.
     ///
     /// Create the monitor before the initial [`Self::try_read`] to avoid missing
@@ -104,15 +107,12 @@ impl State {
     /// Returns an error if the inotify instance or directory watch cannot be created.
     #[cfg(feature = "monitor")]
     pub fn monitor(&self) -> io::Result<monitor::Monitor> {
-        monitor::Monitor::new(self.path.as_ref())
+        monitor::Monitor::new(Self::path())
     }
 
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            path: path::PathBuf::from("/run/sessiond/state.toml").into(),
-            ..Default::default()
-        }
+        Self::default()
     }
 
     /// Reads session state from a TOML file.
@@ -122,12 +122,9 @@ impl State {
     /// Returns an error if the file cannot be read as UTF-8 or its contents
     /// cannot be deserialized into [`State`].
     pub fn try_read(&mut self) -> Result<()> {
-        let contents = fs::read_to_string(self.path.as_ref())?;
+        let contents = fs::read_to_string(Self::path())?;
 
-        let mut state = toml::from_str::<Self>(&contents)?;
-        state.path = sync::Arc::clone(&self.path);
-
-        *self = state;
+        *self = toml::from_str::<Self>(&contents)?;
         Ok(())
     }
 }

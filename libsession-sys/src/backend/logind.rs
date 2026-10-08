@@ -36,7 +36,34 @@ impl Logind {
 }
 
 impl super::Backend for Logind {
-    fn is_local_session(&self, session_id: &ffi::CStr) -> Option<bool> {
+    fn list_sessions(&mut self) -> super::Result<Vec<String>> {
+        self.logger.log(crate::LibsessionLogLevel::Debug, || {
+            "logind: listing all sessions".to_string()
+        });
+
+        let mut sessions = ptr::null_mut::<*mut ffi::c_char>();
+        let result = unsafe { login::sd_get_sessions(&raw mut sessions) };
+        let Ok(count) = usize::try_from(result) else {
+            return Err(io::Error::from_raw_os_error(-result).into());
+        };
+
+        if sessions.is_null() {
+            return Ok(Vec::new());
+        }
+
+        let mut ids = Vec::with_capacity(count);
+        for index in 0..count {
+            if let Some(id) = sd_string(unsafe { *sessions.add(index) }) {
+                ids.push(id);
+            }
+        }
+        unsafe { libc::free(sessions.cast()) };
+
+        Ok(ids)
+    }
+
+    fn is_local_session(&self, session_id: &str) -> Option<bool> {
+        let session_id = ffi::CString::new(session_id).ok()?;
         let result = unsafe { login::sd_session_is_remote(session_id.as_ptr()) };
         (result >= 0).then_some(result == 0)
     }
@@ -81,7 +108,8 @@ impl super::Backend for Logind {
         (result >= 0).then(|| sd_string(display))?
     }
 
-    fn get_uid(&mut self, session_id: &ffi::CStr) -> Option<u32> {
+    fn get_uid(&mut self, session_id: &str) -> Option<u32> {
+        let session_id = ffi::CString::new(session_id).ok()?;
         let mut uid = 0;
         let result = unsafe { login::sd_session_get_uid(session_id.as_ptr(), &raw mut uid) };
         (result >= 0).then_some(uid)
@@ -89,8 +117,10 @@ impl super::Backend for Logind {
 
     fn get_session_state(
         &mut self,
-        session_id: &ffi::CStr,
+        session_id: &str,
     ) -> super::Result<crate::LibsessionSessionState> {
+        let session_id = ffi::CString::new(session_id)
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
         let mut state = ptr::null_mut();
         let result = unsafe { login::sd_session_get_state(session_id.as_ptr(), &raw mut state) };
 

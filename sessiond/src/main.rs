@@ -127,8 +127,6 @@ fn run(args: Args) -> anyhow::Result<()> {
     world.insert_resource(cgroup::CgroupManager::new()?);
     world.insert_resource(config);
     world.insert_resource(LoopSignal(event_loop.get_signal()));
-    let state_path = runtime_dir.join("state.toml");
-    world.insert_resource(state::StateWriter(state_path));
     world.insert_non_send(event_loop.handle());
     #[cfg(feature = "consolekit")]
     world.insert_resource(consolekit::ConsoleKit::start());

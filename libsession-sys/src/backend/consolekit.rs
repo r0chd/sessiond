@@ -1,5 +1,5 @@
 use crate::logging;
-use std::{ffi, io, path, rc};
+use std::{io, path, rc};
 use zbus::{blocking, zvariant};
 
 #[zbus::proxy(
@@ -53,6 +53,25 @@ impl ConsoleKit {
 }
 
 impl super::Backend for ConsoleKit {
+    fn list_sessions(&mut self) -> super::Result<Vec<String>> {
+        self.logger.log(crate::LibsessionLogLevel::Debug, || {
+            "consolekit: listing all sessions".to_string()
+        });
+
+        Ok(self
+            .manager
+            .get_sessions()?
+            .into_iter()
+            .map(|path| {
+                ConsoleKitSessionProxyBlocking::builder(&self.connection)
+                    .path(path)?
+                    .build()?
+                    .get_id()
+            })
+            .filter_map(|session_id| session_id.ok())
+            .collect())
+    }
+
     fn get_monitor(&self) -> Option<Box<dyn super::BackendMonitor>> {
         Some(Box::new(super::inotify::InotifyMonitor::new(
             path::Path::new("/var/run/ConsoleKit"),
@@ -107,8 +126,7 @@ impl super::Backend for ConsoleKit {
         None
     }
 
-    fn get_uid(&mut self, session_id: &ffi::CStr) -> Option<u32> {
-        let session_id = session_id.to_string_lossy();
+    fn get_uid(&mut self, session_id: &str) -> Option<u32> {
         for path in self.manager.get_sessions().ok()? {
             let session = ConsoleKitSessionProxyBlocking::builder(&self.connection)
                 .path(path)
@@ -124,9 +142,8 @@ impl super::Backend for ConsoleKit {
 
     fn get_session_state(
         &mut self,
-        session_id: &ffi::CStr,
+        session_id: &str,
     ) -> super::Result<crate::LibsessionSessionState> {
-        let session_id = session_id.to_string_lossy();
         for path in self.manager.get_sessions()? {
             let session = ConsoleKitSessionProxyBlocking::builder(&self.connection)
                 .path(path)?
@@ -143,8 +160,7 @@ impl super::Backend for ConsoleKit {
         Err(io::Error::new(io::ErrorKind::NotFound, "session not found").into())
     }
 
-    fn is_local_session(&self, session_id: &ffi::CStr) -> Option<bool> {
-        let session_id = session_id.to_string_lossy();
+    fn is_local_session(&self, session_id: &str) -> Option<bool> {
         for path in self.manager.get_sessions().ok()? {
             let session = ConsoleKitSessionProxyBlocking::builder(&self.connection)
                 .path(path)

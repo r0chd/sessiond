@@ -8,7 +8,7 @@ pub mod logind;
 pub mod sessiond;
 
 use std::os::fd;
-use std::{ffi, io, num, result};
+use std::{io, num, result};
 
 pub type Result<T> = result::Result<T, Error>;
 
@@ -33,18 +33,17 @@ pub trait Backend {
 
     fn get_state(&mut self, uid: u32) -> Option<crate::LibsessionUserState>;
 
-    fn get_uid(&mut self, session_id: &ffi::CStr) -> Option<u32>;
+    fn get_uid(&mut self, session_id: &str) -> Option<u32>;
 
     fn get_session_id(&mut self, pid: u32) -> Option<String>;
 
-    fn get_session_state(
-        &mut self,
-        session_id: &ffi::CStr,
-    ) -> Result<crate::LibsessionSessionState>;
+    fn get_session_state(&mut self, session_id: &str) -> Result<crate::LibsessionSessionState>;
 
-    fn is_local_session(&self, session_id: &ffi::CStr) -> Option<bool>;
+    fn is_local_session(&self, session_id: &str) -> Option<bool>;
 
     fn get_monitor(&self) -> Option<Box<dyn BackendMonitor>>;
+
+    fn list_sessions(&mut self) -> Result<Vec<String>>;
 }
 
 pub trait BackendMonitor {

@@ -30,8 +30,5 @@ syslog = "7.0.0"
 hyprwire = { version = "0.5.1", features = ["log"] }
 hyprwire-protocols-sessiond = { path = "../hyprwire-protocols-sessiond", version = "0.2.0" }
 
-[build-dependencies]
-hyprwire-scanner = "0.5.1"
-
 [features]
 consolekit = ["dep:zbus"]

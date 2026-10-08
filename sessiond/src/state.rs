@@ -1,7 +1,6 @@
 use crate::{cgroup, config, session, user};
 use bevy_ecs::prelude::*;
 use hyprwire_protocols_sessiond::server::session_core::v1::session_core_v1;
-use sessiond_state::{Session, SessionClass, SessionState, State, UserState};
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::{fs, path, sync, time};
@@ -12,16 +11,18 @@ trait SessionExt {
     fn session_state(&self) -> session_core_v1::SessionState;
 }
 
-impl SessionExt for Session {
+impl SessionExt for sessiond_state::Session {
     fn class(&self) -> session::SessionClass {
         match self.class {
-            SessionClass::Greeter => session::SessionClass::Greeter,
-            SessionClass::LockScreen => session::SessionClass::LockScreen,
-            SessionClass::Background => session::SessionClass::Background,
-            SessionClass::BackgroundLight => session::SessionClass::BackgroundLight,
-            SessionClass::Manager => session::SessionClass::Manager,
-            SessionClass::ManagerEarly => session::SessionClass::ManagerEarly,
-            SessionClass::User | SessionClass::Unknown => session::SessionClass::User,
+            sessiond_state::SessionClass::Greeter => session::SessionClass::Greeter,
+            sessiond_state::SessionClass::LockScreen => session::SessionClass::LockScreen,
+            sessiond_state::SessionClass::Background => session::SessionClass::Background,
+            sessiond_state::SessionClass::BackgroundLight => session::SessionClass::BackgroundLight,
+            sessiond_state::SessionClass::Manager => session::SessionClass::Manager,
+            sessiond_state::SessionClass::ManagerEarly => session::SessionClass::ManagerEarly,
+            sessiond_state::SessionClass::User | sessiond_state::SessionClass::Unknown => {
+                session::SessionClass::User
+            }
         }
     }
 
@@ -32,10 +33,12 @@ impl SessionExt for Session {
 
     fn session_state(&self) -> session_core_v1::SessionState {
         match self.state {
-            SessionState::Active => session_core_v1::SessionState::Active,
-            SessionState::Closing => session_core_v1::SessionState::Closing,
-            SessionState::Opening => session_core_v1::SessionState::Opening,
-            SessionState::Online | SessionState::Unknown => session_core_v1::SessionState::Online,
+            sessiond_state::SessionState::Active => session_core_v1::SessionState::Active,
+            sessiond_state::SessionState::Closing => session_core_v1::SessionState::Closing,
+            sessiond_state::SessionState::Opening => session_core_v1::SessionState::Opening,
+            sessiond_state::SessionState::Online | sessiond_state::SessionState::Unknown => {
+                session_core_v1::SessionState::Online
+            }
         }
     }
 }
@@ -64,7 +67,7 @@ pub fn write_state(
     next_session_id: Res<session::NextSessionId>,
     users: Query<(&session::Uid, &user::UserState), With<user::User>>,
 ) {
-    let mut saved_state = State::new();
+    let mut saved_state = sessiond_state::State::new();
     saved_state.next_session_id = next_session_id.0.as_raw();
 
     for (
@@ -87,24 +90,24 @@ pub fn write_state(
             .unwrap_or_default()
             .as_micros();
         let class = match class {
-            session::SessionClass::User => SessionClass::User,
-            session::SessionClass::Greeter => SessionClass::Greeter,
-            session::SessionClass::LockScreen => SessionClass::LockScreen,
-            session::SessionClass::Background => SessionClass::Background,
-            session::SessionClass::BackgroundLight => SessionClass::BackgroundLight,
-            session::SessionClass::Manager => SessionClass::Manager,
-            session::SessionClass::ManagerEarly => SessionClass::ManagerEarly,
+            session::SessionClass::User => sessiond_state::SessionClass::User,
+            session::SessionClass::Greeter => sessiond_state::SessionClass::Greeter,
+            session::SessionClass::LockScreen => sessiond_state::SessionClass::LockScreen,
+            session::SessionClass::Background => sessiond_state::SessionClass::Background,
+            session::SessionClass::BackgroundLight => sessiond_state::SessionClass::BackgroundLight,
+            session::SessionClass::Manager => sessiond_state::SessionClass::Manager,
+            session::SessionClass::ManagerEarly => sessiond_state::SessionClass::ManagerEarly,
         };
         let state = match session_state.0 {
-            session_core_v1::SessionState::Active => SessionState::Active,
-            session_core_v1::SessionState::Closing => SessionState::Closing,
-            session_core_v1::SessionState::Opening => SessionState::Opening,
-            _ => SessionState::Online,
+            session_core_v1::SessionState::Active => sessiond_state::SessionState::Active,
+            session_core_v1::SessionState::Closing => sessiond_state::SessionState::Closing,
+            session_core_v1::SessionState::Opening => sessiond_state::SessionState::Opening,
+            _ => sessiond_state::SessionState::Online,
         };
 
         saved_state.sessions.insert(
             id.as_raw().to_string(),
-            Session {
+            sessiond_state::Session {
                 uid: uid.0,
                 class,
                 vt: vt.map(|vt| vt.0),
@@ -125,12 +128,12 @@ pub fn write_state(
 
     for (uid, state) in &users {
         let state = match state.0 {
-            session_core_v1::UserState::Active => UserState::Active,
-            session_core_v1::UserState::Closing => UserState::Closing,
-            session_core_v1::UserState::Lingering => UserState::Lingering,
-            session_core_v1::UserState::Online => UserState::Online,
-            session_core_v1::UserState::Offline => UserState::Offline,
-            _ => UserState::Unknown,
+            session_core_v1::UserState::Active => sessiond_state::UserState::Active,
+            session_core_v1::UserState::Closing => sessiond_state::UserState::Closing,
+            session_core_v1::UserState::Lingering => sessiond_state::UserState::Lingering,
+            session_core_v1::UserState::Online => sessiond_state::UserState::Online,
+            session_core_v1::UserState::Offline => sessiond_state::UserState::Offline,
+            _ => sessiond_state::UserState::Unknown,
         };
         saved_state
             .users
@@ -146,7 +149,7 @@ trait StateExt: Sized {
     fn write(&self, path: &path::Path) -> anyhow::Result<()>;
 }
 
-impl StateExt for State {
+impl StateExt for sessiond_state::State {
     fn write(&self, path: &path::Path) -> anyhow::Result<()> {
         let mut temp_path = path.as_os_str().to_os_string();
         temp_path.push("~");

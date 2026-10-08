@@ -4,9 +4,7 @@ use std::{fs, io, num, path, result, sync};
 use toml::{de, ser};
 
 #[cfg(feature = "monitor")]
-mod monitor;
-#[cfg(feature = "monitor")]
-pub use monitor::Monitor;
+pub mod monitor;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -105,8 +103,8 @@ impl State {
     /// # Errors
     /// Returns an error if the inotify instance or directory watch cannot be created.
     #[cfg(feature = "monitor")]
-    pub fn monitor(&self) -> io::Result<Monitor> {
-        Monitor::new(self.path.as_ref())
+    pub fn monitor(&self) -> io::Result<monitor::Monitor> {
+        monitor::Monitor::new(self.path.as_ref())
     }
 
     #[must_use]

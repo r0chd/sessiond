@@ -1,11 +1,12 @@
 use crate::logging;
+use sessiond_state::monitor;
 use std::os::fd::AsRawFd;
 use std::{ffi, fs, path, rc};
 
 pub struct Sessiond {
     logger: rc::Rc<logging::Logger>,
     state: sessiond_state::State,
-    monitor: sessiond_state::Monitor,
+    monitor: monitor::Monitor,
 }
 
 impl Sessiond {
@@ -119,7 +120,7 @@ impl super::Backend for Sessiond {
     }
 }
 
-impl super::BackendMonitor for sessiond_state::Monitor {
+impl super::BackendMonitor for monitor::Monitor {
     fn fd(&self) -> std::os::fd::RawFd {
         self.as_raw_fd()
     }

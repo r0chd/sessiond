@@ -149,7 +149,7 @@ trait StateExt: Sized {
 
 impl StateExt for sessiond_state::State {
     fn write(&self) -> anyhow::Result<()> {
-        let temp_path = Self::path().join("~");
+        let temp_path = Self::path().with_file_name("state.toml~");
 
         let mut file = fs::File::create(&temp_path)?;
         fs::set_permissions(&temp_path, fs::Permissions::from_mode(0o644))?;

@@ -23,7 +23,7 @@ let
 in
 craneLib.buildPackage {
   pname = cargoToml.package.name;
-  inherit (workspaceToml.workspace.package) version;
+  version = "0.0.0";
 
   cargoExtraArgs = lib.escapeShellArgs ([ "--locked" ] ++ cargoPackageFlags);
 

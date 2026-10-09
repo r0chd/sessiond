@@ -5,7 +5,6 @@ categories = []
 edition = "2024"
 license = "GPL-3.0-only"
 repository = "https://tangled.org/r0chd.pl/sessiond"
-version = "0.0.0"
 publish = false
 description = "Dynamic device access manager"
 

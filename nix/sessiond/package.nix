@@ -13,7 +13,7 @@ let
 in
 craneLib.buildPackage {
   pname = "sessiond";
-  inherit (cargoToml.package) version;
+  version = "0.0.0";
 
   inherit src;
   strictDeps = true;

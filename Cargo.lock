@@ -1573,7 +1573,7 @@ dependencies = [
 
 [[package]]
 name = "sessiond"
-version = "0.2.3"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "bevy_ecs",
@@ -1642,7 +1642,7 @@ dependencies = [
 
 [[package]]
 name = "sessiond-power"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "calloop",

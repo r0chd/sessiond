@@ -5,7 +5,6 @@ categories.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-version = "0.2.3"
 publish = false
 description.workspace = true
 readme.workspace = true

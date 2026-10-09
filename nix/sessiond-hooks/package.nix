@@ -8,7 +8,7 @@ let
 in
 craneLib.buildPackage {
   pname = cargoToml.package.name;
-  inherit (cargoToml.package) version;
+  version = "0.0.0";
 
   cargoExtraArgs = "--locked --package ${cargoToml.package.name}";
 

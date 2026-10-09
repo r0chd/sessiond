@@ -53,6 +53,10 @@ impl ConsoleKit {
 }
 
 impl super::Backend for ConsoleKit {
+    fn get_backend(&self) -> crate::LibsessionBackend {
+        crate::LibsessionBackend::ConsoleKit
+    }
+
     fn list_sessions(&mut self) -> super::Result<Vec<String>> {
         self.logger.log(crate::LibsessionLogLevel::Debug, || {
             "consolekit: listing all sessions".to_string()

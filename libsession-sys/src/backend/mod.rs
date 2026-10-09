@@ -27,6 +27,8 @@ pub enum Error {
 }
 
 pub trait Backend {
+    fn get_backend(&self) -> super::LibsessionBackend;
+
     fn get_owner_uid(&mut self, pid: u32) -> Result<u32>;
 
     fn get_display(&mut self, uid: u32) -> Option<String>;

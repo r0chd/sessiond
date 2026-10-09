@@ -23,6 +23,10 @@ impl Sessiond {
 }
 
 impl super::Backend for Sessiond {
+    fn get_backend(&self) -> crate::LibsessionBackend {
+        crate::LibsessionBackend::Sessiond
+    }
+
     fn list_sessions(&mut self) -> super::Result<Vec<String>> {
         self.logger.log(crate::LibsessionLogLevel::Debug, || {
             "sessiond: listing all sessions".to_string()

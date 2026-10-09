@@ -169,6 +169,31 @@ pub extern "C" fn libsession_new() -> *mut LibsessionContext {
     ptr::null_mut()
 }
 
+#[derive(Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum LibsessionBackend {
+    Sessiond = 0,
+    Logind = 1,
+    ConsoleKit = 2,
+}
+
+#[unsafe(no_mangle)]
+#[must_use]
+pub unsafe extern "C" fn libsession_get_backend(
+    ctx: *mut LibsessionContext,
+    ret_backend: *mut LibsessionBackend,
+) -> LibsessionStatus {
+    if ctx.is_null() {
+        return LibsessionStatus::InvalidArgument;
+    }
+
+    let libsession = unsafe { &mut *ctx.cast::<Libsession>() };
+
+    unsafe { ret_backend.write(libsession.backend.get_backend()) };
+
+    LibsessionStatus::Ok
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn libsession_free(ctx: *mut LibsessionContext) {
     if ctx.is_null() {

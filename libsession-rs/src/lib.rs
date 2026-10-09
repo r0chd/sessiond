@@ -13,6 +13,16 @@ impl Context {
         ptr::NonNull::new(libsession_sys::libsession_new()).map(Self)
     }
 
+    pub fn get_backend(&self) -> libsession_sys::Result<libsession_sys::LibsessionBackend> {
+        let mut backend = libsession_sys::LibsessionBackend::Sessiond;
+
+        libsession_sys::Result::<()>::from(unsafe {
+            libsession_sys::libsession_get_backend(self.0.as_ptr(), &raw mut backend)
+        })?;
+
+        Ok(backend)
+    }
+
     /// Retrieves the session ID for the current process.
     ///
     /// # Errors
@@ -102,9 +112,110 @@ impl Context {
     pub fn get_owner_uid_for_pid(&self, pid: i32) -> libsession_sys::Result<u32> {
         let mut uid = 0u32;
 
-        unsafe { libsession_sys::libsession_pid_get_owner_uid(self.0.as_ptr(), pid, &raw mut uid) };
+        libsession_sys::Result::<()>::from(unsafe {
+            libsession_sys::libsession_pid_get_owner_uid(self.0.as_ptr(), pid, &raw mut uid)
+        })?;
 
         Ok(uid)
+    }
+
+    pub fn get_user_state(
+        &self,
+        uid: u32,
+    ) -> libsession_sys::Result<libsession_sys::LibsessionUserState> {
+        let mut state = libsession_sys::LibsessionUserState::Offline;
+
+        libsession_sys::Result::<()>::from(unsafe {
+            libsession_sys::libsession_uid_get_state(self.0.as_ptr(), uid, &raw mut state)
+        })?;
+
+        Ok(state)
+    }
+
+    pub fn get_session_uid(&self, session: &Session) -> libsession_sys::Result<u32> {
+        let mut uid = 0u32;
+
+        libsession_sys::Result::<()>::from(unsafe {
+            libsession_sys::libsession_session_get_uid(
+                self.0.as_ptr(),
+                session.0.as_ptr(),
+                &raw mut uid,
+            )
+        })?;
+
+        Ok(uid)
+    }
+
+    pub fn get_session_state(
+        &self,
+        session: &Session,
+    ) -> libsession_sys::Result<libsession_sys::LibsessionSessionState> {
+        let mut state = libsession_sys::LibsessionSessionState::Unkown;
+
+        libsession_sys::Result::<()>::from(unsafe {
+            libsession_sys::libsession_session_get_state(
+                self.0.as_ptr(),
+                session.0.as_ptr(),
+                &raw mut state,
+            )
+        })?;
+
+        Ok(state)
+    }
+
+    pub fn is_session_active(&self, session: &Session) -> libsession_sys::Result<bool> {
+        let mut is_active = false;
+
+        libsession_sys::Result::<()>::from(unsafe {
+            libsession_sys::libsession_session_is_active(
+                self.0.as_ptr(),
+                session.0.as_ptr(),
+                &raw mut is_active,
+            )
+        })?;
+
+        Ok(is_active)
+    }
+
+    /// Sets the logging callback, or disables callbacks with `None`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying call fails.
+    ///
+    /// # Safety
+    ///
+    /// The callback must remain callable until replaced or this context is
+    /// dropped. It must not unwind or access this context reentrantly. The
+    /// message pointer is valid only during the callback; it must not be
+    /// retained or freed.
+    pub unsafe fn set_log_fn(
+        &self,
+        callback: libsession_sys::LibsessionLogFn,
+    ) -> libsession_sys::Result<()> {
+        libsession_sys::Result::<()>::from(unsafe {
+            libsession_sys::libsession_set_log_fn(self.0.as_ptr(), callback)
+        })
+    }
+
+    /// Sets the logging level. `Off` disables logging.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying call fails.
+    pub fn set_log_level(
+        &self,
+        level: libsession_sys::LibsessionLogLevel,
+    ) -> libsession_sys::Result<()> {
+        libsession_sys::Result::<()>::from(unsafe {
+            libsession_sys::libsession_set_log_level(self.0.as_ptr(), level)
+        })
+    }
+
+    /// Retrieves the current logging level.
+    #[must_use]
+    pub fn get_log_level(&self) -> libsession_sys::LibsessionLogLevel {
+        unsafe { libsession_sys::libsession_get_log_level(self.0.as_ptr()) }
     }
 
     /// Creates a monitor for session changes.

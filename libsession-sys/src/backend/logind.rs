@@ -36,6 +36,10 @@ impl Logind {
 }
 
 impl super::Backend for Logind {
+    fn get_backend(&self) -> crate::LibsessionBackend {
+        crate::LibsessionBackend::Logind
+    }
+
     fn list_sessions(&mut self) -> super::Result<Vec<String>> {
         self.logger.log(crate::LibsessionLogLevel::Debug, || {
             "logind: listing all sessions".to_string()

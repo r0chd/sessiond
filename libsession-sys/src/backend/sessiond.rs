@@ -60,15 +60,26 @@ impl super::Backend for Sessiond {
             .join(pid.to_string())
             .join("cgroup");
 
-        let cgroup_path: path::PathBuf = fs::read_to_string(path)?
+        let cgroup_path = fs::read_to_string(path)?
             .lines()
             .find_map(|line| line.strip_prefix("0::"))
+            .map(|hierarchy_path| {
+                path::PathBuf::from("/sys/fs/cgroup").join(hierarchy_path.trim_start_matches('/'))
+            })
             .ok_or_else(|| {
                 io::Error::new(io::ErrorKind::NotFound, "process has no cgroup v2 entry")
-            })?
-            .into();
+            })?;
 
-        let component = cgroup_path
+        let relative_path = cgroup_path
+            .strip_prefix(&self.state.cgroup_root)
+            .map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "process is outside sessiond's cgroup root",
+                )
+            })?;
+
+        let component = relative_path
             .components()
             .next()
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "process has no user cgroup"))?;

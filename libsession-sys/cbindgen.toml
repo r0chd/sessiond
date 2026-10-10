@@ -2,7 +2,7 @@ language = "C"
 include_guard = "LIBSESSION_H"
 cpp_compat = true
 style = "tag"
-documentation = false
+documentation = true
 sys_includes = ["sys/types.h"]
 
 trailer = """
@@ -24,6 +24,7 @@ LibsessionStatus = "libsession_status"
 LibsessionLogLevel = "libsession_log_level"
 LibsessionUserState = "libsession_user_state"
 LibsessionSessionState = "libsession_session_state"
+LibsessionBackend = "libsession_backend"
 LibsessionLogFn = "libsession_log_fn"
 LibsessionContext = "libsession_context"
 

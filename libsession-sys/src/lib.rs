@@ -500,12 +500,20 @@ pub unsafe extern "C" fn libsession_session_is_local(
     LibsessionStatus::Ok
 }
 
+/// Copies a session ID into an allocated, NUL-terminated C string.
+///
+/// Free the returned string with `libsession_session_id_free`.
+///
+/// # Safety
+///
+/// `session` must be null or a live session handle. `ret_id` must point to
+/// writable pointer storage. It is written only on success.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_session_get_id(
     session: *const LibsessionSession,
     ret_id: *mut *mut ffi::c_char,
 ) -> LibsessionStatus {
-    if session.is_null() {
+    if session.is_null() || ret_id.is_null() {
         return LibsessionStatus::InvalidArgument;
     }
 
@@ -518,6 +526,20 @@ pub unsafe extern "C" fn libsession_session_get_id(
     unsafe { ret_id.write(session_id.into_raw()) };
 
     LibsessionStatus::Ok
+}
+
+/// Frees a string returned by this library, such as an ID from
+/// `libsession_session_get_id`.
+///
+/// # Safety
+///
+/// `string` must be null or a pointer returned by this library that has not
+/// already been freed. The pointer must not be used after this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn libsession_session_id_free(string: *mut ffi::c_char) {
+    if !string.is_null() {
+        unsafe { drop(ffi::CString::from_raw(string)) };
+    }
 }
 
 #[allow(non_camel_case_types)]

@@ -35,11 +35,11 @@ fn connects_to_correct_backend() {
                 .success()
         };
 
-        let expected = if cfg!(feature = "sessiond") && running("sessiond") {
+        let expected = if running("sessiond") {
             libsession_sys::LibsessionBackend::Sessiond
-        } else if cfg!(feature = "logind") && running("systemd-logind") {
+        } else if running("systemd-logind") {
             libsession_sys::LibsessionBackend::Logind
-        } else if cfg!(feature = "consolekit") && running("console-kit-daemon") {
+        } else if running("console-kit-daemon") {
             libsession_sys::LibsessionBackend::ConsoleKit
         } else {
             panic!("no supported backend daemon is running");
@@ -100,4 +100,27 @@ fn get_owner_uid_for_pid() {
 
     let uid = context.get_owner_uid_for_pid(pid).unwrap();
     assert_eq!(uid, 1000);
+}
+
+#[test]
+fn get_display_session() {
+    let context = Context::connect().expect("no session backend available");
+
+    let pid = process::id() as i32;
+
+    let uid = context.get_owner_uid_for_pid(pid).unwrap();
+    let session = context.get_display_for_uid(uid).unwrap();
+
+    let ids: Vec<_> = context
+        .list_sessions()
+        .expect("failed to list sessions")
+        .iter()
+        .map(|session| session.id().expect("failed to read session ID"))
+        .collect();
+
+    assert!(
+        ids.contains(&session.id().expect("failed to read display session ID")),
+        "current session {:?} missing from session list: {ids:?}",
+        session.id()
+    );
 }

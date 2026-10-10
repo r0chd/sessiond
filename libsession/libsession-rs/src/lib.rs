@@ -10,7 +10,7 @@ pub struct Context(ptr::NonNull<libsession_sys::LibsessionContext>);
 impl Context {
     #[must_use]
     pub fn connect() -> Option<Self> {
-        ptr::NonNull::new(libsession_sys::libsession_new()).map(Self)
+        ptr::NonNull::new(unsafe { libsession_sys::libsession_new() }).map(Self)
     }
 
     pub fn get_backend(&self) -> libsession_sys::Result<libsession_sys::LibsessionBackend> {
@@ -84,15 +84,20 @@ impl Context {
 
         let sessions = ptr::NonNull::new(sessions).ok_or(libsession_sys::Error::InternalError)?;
 
-        let ids = unsafe { Box::from_raw(ptr::slice_from_raw_parts_mut(sessions.as_ptr(), count)) };
+        let ids = unsafe { std::slice::from_raw_parts_mut(sessions.as_ptr(), count) };
+        let mut result = Vec::with_capacity(count);
+        for id in ids {
+            let Some(session) = ptr::NonNull::new(*id) else {
+                unsafe { libsession_sys::libsession_session_list_free(sessions.as_ptr(), count) };
+                return Err(libsession_sys::Error::InternalError);
+            };
+            result.push(Session(session));
+            // Transfer ownership of the handle while leaving the array to the library.
+            *id = ptr::null_mut();
+        }
+        unsafe { libsession_sys::libsession_session_list_free(sessions.as_ptr(), count) };
 
-        Ok(ids
-            .iter()
-            .map(|&id| {
-                // Every entry was allocated with Box::into_raw and is non-null.
-                Session(unsafe { ptr::NonNull::new_unchecked(id) })
-            })
-            .collect())
+        Ok(result)
     }
 
     pub fn is_session_local(&self, session: &Session) -> libsession_sys::Result<bool> {
@@ -224,7 +229,7 @@ impl Context {
     ///
     /// Returns `Error::Unavailable` if the backend cannot create a monitor.
     pub fn get_monitor(&mut self) -> libsession_sys::Result<Monitor> {
-        ptr::NonNull::new(libsession_sys::libsession_monitor_new(self.0.as_ptr()))
+        ptr::NonNull::new(unsafe { libsession_sys::libsession_monitor_new(self.0.as_ptr()) })
             .map(Monitor)
             .ok_or(libsession_sys::Error::Unavailable)
     }
@@ -235,11 +240,17 @@ pub struct Session(ptr::NonNull<libsession_sys::LibsessionSession>);
 impl Session {
     pub fn id(&self) -> libsession_sys::Result<String> {
         let mut id = ptr::null_mut();
-        unsafe { libsession_sys::libsession_session_get_id(self.0.as_ptr(), &raw mut id) };
+        libsession_sys::Result::<()>::from(unsafe {
+            libsession_sys::libsession_session_get_id(self.0.as_ptr(), &raw mut id)
+        })?;
+        let id = ptr::NonNull::new(id).ok_or(libsession_sys::Error::InternalError)?;
 
-        unsafe { ffi::CString::from_raw(id) }
-            .into_string()
-            .map_err(|_| libsession_sys::Error::InvalidData)
+        let result = unsafe { ffi::CStr::from_ptr(id.as_ptr()) }
+            .to_str()
+            .map(str::to_owned)
+            .map_err(|_| libsession_sys::Error::InvalidData);
+        unsafe { libsession_sys::libsession_session_id_free(id.as_ptr()) };
+        result
     }
 }
 
@@ -253,13 +264,13 @@ pub struct Monitor(ptr::NonNull<libsession_sys::libsession_monitor>);
 
 impl Monitor {
     pub fn flush(&mut self) {
-        libsession_sys::libsession_monitor_flush(self.0.as_ptr());
+        unsafe { libsession_sys::libsession_monitor_flush(self.0.as_ptr()) };
     }
 }
 
 impl AsRawFd for Monitor {
     fn as_raw_fd(&self) -> fd::RawFd {
-        libsession_sys::libsession_monitor_fd(self.0.as_ptr())
+        unsafe { libsession_sys::libsession_monitor_fd(self.0.as_ptr()) }
     }
 }
 
@@ -271,12 +282,12 @@ impl AsFd for Monitor {
 
 impl Drop for Monitor {
     fn drop(&mut self) {
-        libsession_sys::libsession_monitor_free(self.0.as_ptr());
+        unsafe { libsession_sys::libsession_monitor_free(self.0.as_ptr()) };
     }
 }
 
 impl Drop for Context {
     fn drop(&mut self) {
-        libsession_sys::libsession_free(self.0.as_ptr());
+        unsafe { libsession_sys::libsession_free(self.0.as_ptr()) };
     }
 }

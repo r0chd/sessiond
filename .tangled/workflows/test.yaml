@@ -32,5 +32,5 @@ steps:
       rustup default stable
       pkg-config --libs --cflags pam libudev libsystemd libacl
 
-      cargo test --locked --workspace --exclude libsession-sys --exclude libsession-rs --no-default-features
-      cargo test --locked --workspace --exclude libsession-sys --exclude libsession-rs --all-features
+      cargo test --locked --workspace --exclude libsession --exclude libsession-sys --exclude libsession-rs --no-default-features
+      cargo test --locked --workspace --exclude libsession --exclude libsession-sys --exclude libsession-rs --all-features

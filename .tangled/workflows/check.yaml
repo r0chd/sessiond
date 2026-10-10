@@ -33,5 +33,5 @@ steps:
       pkg-config --libs --cflags pam libudev libsystemd libacl
 
       # libsession is not part of the daemon release checks yet.
-      cargo check --locked --workspace --exclude libsession-sys --exclude libsession-rs --all-targets --no-default-features
-      cargo check --locked --workspace --exclude libsession-sys --exclude libsession-rs --all-targets --all-features
+      cargo check --locked --workspace --exclude libsession --exclude libsession-sys --exclude libsession-rs --all-targets --no-default-features
+      cargo check --locked --workspace --exclude libsession --exclude libsession-sys --exclude libsession-rs --all-targets --all-features

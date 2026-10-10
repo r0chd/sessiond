@@ -15,7 +15,7 @@ use backend::consolekit;
 use backend::logind;
 #[cfg(feature = "sessiond")]
 use backend::sessiond;
-use std::{env, ffi, process, ptr, rc, result};
+use std::{env, ffi, process, ptr, rc};
 
 struct Libsession {
     backend: Box<dyn backend::Backend>,
@@ -40,44 +40,6 @@ pub enum LibsessionStatus {
     InvalidData = 6,
     IoError = 7,
     DbusError = 8,
-}
-
-impl From<LibsessionStatus> for result::Result<(), Error> {
-    fn from(value: LibsessionStatus) -> Self {
-        match value {
-            LibsessionStatus::Ok => Ok(()),
-            LibsessionStatus::InvalidArgument => Err(Error::InvalidArgument),
-            LibsessionStatus::NotFound => Err(Error::NotFound),
-            LibsessionStatus::InternalError => Err(Error::InternalError),
-            LibsessionStatus::PermissionDenied => Err(Error::PermissionDenied),
-            LibsessionStatus::Unavailable => Err(Error::Unavailable),
-            LibsessionStatus::InvalidData => Err(Error::InvalidData),
-            LibsessionStatus::IoError => Err(Error::IoError),
-            LibsessionStatus::DbusError => Err(Error::DbusError),
-        }
-    }
-}
-
-pub type Result<T> = result::Result<T, Error>;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum Error {
-    #[error("invalid argument")]
-    InvalidArgument,
-    #[error("not found")]
-    NotFound,
-    #[error("internal error")]
-    InternalError,
-    #[error("permission denied")]
-    PermissionDenied,
-    #[error("unavailable")]
-    Unavailable,
-    #[error("invalid data")]
-    InvalidData,
-    #[error("I/O error")]
-    IoError,
-    #[error("D-Bus error")]
-    DbusError,
 }
 
 #[repr(C)]

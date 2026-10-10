@@ -11,11 +11,11 @@
   logindSupport ? lib.meta.availableOn stdenv.hostPlatform systemdLibs,
 }:
 let
-  cargoToml = fromTOML (builtins.readFile ../../libsession-sys/Cargo.toml);
+  cargoToml = fromTOML (builtins.readFile ../../libsession/libsession/Cargo.toml);
   features =
-    lib.optional sessiondSupport "libsession-sys/sessiond"
-    ++ lib.optional consolekitSupport "libsession-sys/consolekit"
-    ++ lib.optional logindSupport "libsession-sys/logind";
+    lib.optional sessiondSupport "libsession/sessiond"
+    ++ lib.optional consolekitSupport "libsession/consolekit"
+    ++ lib.optional logindSupport "libsession/logind";
 in
 craneLib.buildPackage {
   pname = "libsession";
@@ -37,12 +37,12 @@ craneLib.buildPackage {
   buildInputs = lib.optional logindSupport systemdLibs;
 
   cargoExtraArgs =
-    "--locked -p libsession-sys --no-default-features"
+    "--locked -p libsession --no-default-features"
     + lib.optionalString (features != [ ]) " --features ${lib.concatStringsSep "," features}";
 
   postBuild = ''
     if [ -z "''${CRANE_BUILD_DEPS_ONLY:-}" ]; then
-      cbindgen --config libsession-sys/cbindgen.toml --crate libsession-sys --output libsession.h libsession-sys
+      cbindgen --config libsession/libsession/cbindgen.toml --crate libsession --output libsession.h libsession/libsession
     fi
   '';
 
@@ -50,7 +50,7 @@ craneLib.buildPackage {
     install -Dm644 libsession.h $dev/include/libsession.h
 
     mkdir -p $dev/lib/pkgconfig
-    substitute libsession-sys/libsession.pc.in $dev/lib/pkgconfig/libsession.pc \
+    substitute libsession/libsession/libsession.pc.in $dev/lib/pkgconfig/libsession.pc \
       --replace-fail @PREFIX@ "$out" \
       --replace-fail @INCLUDE@ "$dev/include" \
       --replace-fail @LIBDIR@ "$out/lib" \

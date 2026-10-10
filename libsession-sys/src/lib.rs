@@ -1,5 +1,7 @@
 mod backend;
 mod logging;
+#[cfg(feature = "sessiond")]
+mod sessiond_state;
 mod status;
 
 #[cfg(not(any(feature = "sessiond", feature = "logind", feature = "consolekit")))]

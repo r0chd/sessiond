@@ -1039,19 +1039,19 @@ checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 
 [[package]]
 name = "libsession-rs"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "libsession-sys",
 ]
 
 [[package]]
 name = "libsession-sys"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "inotify",
  "libc",
  "libsystemd-sys",
- "sessiond-state",
+ "serde",
  "thiserror",
  "toml",
  "zbus",

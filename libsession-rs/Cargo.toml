@@ -5,12 +5,12 @@ categories.workspace = true
 edition.workspace = true
 license = "MIT"
 repository.workspace = true
-version = "0.1.1"
+version = "0.1.2"
 description.workspace = true
 readme.workspace = true
 
 [dependencies]
-libsession_sys = { package = "libsession-sys", path = "../libsession-sys", version = "0.1.0", default-features = false }
+libsession_sys = { package = "libsession-sys", path = "../libsession-sys", version = "0.1.2", default-features = false }
 
 [features]
 default = ["sessiond", "logind", "consolekit"]

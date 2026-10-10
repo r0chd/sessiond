@@ -1,8 +1,13 @@
 use crate::backend;
+#[cfg(feature = "sessiond")]
+use crate::sessiond_state;
 use std::io;
+#[cfg(feature = "consolekit")]
 use zbus::DBusError;
+#[cfg(feature = "consolekit")]
 use zbus::fdo;
 
+#[cfg(feature = "sessiond")]
 impl From<sessiond_state::Error> for backend::Error {
     fn from(err: sessiond_state::Error) -> Self {
         match err {

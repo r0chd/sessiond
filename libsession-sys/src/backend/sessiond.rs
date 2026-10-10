@@ -1,5 +1,5 @@
 use crate::logging;
-use sessiond_state::monitor;
+use crate::sessiond_state::{self, monitor};
 use std::os::fd::AsRawFd;
 use std::{fs, io, path, rc};
 

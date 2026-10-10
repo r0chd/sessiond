@@ -6,6 +6,10 @@ license = "MIT"
 repository.workspace = true
 description = "Shared sessiond state file types"
 
+[lib]
+# Bundle the shared source with libsession-sys so this crate can remain private.
+path = "../libsession-sys/src/sessiond_state/mod.rs"
+
 [dependencies]
 inotify = { version = "0.11.5", default-features = false, optional = true }
 serde = { version = "1.0.228", features = ["derive", "rc"] }

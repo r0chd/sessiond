@@ -40,6 +40,22 @@ impl super::Backend for Logind {
         crate::LibsessionBackend::Logind
     }
 
+    fn get_vt(&mut self, session_id: &str) -> super::Result<Option<u32>> {
+        let session_id = ffi::CString::new(session_id)
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
+        let mut vt = 0;
+        let result = unsafe { login::sd_session_get_vt(session_id.as_ptr(), &raw mut vt) };
+
+        if result == -libc::ENXIO {
+            return Ok(None);
+        }
+        if result < 0 {
+            return Err(io::Error::from_raw_os_error(-result).into());
+        }
+
+        Ok((vt != 0).then_some(vt))
+    }
+
     fn list_sessions(&mut self) -> super::Result<Vec<String>> {
         self.logger.log(crate::LibsessionLogLevel::Debug, || {
             "logind: listing all sessions".to_string()

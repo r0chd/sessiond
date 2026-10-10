@@ -46,6 +46,8 @@ pub trait Backend {
     fn get_monitor(&self) -> Option<Box<dyn BackendMonitor>>;
 
     fn list_sessions(&mut self) -> Result<Vec<String>>;
+
+    fn get_vt(&mut self, session_id: &str) -> Result<Option<u32>>;
 }
 
 pub trait BackendMonitor {

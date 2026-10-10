@@ -464,6 +464,28 @@ pub unsafe extern "C" fn libsession_session_is_local(
     LibsessionStatus::Ok
 }
 
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn libsession_session_get_vt(
+    ctx: *mut LibsessionContext,
+    session: *const LibsessionSession,
+    ret_vt: *mut u32,
+) -> LibsessionStatus {
+    if ctx.is_null() || session.is_null() || ret_vt.is_null() {
+        return LibsessionStatus::InvalidArgument;
+    }
+
+    let libsession = unsafe { &mut *ctx.cast::<Libsession>() };
+    let session = unsafe { &*session.cast::<LibsessionSession>() };
+
+    match libsession.backend.get_vt(&session.0) {
+        Ok(Some(vt)) => unsafe { ret_vt.write(vt) },
+        Ok(None) => {}
+        Err(error) => return LibsessionStatus::from(&error),
+    }
+
+    LibsessionStatus::Ok
+}
+
 /// Copies a session ID into an allocated, NUL-terminated C string.
 ///
 /// Free the returned string with `libsession_session_id_free`.

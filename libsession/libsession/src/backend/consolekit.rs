@@ -25,6 +25,9 @@ trait ConsoleKitSession {
     #[zbus(name = "GetUnixUser")]
     fn get_unix_user(&self) -> zbus::Result<u32>;
 
+    #[zbus(name = "GetVTNr")]
+    fn get_vt_nr(&self) -> zbus::Result<u32>;
+
     #[zbus(name = "IsActive")]
     fn is_active(&self) -> zbus::Result<bool>;
 
@@ -55,6 +58,22 @@ impl ConsoleKit {
 impl super::Backend for ConsoleKit {
     fn get_backend(&self) -> crate::LibsessionBackend {
         crate::LibsessionBackend::ConsoleKit
+    }
+
+    fn get_vt(&mut self, session_id: &str) -> super::Result<Option<u32>> {
+        for path in self.manager.get_sessions()? {
+            let session = ConsoleKitSessionProxyBlocking::builder(&self.connection)
+                .path(path)?
+                .build()?;
+            if session.get_id()? == session_id {
+                return Ok(match session.get_vt_nr()? {
+                    0 => None,
+                    vt => Some(vt),
+                });
+            }
+        }
+
+        Err(io::Error::new(io::ErrorKind::NotFound, "session not found").into())
     }
 
     fn list_sessions(&mut self) -> super::Result<Vec<String>> {

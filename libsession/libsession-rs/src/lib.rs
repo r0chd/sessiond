@@ -36,8 +36,7 @@ impl Context {
             libsession_sys::libsession_get_session(self.0.as_ptr(), &raw mut id)
         })?;
 
-        let id = ptr::NonNull::new(id).ok_or(libsession_sys::Error::InternalError)?;
-        Ok(Session(id))
+        Session::new(id)
     }
 
     /// Retrieves the session ID for a process.
@@ -52,8 +51,7 @@ impl Context {
             libsession_sys::libsession_pid_get_session(self.0.as_ptr(), pid, &raw mut id)
         })?;
 
-        let id = ptr::NonNull::new(id).ok_or(libsession_sys::Error::InternalError)?;
-        Ok(Session(id))
+        Session::new(id)
     }
 
     pub fn get_display_for_uid(&self, uid: u32) -> libsession_sys::Result<Session> {
@@ -62,8 +60,7 @@ impl Context {
             libsession_sys::libsession_uid_get_display(self.0.as_ptr(), uid, &raw mut id)
         })?;
 
-        let id = ptr::NonNull::new(id).ok_or(libsession_sys::Error::InternalError)?;
-        Ok(Session(id))
+        Session::new(id)
     }
 
     pub fn list_sessions(&self) -> libsession_sys::Result<Vec<Session>> {
@@ -87,12 +84,16 @@ impl Context {
         let ids = unsafe { std::slice::from_raw_parts_mut(sessions.as_ptr(), count) };
         let mut result = Vec::with_capacity(count);
         for id in ids {
-            let Some(session) = ptr::NonNull::new(*id) else {
-                unsafe { libsession_sys::libsession_session_list_free(sessions.as_ptr(), count) };
-                return Err(libsession_sys::Error::InternalError);
+            let session = match Session::new(*id) {
+                Ok(session) => session,
+                Err(error) => {
+                    unsafe {
+                        libsession_sys::libsession_session_list_free(sessions.as_ptr(), count)
+                    };
+                    return Err(error);
+                }
             };
-            result.push(Session(session));
-            // Transfer ownership of the handle while leaving the array to the library.
+            result.push(session);
             *id = ptr::null_mut();
         }
         unsafe { libsession_sys::libsession_session_list_free(sessions.as_ptr(), count) };
@@ -106,7 +107,7 @@ impl Context {
         libsession_sys::Result::<()>::from(unsafe {
             libsession_sys::libsession_session_is_local(
                 self.0.as_ptr(),
-                session.0.as_ptr(),
+                session.inner.as_ptr(),
                 &raw mut is_local,
             )
         })?;
@@ -143,7 +144,7 @@ impl Context {
         libsession_sys::Result::<()>::from(unsafe {
             libsession_sys::libsession_session_get_uid(
                 self.0.as_ptr(),
-                session.0.as_ptr(),
+                session.as_ptr(),
                 &raw mut uid,
             )
         })?;
@@ -160,7 +161,7 @@ impl Context {
         libsession_sys::Result::<()>::from(unsafe {
             libsession_sys::libsession_session_get_state(
                 self.0.as_ptr(),
-                session.0.as_ptr(),
+                session.inner.as_ptr(),
                 &raw mut state,
             )
         })?;
@@ -174,7 +175,7 @@ impl Context {
         libsession_sys::Result::<()>::from(unsafe {
             libsession_sys::libsession_session_is_active(
                 self.0.as_ptr(),
-                session.0.as_ptr(),
+                session.inner.as_ptr(),
                 &raw mut is_active,
             )
         })?;
@@ -235,28 +236,47 @@ impl Context {
     }
 }
 
-pub struct Session(ptr::NonNull<libsession_sys::LibsessionSession>);
+pub struct Session {
+    id: String,
+    inner: ptr::NonNull<libsession_sys::LibsessionSession>,
+}
 
-impl Session {
-    pub fn id(&self) -> libsession_sys::Result<String> {
-        let mut id = ptr::null_mut();
+impl<'a> Session {
+    fn new(session: *mut libsession_sys::LibsessionSession) -> libsession_sys::Result<Self> {
+        let session = ptr::NonNull::new(session).ok_or(libsession_sys::Error::InternalError)?;
+
+        let mut id_ptr = ptr::null_mut();
         libsession_sys::Result::<()>::from(unsafe {
-            libsession_sys::libsession_session_get_id(self.0.as_ptr(), &raw mut id)
+            libsession_sys::libsession_session_get_id(session.as_ptr(), &raw mut id_ptr)
         })?;
-        let id = ptr::NonNull::new(id).ok_or(libsession_sys::Error::InternalError)?;
 
-        let result = unsafe { ffi::CStr::from_ptr(id.as_ptr()) }
+        let id_ptr = ptr::NonNull::new(id_ptr).ok_or(libsession_sys::Error::InternalError)?;
+
+        let id_result = unsafe { ffi::CStr::from_ptr(id_ptr.as_ptr()) }
             .to_str()
             .map(str::to_owned)
-            .map_err(|_| libsession_sys::Error::InvalidData);
-        unsafe { libsession_sys::libsession_session_id_free(id.as_ptr()) };
-        result
+            .map_err(|_| libsession_sys::Error::InvalidData)?;
+
+        unsafe { libsession_sys::libsession_session_id_free(id_ptr.as_ptr()) };
+
+        Ok(Self {
+            inner: session,
+            id: id_result,
+        })
+    }
+
+    fn as_ptr(&self) -> *mut libsession_sys::LibsessionSession {
+        self.inner.as_ptr()
+    }
+
+    pub fn id(&'a self) -> &'a str {
+        &self.id
     }
 }
 
 impl Drop for Session {
     fn drop(&mut self) {
-        unsafe { libsession_sys::libsession_session_free(self.0.as_ptr()) };
+        unsafe { libsession_sys::libsession_session_free(self.as_ptr()) };
     }
 }
 

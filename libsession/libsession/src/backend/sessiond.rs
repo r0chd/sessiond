@@ -27,6 +27,24 @@ impl super::Backend for Sessiond {
         crate::LibsessionBackend::Sessiond
     }
 
+    fn get_vt(&mut self, session_id: &str) -> super::Result<Option<u32>> {
+        self.logger.log(crate::LibsessionLogLevel::Debug, || {
+            format!("sessiond: looking up vt for session ")
+        });
+
+        if self.monitor.has_changed()? {
+            self.state.try_read()?;
+        }
+
+        let session = self
+            .state
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "session not found"))?;
+
+        Ok(session.vt.map(|vt| vt.get()))
+    }
+
     fn list_sessions(&mut self) -> super::Result<Vec<String>> {
         self.logger.log(crate::LibsessionLogLevel::Debug, || {
             "sessiond: listing all sessions".to_string()

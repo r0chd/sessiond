@@ -56,22 +56,18 @@ fn connects_to_correct_backend() {
 fn list_sessions() {
     let context = Context::connect().expect("no session backend available");
 
-    let current_id = context
+    let session = context
         .get_session()
-        .expect("current process has no session")
-        .id()
-        .expect("failed to read current session ID");
-
-    let ids: Vec<_> = context
-        .list_sessions()
-        .expect("failed to list sessions")
-        .iter()
-        .map(|session| session.id().expect("failed to read session ID"))
-        .collect();
+        .expect("current process has no session");
+    let current_id = session.id();
 
     assert!(
-        ids.contains(&current_id),
-        "current session {current_id:?} missing from session list: {ids:?}"
+        context
+            .list_sessions()
+            .expect("failed to list sessions")
+            .into_iter()
+            .any(|session| session.id() == current_id),
+        "current session {current_id:?} missing from session list"
     );
 }
 
@@ -111,16 +107,13 @@ fn get_display_session() {
     let uid = context.get_owner_uid_for_pid(pid).unwrap();
     let session = context.get_display_for_uid(uid).unwrap();
 
-    let ids: Vec<_> = context
-        .list_sessions()
-        .expect("failed to list sessions")
-        .iter()
-        .map(|session| session.id().expect("failed to read session ID"))
-        .collect();
-
     assert!(
-        ids.contains(&session.id().expect("failed to read display session ID")),
-        "current session {:?} missing from session list: {ids:?}",
+        context
+            .list_sessions()
+            .expect("failed to list sessions")
+            .into_iter()
+            .any(|id| session.id() == id.id()),
+        "current session {:?} missing from session list",
         session.id()
     );
 }

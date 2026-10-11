@@ -48,6 +48,8 @@ pub trait Backend {
     fn list_sessions(&mut self) -> Result<Vec<String>>;
 
     fn get_vt(&mut self, session_id: &str) -> Result<Option<u32>>;
+
+    fn get_tty(&mut self, session_id: &str) -> Result<Option<String>>;
 }
 
 pub trait BackendMonitor {

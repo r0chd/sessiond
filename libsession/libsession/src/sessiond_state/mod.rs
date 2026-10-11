@@ -68,6 +68,7 @@ pub struct Session {
     pub uid: u32,
     pub class: SessionClass,
     pub vt: Option<num::NonZeroU32>,
+    pub tty: Option<sync::Arc<str>>,
     pub leader: Option<num::NonZeroU32>,
     pub remote_host: Option<sync::Arc<str>>,
     pub timestamp: u128,
@@ -94,6 +95,7 @@ pub enum Error {
 }
 
 impl State {
+    #[must_use]
     pub fn path() -> path::PathBuf {
         path::PathBuf::from("/run/sessiond/state.toml")
     }
@@ -106,7 +108,7 @@ impl State {
     /// # Errors
     /// Returns an error if the inotify instance or directory watch cannot be created.
     #[cfg(feature = "monitor")]
-    pub fn monitor(&self) -> io::Result<monitor::Monitor> {
+    pub fn monitor() -> io::Result<monitor::Monitor> {
         monitor::Monitor::new(Self::path())
     }
 

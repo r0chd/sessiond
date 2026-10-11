@@ -40,6 +40,15 @@ impl super::Backend for Logind {
         crate::LibsessionBackend::Logind
     }
 
+    fn get_tty(&mut self, session_id: &str) -> super::Result<Option<String>> {
+        let session_id = ffi::CString::new(session_id).unwrap();
+        let mut tty = ptr::null_mut();
+
+        let result = unsafe { login::sd_session_get_tty(session_id.as_ptr(), &raw mut tty) };
+
+        Ok((result >= 0).then(|| sd_string(tty)).flatten())
+    }
+
     fn get_vt(&mut self, session_id: &str) -> super::Result<Option<u32>> {
         let session_id = ffi::CString::new(session_id)
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;

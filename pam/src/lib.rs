@@ -75,8 +75,8 @@ impl PamServiceModule for Pam {
                 .uid();
             let envlist = pamh.getenvlist()?;
 
-            let vt = pamh
-                .get_tty()?
+            let tty = pamh.get_tty()?;
+            let vt: Option<u32> = tty
                 .and_then(|tty| {
                     tty.to_string_lossy()
                         .rsplit('/')
@@ -90,8 +90,7 @@ impl PamServiceModule for Pam {
                         let (name, value) = entry.split_once('=')?;
                         (name == "XDG_VTNR").then(|| value.parse().ok()).flatten()
                     })
-                })
-                .unwrap_or(0);
+                });
 
             let remote_host = pamh
                 .get_rhost()?
@@ -112,18 +111,27 @@ impl PamServiceModule for Pam {
 
                 if name == "XDG_SESSION_CLASS" {
                     class = match value {
+                        "user" => session_management_v1::SessionClass::User,
                         "greeter" => session_management_v1::SessionClass::Greeter,
                         "lock-screen" => session_management_v1::SessionClass::LockScreen,
                         "background" => session_management_v1::SessionClass::Background,
                         "background-light" => session_management_v1::SessionClass::BackgroundLight,
                         "manager" => session_management_v1::SessionClass::Manager,
                         "manager-early" => session_management_v1::SessionClass::ManagerEarly,
-                        _ => session_management_v1::SessionClass::User,
+                        _ => session_management_v1::SessionClass::Unkown,
                     };
                 }
             }
 
-            manager.send_create_session(uid, vt, is_local, remote_host, class, &env);
+            manager.send_create_session(
+                uid,
+                vt.unwrap_or_default(),
+                tty.unwrap_or_default().to_string_lossy(),
+                is_local,
+                remote_host,
+                class,
+                &env,
+            );
 
             while !session.done {
                 event_queue

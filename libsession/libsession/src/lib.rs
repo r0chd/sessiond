@@ -465,6 +465,34 @@ pub unsafe extern "C" fn libsession_session_is_local(
 }
 
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn libsession_session_get_tty(
+    ctx: *mut LibsessionContext,
+    session: *const LibsessionSession,
+    ret_tty: *mut *mut ffi::c_char,
+) -> LibsessionStatus {
+    if ctx.is_null() || session.is_null() || ret_tty.is_null() {
+        return LibsessionStatus::InvalidArgument;
+    }
+
+    let libsession = unsafe { &mut *ctx.cast::<Libsession>() };
+    let session = unsafe { &*session.cast::<LibsessionSession>() };
+
+    match libsession.backend.get_tty(&session.0) {
+        Ok(Some(tty)) => {
+            let Ok(tty) = ffi::CString::new(tty) else {
+                return LibsessionStatus::InvalidArgument;
+            };
+
+            unsafe { ret_tty.write(tty.into_raw()) };
+        }
+        Ok(None) => {}
+        Err(error) => return LibsessionStatus::from(&error),
+    }
+
+    LibsessionStatus::Ok
+}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_session_get_vt(
     ctx: *mut LibsessionContext,
     session: *const LibsessionSession,
@@ -488,7 +516,7 @@ pub unsafe extern "C" fn libsession_session_get_vt(
 
 /// Copies a session ID into an allocated, NUL-terminated C string.
 ///
-/// Free the returned string with `libsession_session_id_free`.
+/// Free the returned string with `libsession_string_free`.
 ///
 /// # Safety
 ///
@@ -522,7 +550,7 @@ pub unsafe extern "C" fn libsession_session_get_id(
 /// `string` must be null or a pointer returned by this library that has not
 /// already been freed. The pointer must not be used after this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn libsession_session_id_free(string: *mut ffi::c_char) {
+pub unsafe extern "C" fn libsession_string_free(string: *mut ffi::c_char) {
     if !string.is_null() {
         unsafe { drop(ffi::CString::from_raw(string)) };
     }

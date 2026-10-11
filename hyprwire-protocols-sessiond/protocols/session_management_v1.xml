@@ -39,6 +39,7 @@
    </description>
    <arg name="uid" type="uint" summary="user id"/>
    <arg name="vt" type="uint" summary="virtual terminal number, 0 if the session is not bound to a VT"/>
+   <arg name="tty" type="varchar" summary="TTY device name, empty if not attached to a TTY"/>
    <arg name="is_local" type="uint" summary="non-zero if local, zero if remote"/>
    <arg name="remote_host" type="varchar" summary="remote host, empty for local sessions"/>
    <arg name="class" type="enum" interface="session_class" summary="session class"/>
@@ -86,5 +87,6 @@
   <value idx="4" name="background_light" summary="lightweight background session excluded from idle shutdown accounting"/>
   <value idx="5" name="manager" summary="per-user service manager session"/>
   <value idx="6" name="manager_early" summary="early per-user service manager session created before a regular login"/>
+  <value idx="7" name="unkown" summary="session whose type could not be determined"/>
  </enum>
 </protocol>

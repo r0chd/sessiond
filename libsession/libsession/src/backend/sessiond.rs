@@ -1,5 +1,6 @@
 use crate::logging;
-use crate::sessiond_state::{self, monitor};
+use crate::sessiond_state;
+use crate::sessiond_state::monitor;
 use std::os::fd::AsRawFd;
 use std::{fs, io, path, rc};
 
@@ -16,7 +17,7 @@ impl Sessiond {
 
         Some(Self {
             logger,
-            monitor: state.monitor().ok()?,
+            monitor: sessiond_state::State::monitor().ok()?,
             state,
         })
     }
@@ -27,9 +28,27 @@ impl super::Backend for Sessiond {
         crate::LibsessionBackend::Sessiond
     }
 
+    fn get_tty(&mut self, session_id: &str) -> super::Result<Option<String>> {
+        self.logger.log(crate::LibsessionLogLevel::Debug, || {
+            format!("sessiond: looking up vt for session {session_id}")
+        });
+
+        if self.monitor.has_changed()? {
+            self.state.try_read()?;
+        }
+
+        let session = self
+            .state
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "session not found"))?;
+
+        Ok(session.tty.as_ref().map(|tty| tty.to_string()))
+    }
+
     fn get_vt(&mut self, session_id: &str) -> super::Result<Option<u32>> {
         self.logger.log(crate::LibsessionLogLevel::Debug, || {
-            format!("sessiond: looking up vt for session ")
+            format!("sessiond: looking up vt for session {session_id}")
         });
 
         if self.monitor.has_changed()? {
@@ -190,7 +209,7 @@ impl super::Backend for Sessiond {
     }
 
     fn get_monitor(&self) -> Option<Box<dyn super::BackendMonitor>> {
-        Some(Box::new(self.state.monitor().ok()?))
+        Some(Box::new(sessiond_state::State::monitor().ok()?))
     }
 }
 

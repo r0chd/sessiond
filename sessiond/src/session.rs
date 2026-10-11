@@ -96,6 +96,7 @@ pub struct PendingSession {
     pub uid: u32,
     pub class: Option<SessionClass>,
     pub vt: Option<num::NonZeroU32>,
+    pub tty: Option<sync::Arc<str>>,
     pub remote_host: Option<sync::Arc<str>>,
     pub env: BTreeMap<sync::Arc<str>, sync::Arc<str>>,
     pub cgroup: Option<CgroupControl>,
@@ -178,6 +179,9 @@ pub struct Uid(pub u32);
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Vt(pub num::NonZeroU32);
+
+#[derive(Component, Debug, Clone, PartialEq, Eq)]
+pub struct Tty(pub sync::Arc<str>);
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Timestamp(pub time::SystemTime);
@@ -268,6 +272,7 @@ pub fn spawn(
     class: SessionClass,
     uid: u32,
     vt: Option<num::NonZeroU32>,
+    tty: Option<sync::Arc<str>>,
     leader: Option<num::NonZeroU32>,
     remote_host: Option<sync::Arc<str>>,
     session_state: session_core_v1::SessionState,
@@ -292,6 +297,9 @@ pub fn spawn(
     cmd.insert(cgroup);
     if let Some(vt) = vt {
         cmd.insert(Vt(vt));
+    }
+    if let Some(tty) = tty {
+        cmd.insert(Tty(tty));
     }
     if let Some(leader) = leader {
         cmd.insert(Leader(leader));
@@ -706,6 +714,9 @@ pub enum SessionManagementAction {
     Vt {
         vt: u32,
     },
+    Tty {
+        tty: sync::Arc<str>,
+    },
     RemoteHost {
         remote_host: sync::Arc<str>,
     },
@@ -845,6 +856,7 @@ pub fn handle_session_management_action(
                         uid: *uid,
                         class: None,
                         vt: None,
+                        tty: None,
                         remote_host: None,
                         env,
                         cgroup: None,
@@ -865,6 +877,13 @@ pub fn handle_session_management_action(
                 if let Some(pending_session) = pending_sessions.by_management_object.get_mut(object)
                 {
                     pending_session.vt = num::NonZeroU32::new(*vt);
+                    continue;
+                }
+            }
+            SessionManagementAction::Tty { tty } => {
+                if let Some(pending_session) = pending_sessions.by_management_object.get_mut(object)
+                {
+                    pending_session.tty = Some(sync::Arc::clone(tty));
                     continue;
                 }
             }
@@ -1058,6 +1077,7 @@ pub fn handle_session_management_action(
                                 pending_session.class.unwrap_or_default(),
                                 pending_session.uid,
                                 pending_session.vt,
+                                pending_session.tty,
                                 Some(leader),
                                 pending_session.remote_host,
                                 session_state,
@@ -1099,6 +1119,7 @@ pub fn handle_session_management_action(
                                 pending_session.class.unwrap_or_default(),
                                 pending_session.uid,
                                 pending_session.vt,
+                                pending_session.tty,
                                 None,
                                 pending_session.remote_host,
                                 session_state,
@@ -1153,6 +1174,7 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
             session_manager_v1::Event::CreateSession {
                 uid,
                 vt,
+                tty,
                 is_local,
                 remote_host,
                 class,
@@ -1169,6 +1191,10 @@ impl hyprwire::Dispatch<session_manager_v1::SessionManager> for crate::Sessiond 
                 });
                 self.world.write_message(SessionManagementMessage {
                     action: SessionManagementAction::Vt { vt },
+                    object: Some(target.clone()),
+                });
+                self.world.write_message(SessionManagementMessage {
+                    action: SessionManagementAction::Tty { tty: tty.into() },
                     object: Some(target.clone()),
                 });
                 if is_local == 0 {
@@ -1248,6 +1274,9 @@ impl hyprwire::Dispatch<session_management_session::SessionManagementSession> fo
     ) {
         let action = match event {
             session_management_session::Event::Vt { vt } => SessionManagementAction::Vt { vt },
+            session_management_session::Event::Tty { tty } => {
+                SessionManagementAction::Tty { tty: tty.into() }
+            }
             session_management_session::Event::RemoteHost { remote_host } => {
                 SessionManagementAction::RemoteHost {
                     remote_host: remote_host.into(),

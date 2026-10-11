@@ -23,6 +23,7 @@ struct Session {
     username: String,
     class: session_core_v1::SessionClass,
     vt: u32,
+    tty: String,
     leader: u32,
     timestamp: u32,
     state: session_core_v1::SessionState,
@@ -107,6 +108,7 @@ impl State {
                 username: String::new(),
                 class: session_core_v1::SessionClass::User,
                 vt: 0,
+                tty: String::new(),
                 leader: 0,
                 timestamp: 0,
                 state: session_core_v1::SessionState::Online,
@@ -207,6 +209,7 @@ impl hyprwire::Dispatch<session_core_session::SessionCoreSession> for State {
             }
             session_core_session::Event::Class { class } => s.class = class,
             session_core_session::Event::Vt { vt } => s.vt = vt,
+            session_core_session::Event::Tty { tty } => s.tty = tty,
             session_core_session::Event::Leader { leader } => s.leader = leader,
             session_core_session::Event::Timestamp { timestamp } => s.timestamp = timestamp,
             session_core_session::Event::State { state } => s.state = state,
@@ -754,7 +757,13 @@ fn main() -> anyhow::Result<()> {
                                     "username": session.username,
                                     "class": class_name(session.class),
                                     "vt": session.vt,
-                                    "tty": session.vt.checked_sub(1).map(|_| format!("tty{}", session.vt)),
+                                    "tty": if !session.tty.is_empty() {
+                                        Some(session.tty.clone())
+                                    } else if session.vt > 0 {
+                                        Some(format!("tty{}", session.vt))
+                                    } else {
+                                        None
+                                    },
                                     "leader": session.leader,
                                     "timestamp": session.timestamp,
                                     "state": session_state_name(session.state),
@@ -775,16 +784,20 @@ fn main() -> anyhow::Result<()> {
             let mut table = new_table();
             table.set_header(["ID", "UID", "USER", "CLASS", "TTY", "STATE", "SINCE"]);
             for s in state.sessions {
+                let tty = if !s.tty.is_empty() {
+                    s.tty.clone()
+                } else if s.vt > 0 {
+                    format!("tty{}", s.vt)
+                } else {
+                    "-".to_owned()
+                };
+
                 let mut row = vec![
                     s.id.to_string(),
                     s.uid.to_string(),
                     s.username,
                     class_name(s.class).to_owned(),
-                    if s.vt == 0 {
-                        "-".to_owned()
-                    } else {
-                        format!("tty{}", s.vt)
-                    },
+                    tty,
                 ];
                 row.extend([
                     session_state_name(s.state).to_owned(),

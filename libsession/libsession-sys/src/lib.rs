@@ -211,6 +211,18 @@ unsafe extern "C" {
         ret_active: *mut bool,
     ) -> LibsessionStatus;
 
+    pub fn libsession_session_get_vt(
+        ctx: *mut LibsessionContext,
+        session: *const LibsessionSession,
+        ret_vt: *mut u32,
+    ) -> LibsessionStatus;
+
+    pub fn libsession_session_get_tty(
+        ctx: *mut LibsessionContext,
+        session: *const LibsessionSession,
+        ret_tty: *mut *mut ffi::c_char,
+    ) -> LibsessionStatus;
+
     /// Reports whether a session is local.
     ///
     /// # Safety
@@ -227,7 +239,7 @@ unsafe extern "C" {
 
     /// Copies a session ID into an allocated, NUL-terminated C string.
     ///
-    /// Free the returned string with `libsession_session_id_free`.
+    /// Free the returned string with `libsession_string_free`.
     ///
     /// # Safety
     ///
@@ -245,7 +257,7 @@ unsafe extern "C" {
     ///
     /// `string` must be null or a pointer returned by this library that has not
     /// already been freed. The pointer must not be used after this call.
-    pub fn libsession_session_id_free(string: *mut ffi::c_char);
+    pub fn libsession_string_free(string: *mut ffi::c_char);
 
     pub fn libsession_monitor_new(ctx: *const LibsessionContext) -> *mut libsession_monitor;
 

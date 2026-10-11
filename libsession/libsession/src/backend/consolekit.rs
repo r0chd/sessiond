@@ -33,6 +33,9 @@ trait ConsoleKitSession {
 
     #[zbus(name = "IsLocal")]
     fn is_local(&self) -> zbus::Result<bool>;
+
+    #[zbus(name = "GetDisplayDevice")]
+    fn get_display_device(&self) -> zbus::Result<String>;
 }
 
 pub struct ConsoleKit {
@@ -58,6 +61,19 @@ impl ConsoleKit {
 impl super::Backend for ConsoleKit {
     fn get_backend(&self) -> crate::LibsessionBackend {
         crate::LibsessionBackend::ConsoleKit
+    }
+
+    fn get_tty(&mut self, session_id: &str) -> super::Result<Option<String>> {
+        for path in self.manager.get_sessions()? {
+            let session = ConsoleKitSessionProxyBlocking::builder(&self.connection)
+                .path(path)?
+                .build()?;
+            if session.get_id()? == session_id {
+                return Ok(Some(session.get_display_device()?));
+            }
+        }
+
+        Err(io::Error::new(io::ErrorKind::NotFound, "session not found").into())
     }
 
     fn get_vt(&mut self, session_id: &str) -> super::Result<Option<u32>> {

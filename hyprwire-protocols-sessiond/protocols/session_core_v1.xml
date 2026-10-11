@@ -117,6 +117,9 @@
   <s2c name="vt">
    <arg name="vt" type="uint" summary="virtual terminal number"/>
   </s2c>
+  <s2c name="tty">
+   <arg name="tty" type="varchar" summary="TTY device name"/>
+  </s2c>
   <s2c name="leader">
    <arg name="leader" type="uint" summary="PID of the session-creating process, or 0 if unknown"/>
   </s2c>
@@ -301,6 +304,7 @@
   <value idx="4" name="background_light" summary="lightweight background session excluded from idle shutdown accounting"/>
   <value idx="5" name="manager" summary="per-user service manager session"/>
   <value idx="6" name="manager_early" summary="early per-user service manager session created before a regular login"/>
+  <value idx="7" name="unkown" summary="session whose type could not be determined"/>
  </enum>
 
  <enum name="inhibitor_mode">

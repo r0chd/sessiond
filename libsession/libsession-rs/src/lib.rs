@@ -88,7 +88,7 @@ impl Context {
                 Ok(session) => session,
                 Err(error) => {
                     unsafe {
-                        libsession_sys::libsession_session_list_free(sessions.as_ptr(), count)
+                        libsession_sys::libsession_session_list_free(sessions.as_ptr(), count);
                     };
                     return Err(error);
                 }
@@ -167,6 +167,43 @@ impl Context {
         })?;
 
         Ok(state)
+    }
+
+    pub fn get_session_vt(&self, session: &Session) -> libsession_sys::Result<u32> {
+        let mut vt = 0u32;
+
+        libsession_sys::Result::<()>::from(unsafe {
+            libsession_sys::libsession_session_get_vt(
+                self.0.as_ptr(),
+                session.inner.as_ptr(),
+                &raw mut vt,
+            )
+        })?;
+
+        Ok(vt)
+    }
+
+    pub fn get_session_tty(&self, session: &Session) -> libsession_sys::Result<String> {
+        let mut tty_ptr = ptr::null_mut();
+
+        libsession_sys::Result::<()>::from(unsafe {
+            libsession_sys::libsession_session_get_tty(
+                self.0.as_ptr(),
+                session.inner.as_ptr(),
+                &raw mut tty_ptr,
+            )
+        })?;
+
+        let tty_ptr = ptr::NonNull::new(tty_ptr).ok_or(libsession_sys::Error::InternalError)?;
+
+        let tty_result = unsafe { ffi::CStr::from_ptr(tty_ptr.as_ptr()) }
+            .to_str()
+            .map(str::to_owned)
+            .map_err(|_| libsession_sys::Error::InvalidData)?;
+
+        unsafe { libsession_sys::libsession_string_free(tty_ptr.as_ptr()) };
+
+        Ok(tty_result)
     }
 
     pub fn is_session_active(&self, session: &Session) -> libsession_sys::Result<bool> {
@@ -257,7 +294,7 @@ impl<'a> Session {
             .map(str::to_owned)
             .map_err(|_| libsession_sys::Error::InvalidData)?;
 
-        unsafe { libsession_sys::libsession_session_id_free(id_ptr.as_ptr()) };
+        unsafe { libsession_sys::libsession_string_free(id_ptr.as_ptr()) };
 
         Ok(Self {
             inner: session,
@@ -265,10 +302,11 @@ impl<'a> Session {
         })
     }
 
-    fn as_ptr(&self) -> *mut libsession_sys::LibsessionSession {
+    const fn as_ptr(&self) -> *mut libsession_sys::LibsessionSession {
         self.inner.as_ptr()
     }
 
+    #[must_use]
     pub fn id(&'a self) -> &'a str {
         &self.id
     }

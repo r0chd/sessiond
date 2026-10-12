@@ -37,7 +37,7 @@ in
     );
 
     finit.services.sessiond = {
-      description = "daemon for power management";
+      description = "modular session management daemon";
       conditions = "service/dbus/ready";
       command = "${lib.getExe' cfg.package "sessiond"} --config ${configFile} --log-target syslog";
       notify = "systemd";

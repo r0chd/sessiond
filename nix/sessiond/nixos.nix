@@ -17,7 +17,7 @@ in
     services.dbus.packages = [ cfg.package ];
 
     systemd.services.sessiond = {
-      description = "session management daemon";
+      description = "modular session management daemon";
       wantedBy = [ "default.target" ];
 
       serviceConfig = {

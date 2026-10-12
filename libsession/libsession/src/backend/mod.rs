@@ -41,7 +41,7 @@ pub trait Backend {
 
     fn get_session_state(&mut self, session_id: &str) -> Result<crate::LibsessionSessionState>;
 
-    fn is_local_session(&self, session_id: &str) -> Option<bool>;
+    fn is_local_session(&mut self, session_id: &str) -> Option<bool>;
 
     fn get_monitor(&self) -> Option<Box<dyn BackendMonitor>>;
 

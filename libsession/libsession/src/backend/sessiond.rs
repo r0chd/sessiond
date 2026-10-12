@@ -2,7 +2,7 @@ use crate::logging;
 use crate::sessiond_state;
 use crate::sessiond_state::monitor;
 use std::os::fd::AsRawFd;
-use std::{fs, io, path, rc};
+use std::{fs, io, num, path, rc};
 
 pub struct Sessiond {
     logger: rc::Rc<logging::Logger>,
@@ -30,7 +30,7 @@ impl super::Backend for Sessiond {
 
     fn get_tty(&mut self, session_id: &str) -> super::Result<Option<String>> {
         self.logger.log(crate::LibsessionLogLevel::Debug, || {
-            format!("sessiond: looking up vt for session {session_id}")
+            format!("sessiond: looking up tty for session {session_id}")
         });
 
         if self.monitor.has_changed()? {
@@ -43,7 +43,7 @@ impl super::Backend for Sessiond {
             .get(session_id)
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "session not found"))?;
 
-        Ok(session.tty.as_ref().map(|tty| tty.to_string()))
+        Ok(session.tty.as_deref().map(str::to_owned))
     }
 
     fn get_vt(&mut self, session_id: &str) -> super::Result<Option<u32>> {
@@ -61,7 +61,7 @@ impl super::Backend for Sessiond {
             .get(session_id)
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "session not found"))?;
 
-        Ok(session.vt.map(|vt| vt.get()))
+        Ok(session.vt.map(num::NonZeroU32::get))
     }
 
     fn list_sessions(&mut self) -> super::Result<Vec<String>> {
@@ -202,7 +202,11 @@ impl super::Backend for Sessiond {
         }
     }
 
-    fn is_local_session(&self, session_id: &str) -> Option<bool> {
+    fn is_local_session(&mut self, session_id: &str) -> Option<bool> {
+        if self.monitor.has_changed().ok()? {
+            self.state.try_read().ok()?;
+        }
+
         let session = self.state.sessions.get(session_id)?;
 
         Some(session.remote_host.is_none())

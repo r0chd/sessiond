@@ -41,21 +41,28 @@ impl super::Backend for Logind {
     }
 
     fn get_tty(&mut self, session_id: &str) -> super::Result<Option<String>> {
-        let session_id = ffi::CString::new(session_id).unwrap();
+        let session_id = ffi::CString::new(session_id)
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
         let mut tty = ptr::null_mut();
 
         let result = unsafe { login::sd_session_get_tty(session_id.as_ptr(), &raw mut tty) };
+        if result == -libc::ENODATA {
+            return Ok(None);
+        }
+        if result < 0 {
+            return Err(io::Error::from_raw_os_error(-result).into());
+        }
 
-        Ok((result >= 0).then(|| sd_string(tty)).flatten())
+        Ok(sd_string(tty).filter(|tty| !tty.is_empty()))
     }
 
     fn get_vt(&mut self, session_id: &str) -> super::Result<Option<u32>> {
         let session_id = ffi::CString::new(session_id)
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
         let mut vt = 0;
-        let result = unsafe { login::sd_session_get_vt(session_id.as_ptr(), &raw mut vt) };
 
-        if result == -libc::ENXIO {
+        let result = unsafe { login::sd_session_get_vt(session_id.as_ptr(), &raw mut vt) };
+        if result == -libc::ENODATA {
             return Ok(None);
         }
         if result < 0 {
@@ -91,7 +98,7 @@ impl super::Backend for Logind {
         Ok(ids)
     }
 
-    fn is_local_session(&self, session_id: &str) -> Option<bool> {
+    fn is_local_session(&mut self, session_id: &str) -> Option<bool> {
         let session_id = ffi::CString::new(session_id).ok()?;
         let result = unsafe { login::sd_session_is_remote(session_id.as_ptr()) };
         (result >= 0).then_some(result == 0)

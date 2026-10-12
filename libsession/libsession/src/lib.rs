@@ -147,7 +147,7 @@ pub unsafe extern "C" fn libsession_get_backend(
     ctx: *mut LibsessionContext,
     ret_backend: *mut LibsessionBackend,
 ) -> LibsessionStatus {
-    if ctx.is_null() {
+    if ctx.is_null() || ret_backend.is_null() {
         return LibsessionStatus::InvalidArgument;
     }
 
@@ -227,7 +227,17 @@ pub unsafe extern "C" fn libsession_session_list_free(
     }
 }
 
+fn resolve_pid(pid: libc::pid_t) -> Option<u32> {
+    match pid {
+        // sd-login treats pid 0 as the calling process
+        0 => Some(process::id()),
+        pid => pid.try_into().ok(),
+    }
+}
+
 /// Retrieves an allocated session ID for a process.
+///
+/// A `pid` of 0 refers to the calling process.
 ///
 /// # Safety
 ///
@@ -247,7 +257,7 @@ pub unsafe extern "C" fn libsession_pid_get_session(
 
     let libsession = unsafe { &mut *ctx.cast::<Libsession>() };
 
-    let Ok(pid) = pid.try_into() else {
+    let Some(pid) = resolve_pid(pid) else {
         return LibsessionStatus::InvalidArgument;
     };
     let Some(session_id) = libsession.backend.get_session_id(pid) else {
@@ -301,13 +311,16 @@ pub unsafe extern "C" fn libsession_pid_get_owner_uid(
     pid: libc::pid_t,
     ret_uid: *mut libc::uid_t,
 ) -> LibsessionStatus {
-    if ctx.is_null() || pid < 0 || ret_uid.is_null() {
+    if ctx.is_null() || ret_uid.is_null() {
         return LibsessionStatus::InvalidArgument;
     }
+    let Some(resolved_pid) = resolve_pid(pid) else {
+        return LibsessionStatus::InvalidArgument;
+    };
 
     let libsession = unsafe { &mut *ctx.cast::<Libsession>() };
 
-    match libsession.backend.get_owner_uid(pid.cast_unsigned()) {
+    match libsession.backend.get_owner_uid(resolved_pid) {
         Ok(owner_uid) => {
             unsafe { ret_uid.write(owner_uid) };
             LibsessionStatus::Ok
@@ -464,6 +477,15 @@ pub unsafe extern "C" fn libsession_session_is_local(
     LibsessionStatus::Ok
 }
 
+/// Retrieves a session's TTY as an allocated, NUL-terminated C string.
+///
+/// On success, `ret_tty` is set to NULL if the session has no TTY. Free a
+/// non-null result with `libsession_string_free`.
+///
+/// # Safety
+///
+/// `ctx` and `session` must be valid, and `ret_tty` must point to writable
+/// pointer storage.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_session_get_tty(
     ctx: *mut LibsessionContext,
@@ -480,18 +502,28 @@ pub unsafe extern "C" fn libsession_session_get_tty(
     match libsession.backend.get_tty(&session.0) {
         Ok(Some(tty)) => {
             let Ok(tty) = ffi::CString::new(tty) else {
-                return LibsessionStatus::InvalidArgument;
+                return LibsessionStatus::InvalidData;
             };
 
             unsafe { ret_tty.write(tty.into_raw()) };
+            LibsessionStatus::Ok
         }
-        Ok(None) => {}
-        Err(error) => return LibsessionStatus::from(&error),
+        Ok(None) => {
+            unsafe { ret_tty.write(ptr::null_mut()) };
+            LibsessionStatus::Ok
+        }
+        Err(error) => LibsessionStatus::from(&error),
     }
-
-    LibsessionStatus::Ok
 }
 
+/// Retrieves a session's virtual terminal number.
+///
+/// On success, `ret_vt` is set to 0 if the session has no VT.
+///
+/// # Safety
+///
+/// `ctx` and `session` must be valid, and `ret_vt` must point to writable
+/// storage.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_session_get_vt(
     ctx: *mut LibsessionContext,
@@ -506,12 +538,12 @@ pub unsafe extern "C" fn libsession_session_get_vt(
     let session = unsafe { &*session.cast::<LibsessionSession>() };
 
     match libsession.backend.get_vt(&session.0) {
-        Ok(Some(vt)) => unsafe { ret_vt.write(vt) },
-        Ok(None) => {}
-        Err(error) => return LibsessionStatus::from(&error),
+        Ok(vt) => {
+            unsafe { ret_vt.write(vt.unwrap_or(0)) };
+            LibsessionStatus::Ok
+        }
+        Err(error) => LibsessionStatus::from(&error),
     }
-
-    LibsessionStatus::Ok
 }
 
 /// Copies a session ID into an allocated, NUL-terminated C string.

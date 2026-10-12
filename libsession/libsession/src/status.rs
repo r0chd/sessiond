@@ -33,7 +33,10 @@ impl From<&backend::Error> for crate::LibsessionStatus {
 
 impl From<&io::Error> for crate::LibsessionStatus {
     fn from(value: &io::Error) -> Self {
-        if matches!(value.raw_os_error(), Some(libc::ESRCH | libc::ENODATA)) {
+        if matches!(
+            value.raw_os_error(),
+            Some(libc::ESRCH | libc::ENODATA | libc::ENXIO)
+        ) {
             return Self::NotFound;
         }
 

@@ -169,7 +169,7 @@ impl Context {
         Ok(state)
     }
 
-    pub fn get_session_vt(&self, session: &Session) -> libsession_sys::Result<u32> {
+    pub fn get_session_vt(&self, session: &Session) -> libsession_sys::Result<Option<u32>> {
         let mut vt = 0u32;
 
         libsession_sys::Result::<()>::from(unsafe {
@@ -180,10 +180,10 @@ impl Context {
             )
         })?;
 
-        Ok(vt)
+        Ok((vt != 0).then_some(vt))
     }
 
-    pub fn get_session_tty(&self, session: &Session) -> libsession_sys::Result<String> {
+    pub fn get_session_tty(&self, session: &Session) -> libsession_sys::Result<Option<String>> {
         let mut tty_ptr = ptr::null_mut();
 
         libsession_sys::Result::<()>::from(unsafe {
@@ -194,16 +194,19 @@ impl Context {
             )
         })?;
 
-        let tty_ptr = ptr::NonNull::new(tty_ptr).ok_or(libsession_sys::Error::InternalError)?;
+        let Some(tty_ptr) = ptr::NonNull::new(tty_ptr) else {
+            return Ok(None);
+        };
 
         let tty_result = unsafe { ffi::CStr::from_ptr(tty_ptr.as_ptr()) }
             .to_str()
-            .map(str::to_owned)
-            .map_err(|_| libsession_sys::Error::InvalidData)?;
+            .map(str::to_owned);
 
         unsafe { libsession_sys::libsession_string_free(tty_ptr.as_ptr()) };
 
-        Ok(tty_result)
+        tty_result
+            .map(Some)
+            .map_err(|_| libsession_sys::Error::InvalidData)
     }
 
     pub fn is_session_active(&self, session: &Session) -> libsession_sys::Result<bool> {

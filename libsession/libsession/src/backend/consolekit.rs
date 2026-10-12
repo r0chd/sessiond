@@ -69,7 +69,8 @@ impl super::Backend for ConsoleKit {
                 .path(path)?
                 .build()?;
             if session.get_id()? == session_id {
-                return Ok(Some(session.get_display_device()?));
+                let tty = session.get_display_device()?;
+                return Ok((!tty.is_empty()).then_some(tty));
             }
         }
 
@@ -82,10 +83,8 @@ impl super::Backend for ConsoleKit {
                 .path(path)?
                 .build()?;
             if session.get_id()? == session_id {
-                return Ok(match session.get_vt_nr()? {
-                    0 => None,
-                    vt => Some(vt),
-                });
+                let vt = session.get_vt_nr()?;
+                return Ok((vt != 0).then_some(vt));
             }
         }
 
@@ -199,7 +198,7 @@ impl super::Backend for ConsoleKit {
         Err(io::Error::new(io::ErrorKind::NotFound, "session not found").into())
     }
 
-    fn is_local_session(&self, session_id: &str) -> Option<bool> {
+    fn is_local_session(&mut self, session_id: &str) -> Option<bool> {
         for path in self.manager.get_sessions().ok()? {
             let session = ConsoleKitSessionProxyBlocking::builder(&self.connection)
                 .path(path)

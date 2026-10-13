@@ -1,10 +1,12 @@
+engine: nixery
+
 when:
-  - event: ["push", "manual"]
-    branch: ["*"]
   - event: ["pull_request"]
     branch: ["master"]
-
-engine: nixery
+  - event: ["push", "manual"]
+    branch: ["master"]
+  - event: ["manual"]
+    branch: ["*"]
 
 environment:
   PKG_CONFIG_PATH: /lib/pkgconfig:/share/pkgconfig

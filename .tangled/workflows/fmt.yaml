@@ -1,10 +1,12 @@
+engine: nixery
+
 when:
-  - event: ["push", "manual"]
-    branch: ["*"]
   - event: ["pull_request"]
     branch: ["master"]
-
-engine: nixery
+  - event: ["push", "manual"]
+    branch: ["master"]
+  - event: ["manual"]
+    branch: ["*"]
 
 dependencies:
   nixpkgs:

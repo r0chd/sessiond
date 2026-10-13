@@ -1,8 +1,8 @@
+engine: nixery
+
 when:
   - event: ["push", "manual"]
     branch: ["master"]
-
-engine: nixery
 
 dependencies:
   nixpkgs/nixpkgs-unstable:

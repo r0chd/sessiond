@@ -1,0 +1,34 @@
+when:
+  - event: ["push", "manual"]
+    branch: ["*"]
+
+engine: nixery
+
+clone:
+  skip: true
+
+dependencies:
+  nixpkgs/nixpkgs-unstable:
+    - git
+    - openssh
+
+steps:
+  - name: Mirror to GitHub
+    command: |
+      set -eu
+      export HOME="${HOME:-/tmp/ci-home}"
+      mkdir -p "$HOME"
+      grep -q ':0:0:' /etc/passwd 2>/dev/null || \
+        echo "root:x:0:0:root:$HOME:/bin/sh" >> /etc/passwd
+
+      install -dm700 ~/.ssh
+      printf '%s\n' "$GITHUB_MIRROR_KEY" > ~/.ssh/id_ed25519
+      chmod 600 ~/.ssh/id_ed25519
+      ssh-keyscan -T 10 -H github.com >> ~/.ssh/known_hosts
+      export GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10"
+
+      git clone --bare https://tangled.org/did:plc:vj3bxta3i3cp26nn46yideoh repo.git
+      cd repo.git
+      git push --force --prune git@github.com:r0chd/sessiond.git \
+        'refs/heads/*:refs/heads/*' \
+        'refs/tags/*:refs/tags/*'

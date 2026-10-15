@@ -17,12 +17,10 @@ crate-type = ["cdylib"]
 workspace = true
 
 [dependencies]
-pamsm = { git = "https://github.com/r0chd/pam_sm_rust", rev = "fcb5a16c9655eb55a569ad311b3423433355e3ed", features = [
-  "libpam",
-] }
 uzers = "0.12.2"
 hyprwire = "0.5.1"
 hyprwire-protocols-sessiond = { path = "../hyprwire-protocols-sessiond", version = "0.2.0" }
+pamsm_sessiond = { version = "0.1.0", features = ["libpam"] }
 
 [build-dependencies]
 hyprwire-scanner = "0.5.1"

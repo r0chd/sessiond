@@ -1,7 +1,8 @@
 use hyprwire::client;
 use hyprwire_protocols_sessiond::client::session_management::v1::session_management_v1;
 use hyprwire_protocols_sessiond::client::session_management::v1::session_management_v1::session_manager;
-use pamsm::{PamLibExt, PamServiceModule};
+use pamsm_sessiond as pamsm;
+use pamsm_sessiond::{PamLibExt, PamServiceModule};
 
 struct Session {
     id: Option<u32>,

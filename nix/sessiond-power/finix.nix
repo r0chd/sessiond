@@ -2,6 +2,7 @@
   lib,
   pkgs,
   config,
+  modules,
   ...
 }:
 let
@@ -10,6 +11,9 @@ let
   configFile = toml.generate "sessiond-power.toml" cfg.settings;
 in
 {
+  # finix ships its own sessiond module, disable it
+  disabledModules = [ modules.sessiond-power ];
+
   imports = [ ./common.nix ];
 
   config = lib.mkIf cfg.enable {

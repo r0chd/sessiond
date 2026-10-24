@@ -7,9 +7,9 @@
       "owner": "finix-community",
       "repo": "finix",
       "branch": "main",
-      "revision": "c6acbb9697a0a50ab578e957cd002e15c4f31674",
-      "url": "https://github.com/finix-community/finix/archive/c6acbb9697a0a50ab578e957cd002e15c4f31674.tar.gz",
-      "hash": "sha256-uD3jOjGE9sSUIJINitmirHB/qj6cucJ8f/hlFn3MxMQ="
+      "revision": "32b3c2d84bd7773ff84b63e1a5ddc5f54524c8bf",
+      "url": "https://github.com/finix-community/finix/archive/32b3c2d84bd7773ff84b63e1a5ddc5f54524c8bf.tar.gz",
+      "hash": "sha256-bnSAeEGdd85dD2+iB/GEBm32s7BGmEfYHk7M/dxse6E="
     }
   }
 }

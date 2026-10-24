@@ -12,8 +12,7 @@ let
   configFile = format.generate "sessiond.toml" cfg.settings;
 in
 {
-  # finix ships its own sessiond module; locate it through the `modules`
-  # specialArg, which finix always provides (unlike `inputs`)
+  # finix ships its own sessiond module, disable it
   disabledModules = builtins.filter (m: baseNameOf m == "sessiond") modules.default.imports;
 
   imports = [

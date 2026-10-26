@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Configuration</title>
+     
+    
+    <script>
+      document.documentElement.classList.remove("no-js");
+      document.documentElement.classList.add("js");
+      // Apply sidebar state immediately to prevent flash
+      (function () {
+        try {
+          if (localStorage.getItem("sidebar-collapsed") === "true") {
+            document.documentElement.classList.add("sidebar-collapsed");
+          }
+        } catch (e) {
+          // localStorage unavailable
+        }
+      })();
+    </script>
+    <link rel="stylesheet" href="assets/style.css" />
+    <script defer src="assets/main.js"></script>
+    
+    <script>
+      window.searchNamespace = window.searchNamespace || {};
+      window.searchNamespace.rootPath = "";
+    </script>
+    <script defer src="assets/search-core.js"></script>
+    <script defer src="assets/search.js"></script>
+    
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <div class="header-left">
+          <h1 class="site-title">
+            <a href="index.html">sessiond</a>
+          </h1>
+
+          <nav class="header-nav" aria-label="Primary">
+  <ul>
+    <li style="display:none;">
+      <a href="options.html">Options</a>
+    </li>
+    
+    <li><a href="search.html">Search</a></li>
+    
+  </ul>
+</nav>
+
+        </div>
+        
+        <div class="search-container js-only">
+          <input type="text" id="search-input" placeholder="Search..." aria-label="Search" autocomplete="off" />
+          <div id="search-results" class="search-results"></div>
+        </div>
+        
+      </header>
+
+      <div class="layout">
+        <button
+          type="button"
+          class="sidebar-toggle js-only"
+          aria-label="Collapse sidebar"
+          aria-expanded="true"
+          aria-controls="sidebar"
+        >
+          <svg
+            aria-hidden="true"
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            width="24"
+            height="24"
+          >
+            <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"></path>
+          </svg>
+        </button>
+        <nav id="sidebar" class="sidebar" aria-label="Sidebar">
+          <details class="sidebar-section" data-section="docs" open>
+            <summary>Documents</summary>
+            <div class="sidebar-section-content">
+              <ul>
+                <li><a href="index.html">Introduction</a></li>
+<li><a href="release-notes/index.html">Changelogs</a></li>
+<li><a href="configuration.html">Configuration</a></li>
+<li><a href="known-issues.html">Known issues</a></li>
+<li><a href="consolekit.html">ConsoleKit interface</a></li>
+<li><a href="libsession.html">libsession</a></li>
+<li class="sidebar-dir-group"><details open><summary><span class="sidebar-dir-label">Clients</span></summary><ul>
+<li><a href="clients/overview.html">Clients</a></li>
+<li><a href="clients/client-hooks.html">sessiond-hooks</a></li>
+<li><a href="clients/client-backlight.html">sessiond-backlight</a></li>
+<li><a href="clients/client-uaccess.html">sessiond-uaccess</a></li>
+<li><a href="clients/client-power.html">sessiond-power</a></li>
+<li><a href="clients/writing-a-client.html">Writing a Client</a></li>
+</ul></details></li>
+<li class="sidebar-dir-group"><details open><summary><span class="sidebar-dir-label">Installation</span></summary><ul>
+<li><a href="installation/from-source.html">From source</a></li>
+<li><a href="installation/finix.html">Finix</a></li>
+<li><a href="installation/nixos.html">NixOS</a></li>
+</ul></details></li>
+<li class="sidebar-dir-group"><details open><summary><span class="sidebar-dir-label">Release-notes</span></summary><ul>
+<li><a href="release-notes/sessiond.html">sessiond changelog</a></li>
+<li><a href="release-notes/sessiond-hooks.html">sessiond-hooks changelog</a></li>
+<li><a href="release-notes/sessiond-uaccess.html">sessiond-uaccess changelog</a></li>
+<li><a href="release-notes/sessiond-backlight.html">sessiond-backlight changelog</a></li>
+<li><a href="release-notes/sessiond-power.html">sessiond-power changelog</a></li>
+</ul></details></li>
+<li><a href="search.html">Search</a></li>
+
+              </ul>
+            </div>
+          </details>
+
+          <details class="sidebar-section" data-section="toc" open>
+            <summary>Contents</summary>
+            <div class="sidebar-section-content">
+              <ul class="toc-list">
+                <li><a href="#configuration">Configuration</a>
+<ul><li><a href="#example">Example</a>
+</li></ul></li>
+              </ul>
+            </div>
+          </details>
+        </nav>
+
+        <main class="content"><html><head></head><body><h1 id="configuration">Configuration</h1>
+<p><code>sessiond</code> reads TOML configuration from <code>/etc/sessiond.toml</code> by default.
+Use <code>sessiond --config &lt;path&gt;</code> to load another file.</p>
+<h2 id="example">Example</h2>
+<pre><code class="language-toml">[users.alice]
+linger = true
+runtime-dir = "/run/user/{uid}"
+</code></pre>
+<p>User entries are keyed by login name. Supported fields are:</p>
+<ul>
+<li><code>linger</code>: create user state before an active session exists.</li>
+<li><code>runtime-dir</code>: runtime directory template; defaults to <code>/run/user/{uid}</code>.</li>
+</ul>
+</body></html></main>
+      </div>
+
+      <aside class="page-toc">
+        <nav class="page-toc-nav">
+          <h3>On this page</h3>
+          <ul class="page-toc-list">
+            <li><a href="#configuration">Configuration</a>
+<ul><li><a href="#example">Example</a>
+</li></ul></li>
+          </ul>
+        </nav>
+      </aside>
+
+      <footer>
+  <p>Generated with ndg</p>
+</footer>
+
+    </div>
+
+    
+  </body>
+</html>

@@ -48,6 +48,8 @@ craneLib.buildPackage {
       $out/share/dbus-1/system.d/org.freedesktop.ConsoleKit.conf
   '';
 
+  passthru = { inherit withConsoleKit; };
+
   meta = {
     outputsToInstall = [ "out" ];
     description = cargoToml.package.description;

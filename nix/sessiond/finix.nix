@@ -23,7 +23,7 @@ in
   config = lib.mkIf cfg.enable {
     environment.systemPackages = [ cfg.package ];
 
-    services.dbus = {
+    services.dbus = lib.mkIf cfg.package.withConsoleKit {
       enable = true;
       packages = [ cfg.package ];
     };
@@ -37,7 +37,10 @@ in
 
     finit.services.sessiond = {
       description = "modular session management daemon";
-      conditions = "service/dbus/ready";
+      conditions = [
+        "service/syslogd/ready"
+      ]
+      ++ lib.optionals cfg.package.withConsoleKit [ "service/dbus/ready" ];
       command = "${lib.getExe' cfg.package "sessiond"} --config ${configFile} --log-target syslog";
       notify = "systemd";
       cgroup.system.delegate = true;

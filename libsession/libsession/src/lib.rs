@@ -63,6 +63,11 @@ pub enum LibsessionSessionState {
     Unkown = 4,
 }
 
+/// Creates a context using the first available backend, or returns NULL if
+/// none is available.
+///
+/// The context must only be used on the thread that created it. Free it with
+/// `libsession_free`.
 #[unsafe(no_mangle)]
 #[must_use]
 pub extern "C" fn libsession_new() -> *mut LibsessionContext {
@@ -141,6 +146,12 @@ pub enum LibsessionBackend {
     ConsoleKit = 2,
 }
 
+/// Retrieves the context's active backend.
+///
+/// # Safety
+///
+/// `ctx` must be a valid context.
+/// `ret_backend` must point to writable storage. It is written only on success.
 #[unsafe(no_mangle)]
 #[must_use]
 pub unsafe extern "C" fn libsession_get_backend(
@@ -158,6 +169,12 @@ pub unsafe extern "C" fn libsession_get_backend(
     LibsessionStatus::Ok
 }
 
+/// Frees a context.
+///
+/// # Safety
+///
+/// `ctx` must be a context returned by `libsession_new` that has not already
+/// been freed.
 #[unsafe(no_mangle)]
 pub extern "C" fn libsession_free(ctx: *mut LibsessionContext) {
     if ctx.is_null() {
@@ -167,6 +184,15 @@ pub extern "C" fn libsession_free(ctx: *mut LibsessionContext) {
     unsafe { drop(Box::from_raw(ctx.cast::<Libsession>())) }
 }
 
+/// Retrieves handles for all sessions.
+///
+/// Free the list with `libsession_session_list_free`.
+///
+/// # Safety
+///
+/// `ctx` must be a valid context.
+/// `ret_sessions` and `ret_count` must point to writable storage. They are
+/// written only on success.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_session_list(
     ctx: *mut LibsessionContext,
@@ -210,6 +236,12 @@ pub unsafe extern "C" fn libsession_session_list(
     }
 }
 
+/// Frees a session list and the handles in it.
+///
+/// # Safety
+///
+/// `sessions` and `count` must come from `libsession_session_list`, and the
+/// list must not already be freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_session_list_free(
     sessions: *mut *mut LibsessionSession,
@@ -235,16 +267,14 @@ fn resolve_pid(pid: libc::pid_t) -> Option<u32> {
     }
 }
 
-/// Retrieves an allocated session ID for a process.
+/// Retrieves a session handle for a process.
 ///
-/// A `pid` of 0 refers to the calling process.
+/// Free the handle with `libsession_session_free`.
 ///
 /// # Safety
 ///
-/// Non-null `ctx` must be a live context with exclusive access for this call.
-/// Non-null `ret_session` must point to writable, aligned pointer storage that
-/// does not overlap the context. It is written only on success. Free the
-/// resulting string with `libsession_session_free`.
+/// `ctx` must be a valid context.
+/// `ret_session` must point to writable storage. It is written only on success.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_pid_get_session(
     ctx: *mut LibsessionContext,
@@ -269,11 +299,14 @@ pub unsafe extern "C" fn libsession_pid_get_session(
     LibsessionStatus::Ok
 }
 
-/// Retrieves an allocated session ID for the current process.
+/// Retrieves a session handle for the current process.
+///
+/// Free the handle with `libsession_session_free`.
 ///
 /// # Safety
 ///
-/// The pointer requirements of `libsession_pid_get_session` apply.
+/// `ctx` must be a valid context.
+/// `ret_session` must point to writable storage. It is written only on success.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_get_session(
     ctx: *mut LibsessionContext,
@@ -287,15 +320,12 @@ pub unsafe extern "C" fn libsession_get_session(
     LibsessionStatus::InvalidArgument
 }
 
-/// Frees an owned session ID handle.
+/// Frees a session handle.
 ///
 /// # Safety
 ///
-/// `id` must be null or a live handle allocated by this library. The caller
-/// must own the handle and ensure it is freed only once, including through
-/// session-list cleanup. No other pointer or reference may access the handle
-/// during this call. The handle and any references into it must not be used
-/// afterward.
+/// `id` must be a handle allocated by this library that has not already been
+/// freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_session_free(id: *mut LibsessionSession) {
     if !id.is_null() {
@@ -303,9 +333,13 @@ pub unsafe extern "C" fn libsession_session_free(id: *mut LibsessionSession) {
     }
 }
 
-#[unsafe(no_mangle)]
+/// Retrieves the UID of the owner of the session containing a process.
+///
 /// # Safety
-/// `ctx` must be a valid context and `ret_uid` must point to writable storage.
+///
+/// `ctx` must be a valid context.
+/// `ret_uid` must point to writable storage. It is written only on success.
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_pid_get_owner_uid(
     ctx: *mut LibsessionContext,
     pid: libc::pid_t,
@@ -334,9 +368,15 @@ pub unsafe extern "C" fn libsession_pid_get_owner_uid(
     }
 }
 
-#[unsafe(no_mangle)]
+/// Retrieves a handle for a user's display session.
+///
+/// Free the handle with `libsession_session_free`.
+///
 /// # Safety
-/// `ctx` must be valid and `ret_session` must point to writable storage.
+///
+/// `ctx` must be a valid context.
+/// `ret_session` must point to writable storage. It is written only on success.
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_uid_get_display(
     ctx: *mut LibsessionContext,
     uid: libc::uid_t,
@@ -356,9 +396,13 @@ pub unsafe extern "C" fn libsession_uid_get_display(
     LibsessionStatus::NotFound
 }
 
-#[unsafe(no_mangle)]
+/// Retrieves a user's login state.
+///
 /// # Safety
-/// `ctx` must be valid and `ret_state` must point to writable storage.
+///
+/// `ctx` must be a valid context.
+/// `ret_state` must point to writable storage. It is written only on success.
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_uid_get_state(
     ctx: *mut LibsessionContext,
     uid: libc::uid_t,
@@ -377,9 +421,14 @@ pub unsafe extern "C" fn libsession_uid_get_state(
     LibsessionStatus::Ok
 }
 
-#[unsafe(no_mangle)]
+/// Retrieves the UID of a session's owner.
+///
 /// # Safety
-/// `ctx` and `session` must be valid, and `ret_uid` must point to writable storage.
+///
+/// `ctx` must be a valid context.
+/// `session` must be a valid session handle.
+/// `ret_uid` must point to writable storage. It is written only on success.
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_session_get_uid(
     ctx: *mut LibsessionContext,
     session: *const LibsessionSession,
@@ -400,9 +449,14 @@ pub unsafe extern "C" fn libsession_session_get_uid(
     LibsessionStatus::NotFound
 }
 
-#[unsafe(no_mangle)]
+/// Retrieves a session's state.
+///
 /// # Safety
-/// `ctx` and `session` must be valid, and `ret_state` must point to writable storage.
+///
+/// `ctx` must be a valid context.
+/// `session` must be a valid session handle.
+/// `ret_state` must point to writable storage. It is written only on success.
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_session_get_state(
     ctx: *mut LibsessionContext,
     session: *const LibsessionSession,
@@ -424,9 +478,14 @@ pub unsafe extern "C" fn libsession_session_get_state(
     LibsessionStatus::Ok
 }
 
-#[unsafe(no_mangle)]
+/// Reports whether a session is active.
+///
 /// # Safety
-/// `ctx` and `session` must be valid, and `ret_active` must point to writable storage.
+///
+/// `ctx` must be a valid context.
+/// `session` must be a valid session handle.
+/// `ret_active` must point to writable storage. It is written only on success.
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_session_is_active(
     ctx: *mut LibsessionContext,
     session: *const LibsessionSession,
@@ -452,10 +511,9 @@ pub unsafe extern "C" fn libsession_session_is_active(
 ///
 /// # Safety
 ///
-/// Non-null `ctx` must be a live context with exclusive access for this call.
-/// Non-null `session` must point to a valid NUL-terminated string for this call.
-/// Non-null `ret_local` must point to writable, aligned storage that does not
-/// overlap the context or session string. It is written only on success.
+/// `ctx` must be a valid context.
+/// `session` must be a valid session handle.
+/// `ret_local` must point to writable storage. It is written only on success.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_session_is_local(
     ctx: *mut LibsessionContext,
@@ -479,13 +537,14 @@ pub unsafe extern "C" fn libsession_session_is_local(
 
 /// Retrieves a session's TTY as an allocated, NUL-terminated C string.
 ///
-/// On success, `ret_tty` is set to NULL if the session has no TTY. Free a
-/// non-null result with `libsession_string_free`.
+/// `ret_tty` is set to NULL if the session has no TTY. Free the string with
+/// `libsession_string_free`.
 ///
 /// # Safety
 ///
-/// `ctx` and `session` must be valid, and `ret_tty` must point to writable
-/// pointer storage.
+/// `ctx` must be a valid context.
+/// `session` must be a valid session handle.
+/// `ret_tty` must point to writable storage. It is written only on success.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_session_get_tty(
     ctx: *mut LibsessionContext,
@@ -518,12 +577,13 @@ pub unsafe extern "C" fn libsession_session_get_tty(
 
 /// Retrieves a session's virtual terminal number.
 ///
-/// On success, `ret_vt` is set to 0 if the session has no VT.
+/// `ret_vt` is set to 0 if the session has no VT.
 ///
 /// # Safety
 ///
-/// `ctx` and `session` must be valid, and `ret_vt` must point to writable
-/// storage.
+/// `ctx` must be a valid context.
+/// `session` must be a valid session handle.
+/// `ret_vt` must point to writable storage. It is written only on success.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_session_get_vt(
     ctx: *mut LibsessionContext,
@@ -548,12 +608,12 @@ pub unsafe extern "C" fn libsession_session_get_vt(
 
 /// Copies a session ID into an allocated, NUL-terminated C string.
 ///
-/// Free the returned string with `libsession_string_free`.
+/// Free the string with `libsession_string_free`.
 ///
 /// # Safety
 ///
-/// `session` must be null or a live session handle. `ret_id` must point to
-/// writable pointer storage. It is written only on success.
+/// `session` must be a valid session handle.
+/// `ret_id` must point to writable storage. It is written only on success.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_session_get_id(
     session: *const LibsessionSession,
@@ -574,13 +634,12 @@ pub unsafe extern "C" fn libsession_session_get_id(
     LibsessionStatus::Ok
 }
 
-/// Frees a string returned by this library, such as an ID from
-/// `libsession_session_get_id`.
+/// Frees a string returned by this library.
 ///
 /// # Safety
 ///
-/// `string` must be null or a pointer returned by this library that has not
-/// already been freed. The pointer must not be used after this call.
+/// `string` must be a string allocated by this library that has not already
+/// been freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_string_free(string: *mut ffi::c_char) {
     if !string.is_null() {
@@ -596,6 +655,11 @@ pub struct libsession_monitor {
 
 struct Monitor(Box<dyn backend::BackendMonitor>);
 
+/// Creates a monitor for session changes, or returns NULL if the backend does
+/// not support monitoring.
+///
+/// `ctx` must be a valid context. Free the monitor with
+/// `libsession_monitor_free`.
 #[unsafe(no_mangle)]
 pub extern "C" fn libsession_monitor_new(ctx: *const LibsessionContext) -> *mut libsession_monitor {
     if ctx.is_null() {
@@ -609,6 +673,10 @@ pub extern "C" fn libsession_monitor_new(ctx: *const LibsessionContext) -> *mut 
     ptr::null_mut()
 }
 
+/// Frees a monitor.
+///
+/// `monitor` must be a monitor allocated by this library that has not already
+/// been freed.
 #[unsafe(no_mangle)]
 pub extern "C" fn libsession_monitor_free(monitor: *mut libsession_monitor) {
     if monitor.is_null() {
@@ -618,6 +686,9 @@ pub extern "C" fn libsession_monitor_free(monitor: *mut libsession_monitor) {
     unsafe { drop(Box::from_raw(monitor.cast::<Monitor>())) }
 }
 
+/// Discards pending monitor events.
+///
+/// `monitor` must be a valid monitor.
 #[unsafe(no_mangle)]
 pub extern "C" fn libsession_monitor_flush(monitor: *mut libsession_monitor) {
     if monitor.is_null() {
@@ -627,6 +698,9 @@ pub extern "C" fn libsession_monitor_flush(monitor: *mut libsession_monitor) {
     monitor.0.flush();
 }
 
+/// Returns the monitor's pollable file descriptor.
+///
+/// `monitor` must be a valid monitor.
 #[unsafe(no_mangle)]
 pub extern "C" fn libsession_monitor_fd(monitor: *mut libsession_monitor) -> ffi::c_int {
     if monitor.is_null() {
@@ -642,7 +716,7 @@ pub type LibsessionLogFn = Option<unsafe extern "C" fn(LibsessionLogLevel, *cons
 ///
 /// # Safety
 ///
-/// Non-null `ctx` must be a live context on the thread that created it.
+/// `ctx` must be a valid context.
 /// The callback must remain callable until replaced or the context is freed.
 /// It must not unwind, access the context reentrantly, or retain the message
 /// pointer, which is valid only for the duration of the callback.
@@ -677,8 +751,7 @@ pub enum LibsessionLogLevel {
 ///
 /// # Safety
 ///
-/// Non-null `ctx` must be a live context on the thread that created it and
-/// remain valid for this call.
+/// `ctx` must be a valid context.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_set_log_level(
     ctx: *mut LibsessionContext,
@@ -698,8 +771,7 @@ pub unsafe extern "C" fn libsession_set_log_level(
 ///
 /// # Safety
 ///
-/// Non-null `ctx` must be a live context on the thread that created it and
-/// remain valid for this call.
+/// `ctx` must be a valid context.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn libsession_get_log_level(
     ctx: *const LibsessionContext,

@@ -8,11 +8,18 @@ use std::{ffi, ptr};
 pub struct Context(ptr::NonNull<libsession_sys::LibsessionContext>);
 
 impl Context {
+    /// Connects to the first available backend, or returns `None` if none is
+    /// available.
     #[must_use]
     pub fn connect() -> Option<Self> {
         ptr::NonNull::new(unsafe { libsession_sys::libsession_new() }).map(Self)
     }
 
+    /// Retrieves the active backend.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying call fails.
     pub fn get_backend(&self) -> libsession_sys::Result<libsession_sys::LibsessionBackend> {
         let mut backend = libsession_sys::LibsessionBackend::Sessiond;
 
@@ -23,12 +30,11 @@ impl Context {
         Ok(backend)
     }
 
-    /// Retrieves the session ID for the current process.
+    /// Retrieves the session for the current process.
     ///
     /// # Errors
     ///
-    /// Returns `Error::NotFound` if the backend cannot resolve the session,
-    /// or `Error::InternalError` if it returns a null session ID.
+    /// Returns `Error::NotFound` if the backend cannot resolve the session.
     pub fn get_session(&self) -> libsession_sys::Result<Session> {
         let mut id = ptr::null_mut();
 
@@ -39,12 +45,11 @@ impl Context {
         Session::new(id)
     }
 
-    /// Retrieves the session ID for a process.
+    /// Retrieves the session for a process.
     ///
     /// # Errors
     ///
-    /// Returns `Error::NotFound` if the backend cannot resolve the
-    /// session, or `Error::InternalError` if it returns a null ID.
+    /// Returns `Error::NotFound` if the backend cannot resolve the session.
     pub fn get_session_for_pid(&self, pid: i32) -> libsession_sys::Result<Session> {
         let mut id = ptr::null_mut();
         libsession_sys::Result::<()>::from(unsafe {
@@ -54,6 +59,11 @@ impl Context {
         Session::new(id)
     }
 
+    /// Retrieves a user's display session.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::NotFound` if the user has no display session.
     pub fn get_display_for_uid(&self, uid: u32) -> libsession_sys::Result<Session> {
         let mut id = ptr::null_mut();
         libsession_sys::Result::<()>::from(unsafe {
@@ -63,6 +73,11 @@ impl Context {
         Session::new(id)
     }
 
+    /// Lists all sessions.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the backend cannot list sessions.
     pub fn list_sessions(&self) -> libsession_sys::Result<Vec<Session>> {
         let mut sessions = ptr::null_mut();
         let mut count = 0usize;
@@ -101,6 +116,11 @@ impl Context {
         Ok(result)
     }
 
+    /// Reports whether a session is local.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::NotFound` if the session does not exist.
     pub fn is_session_local(&self, session: &Session) -> libsession_sys::Result<bool> {
         let mut is_local = false;
 
@@ -115,6 +135,11 @@ impl Context {
         Ok(is_local)
     }
 
+    /// Retrieves the UID of the owner of the session containing a process.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the backend cannot resolve the owner.
     pub fn get_owner_uid_for_pid(&self, pid: i32) -> libsession_sys::Result<u32> {
         let mut uid = 0u32;
 
@@ -125,6 +150,11 @@ impl Context {
         Ok(uid)
     }
 
+    /// Retrieves a user's login state.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::NotFound` if the backend has no state for the user.
     pub fn get_user_state(
         &self,
         uid: u32,
@@ -138,6 +168,11 @@ impl Context {
         Ok(state)
     }
 
+    /// Retrieves the UID of a session's owner.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::NotFound` if the session does not exist.
     pub fn get_session_uid(&self, session: &Session) -> libsession_sys::Result<u32> {
         let mut uid = 0u32;
 
@@ -152,6 +187,11 @@ impl Context {
         Ok(uid)
     }
 
+    /// Retrieves a session's state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the backend cannot read the session state.
     pub fn get_session_state(
         &self,
         session: &Session,
@@ -169,6 +209,11 @@ impl Context {
         Ok(state)
     }
 
+    /// Retrieves a session's virtual terminal number, or `None` if it has none.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the backend cannot read the VT.
     pub fn get_session_vt(&self, session: &Session) -> libsession_sys::Result<Option<u32>> {
         let mut vt = 0u32;
 
@@ -183,6 +228,12 @@ impl Context {
         Ok((vt != 0).then_some(vt))
     }
 
+    /// Retrieves a session's TTY, or `None` if it has none.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::InvalidData` if the TTY is not valid UTF-8, or another
+    /// error if the backend cannot read the TTY.
     pub fn get_session_tty(&self, session: &Session) -> libsession_sys::Result<Option<String>> {
         let mut tty_ptr = ptr::null_mut();
 
@@ -209,6 +260,11 @@ impl Context {
             .map_err(|_| libsession_sys::Error::InvalidData)
     }
 
+    /// Reports whether a session is active.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the backend cannot read the session state.
     pub fn is_session_active(&self, session: &Session) -> libsession_sys::Result<bool> {
         let mut is_active = false;
 
@@ -309,6 +365,7 @@ impl<'a> Session {
         self.inner.as_ptr()
     }
 
+    /// Returns the session ID.
     #[must_use]
     pub fn id(&'a self) -> &'a str {
         &self.id
@@ -324,6 +381,7 @@ impl Drop for Session {
 pub struct Monitor(ptr::NonNull<libsession_sys::libsession_monitor>);
 
 impl Monitor {
+    /// Discards pending monitor events.
     pub fn flush(&mut self) {
         unsafe { libsession_sys::libsession_monitor_flush(self.0.as_ptr()) };
     }

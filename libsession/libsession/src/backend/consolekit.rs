@@ -1,5 +1,5 @@
 use crate::logging;
-use std::{io, path, rc};
+use std::{io, path, rc, result};
 use zbus::{blocking, zvariant};
 
 #[zbus::proxy(
@@ -106,7 +106,7 @@ impl super::Backend for ConsoleKit {
                     .build()?
                     .get_id()
             })
-            .filter_map(|session_id| session_id.ok())
+            .filter_map(result::Result::ok)
             .collect())
     }
 

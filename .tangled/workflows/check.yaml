@@ -14,12 +14,14 @@ environment:
   RUSTFLAGS: "-L native=/lib"
   RUSTDOCFLAGS: "-L native=/lib"
   LD_LIBRARY_PATH: /lib
+  NIX_CONFIG: "experimental-features = nix-command flakes"
 
 dependencies:
   nixpkgs:
     - rustup
     - gcc
     - pkg-config
+    - nix
     - linux-pam.out
     - udev.out
     - udev.dev
@@ -32,7 +34,11 @@ steps:
       set -eu
       rustup toolchain install stable
       rustup default stable
-      pkg-config --libs --cflags pam libudev libsystemd libacl
+
+      libsession_dev=$(nix build --no-link --print-out-paths -L .#libsession.dev)
+      export PKG_CONFIG_PATH="$libsession_dev/lib/pkgconfig:$PKG_CONFIG_PATH"
+
+      pkg-config --libs --cflags pam libudev libsystemd libacl 'libsession >= 0.1.3'
 
       cargo check --locked --workspace --all-targets --no-default-features
       cargo check --locked --workspace --all-targets --all-features

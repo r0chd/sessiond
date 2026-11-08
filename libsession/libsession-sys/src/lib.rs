@@ -111,112 +111,192 @@ pub enum LibsessionLogLevel {
 }
 
 unsafe extern "C" {
+    /// Creates a context using the first available backend, or returns NULL if
+    /// none is available.
+    ///
+    /// The context must only be used on the thread that created it. Free it with
+    /// `libsession_free`.
     pub fn libsession_new() -> *mut LibsessionContext;
 
+    /// Retrieves the context's active backend.
+    ///
+    /// # Safety
+    ///
+    /// `ctx` must be a valid context.
+    /// `ret_backend` must point to writable storage. It is written only on success.
     pub fn libsession_get_backend(
         ctx: *mut LibsessionContext,
         ret_backend: *mut LibsessionBackend,
     ) -> LibsessionStatus;
 
+    /// Frees a context.
+    ///
+    /// # Safety
+    ///
+    /// `ctx` must be a context returned by `libsession_new` that has not already
+    /// been freed.
     pub fn libsession_free(ctx: *mut LibsessionContext);
 
+    /// Retrieves handles for all sessions.
+    ///
+    /// Free the list with `libsession_session_list_free`.
+    ///
+    /// # Safety
+    ///
+    /// `ctx` must be a valid context.
+    /// `ret_sessions` and `ret_count` must point to writable storage. They are
+    /// written only on success.
     pub fn libsession_session_list(
         ctx: *mut LibsessionContext,
         ret_sessions: *mut *mut *mut LibsessionSession,
         ret_count: *mut usize,
     ) -> LibsessionStatus;
 
-    pub fn libsession_session_list_free(sessions: *mut *mut LibsessionSession, count: usize);
-
-    /// Retrieves an allocated session ID for a process.
+    /// Frees a session list and the handles in it.
     ///
     /// # Safety
     ///
-    /// Non-null `ctx` must be a live context with exclusive access for this call.
-    /// Non-null `ret_session` must point to writable, aligned pointer storage that
-    /// does not overlap the context. It is written only on success. Free the
-    /// resulting string with `libsession_session_free`.
+    /// `sessions` and `count` must come from `libsession_session_list`, and the
+    /// list must not already be freed.
+    pub fn libsession_session_list_free(sessions: *mut *mut LibsessionSession, count: usize);
+
+    /// Retrieves a session handle for a process.
+    ///
+    /// Free the handle with `libsession_session_free`.
+    ///
+    /// # Safety
+    ///
+    /// `ctx` must be a valid context.
+    /// `ret_session` must point to writable storage. It is written only on success.
     pub fn libsession_pid_get_session(
         ctx: *mut LibsessionContext,
         pid: libc::pid_t,
         ret_session: *mut *mut LibsessionSession,
     ) -> LibsessionStatus;
 
-    /// Retrieves an allocated session ID for the current process.
+    /// Retrieves a session handle for the current process.
+    ///
+    /// Free the handle with `libsession_session_free`.
     ///
     /// # Safety
     ///
-    /// The pointer requirements of `libsession_pid_get_session` apply.
+    /// `ctx` must be a valid context.
+    /// `ret_session` must point to writable storage. It is written only on success.
     pub fn libsession_get_session(
         ctx: *mut LibsessionContext,
         ret_session: *mut *mut LibsessionSession,
     ) -> LibsessionStatus;
 
-    /// Frees an owned session ID handle.
+    /// Frees a session handle.
     ///
     /// # Safety
     ///
-    /// `id` must be null or a live handle allocated by this library. The caller
-    /// must own the handle and ensure it is freed only once, including through
-    /// session-list cleanup. No other pointer or reference may access the handle
-    /// during this call. The handle and any references into it must not be used
-    /// afterward.
+    /// `id` must be a handle allocated by this library that has not already been
+    /// freed.
     pub fn libsession_session_free(id: *mut LibsessionSession);
 
+    /// Retrieves the UID of the owner of the session containing a process.
+    ///
     /// # Safety
-    /// `ctx` must be a valid context and `ret_uid` must point to writable storage.
+    ///
+    /// `ctx` must be a valid context.
+    /// `ret_uid` must point to writable storage. It is written only on success.
     pub fn libsession_pid_get_owner_uid(
         ctx: *mut LibsessionContext,
         pid: libc::pid_t,
         ret_uid: *mut libc::uid_t,
     ) -> LibsessionStatus;
 
+    /// Retrieves a handle for a user's display session.
+    ///
+    /// Free the handle with `libsession_session_free`.
+    ///
     /// # Safety
-    /// `ctx` must be valid and `ret_session` must point to writable storage.
+    ///
+    /// `ctx` must be a valid context.
+    /// `ret_session` must point to writable storage. It is written only on success.
     pub fn libsession_uid_get_display(
         ctx: *mut LibsessionContext,
         uid: libc::uid_t,
         ret_session: *mut *mut LibsessionSession,
     ) -> LibsessionStatus;
 
+    /// Retrieves a user's login state.
+    ///
     /// # Safety
-    /// `ctx` must be valid and `ret_state` must point to writable storage.
+    ///
+    /// `ctx` must be a valid context.
+    /// `ret_state` must point to writable storage. It is written only on success.
     pub fn libsession_uid_get_state(
         ctx: *mut LibsessionContext,
         uid: libc::uid_t,
         ret_state: *mut LibsessionUserState,
     ) -> LibsessionStatus;
 
+    /// Retrieves the UID of a session's owner.
+    ///
     /// # Safety
-    /// `ctx` and `session` must be valid, and `ret_uid` must point to writable storage.
+    ///
+    /// `ctx` must be a valid context.
+    /// `session` must be a valid session handle.
+    /// `ret_uid` must point to writable storage. It is written only on success.
     pub fn libsession_session_get_uid(
         ctx: *mut LibsessionContext,
         session: *const LibsessionSession,
         ret_uid: *mut libc::uid_t,
     ) -> LibsessionStatus;
 
+    /// Retrieves a session's state.
+    ///
     /// # Safety
-    /// `ctx` and `session` must be valid, and `ret_state` must point to writable storage.
+    ///
+    /// `ctx` must be a valid context.
+    /// `session` must be a valid session handle.
+    /// `ret_state` must point to writable storage. It is written only on success.
     pub fn libsession_session_get_state(
         ctx: *mut LibsessionContext,
         session: *const LibsessionSession,
         ret_state: *mut LibsessionSessionState,
     ) -> LibsessionStatus;
 
+    /// Reports whether a session is active.
+    ///
     /// # Safety
-    /// `ctx` and `session` must be valid, and `ret_active` must point to writable storage.
+    ///
+    /// `ctx` must be a valid context.
+    /// `session` must be a valid session handle.
+    /// `ret_active` must point to writable storage. It is written only on success.
     pub fn libsession_session_is_active(
         ctx: *mut LibsessionContext,
         session: *const LibsessionSession,
         ret_active: *mut bool,
     ) -> LibsessionStatus;
 
+    /// Retrieves a session's virtual terminal number.
+    ///
+    /// `ret_vt` is set to 0 if the session has no VT.
+    ///
+    /// # Safety
+    ///
+    /// `ctx` must be a valid context.
+    /// `session` must be a valid session handle.
+    /// `ret_vt` must point to writable storage. It is written only on success.
     pub fn libsession_session_get_vt(
         ctx: *mut LibsessionContext,
         session: *const LibsessionSession,
         ret_vt: *mut u32,
     ) -> LibsessionStatus;
 
+    /// Retrieves a session's TTY as an allocated, NUL-terminated C string.
+    ///
+    /// `ret_tty` is set to NULL if the session has no TTY. Free the string with
+    /// `libsession_string_free`.
+    ///
+    /// # Safety
+    ///
+    /// `ctx` must be a valid context.
+    /// `session` must be a valid session handle.
+    /// `ret_tty` must point to writable storage. It is written only on success.
     pub fn libsession_session_get_tty(
         ctx: *mut LibsessionContext,
         session: *const LibsessionSession,
@@ -227,10 +307,9 @@ unsafe extern "C" {
     ///
     /// # Safety
     ///
-    /// Non-null `ctx` must be a live context with exclusive access for this call.
-    /// Non-null `session` must point to a valid NUL-terminated string for this call.
-    /// Non-null `ret_local` must point to writable, aligned storage that does not
-    /// overlap the context or session string. It is written only on success.
+    /// `ctx` must be a valid context.
+    /// `session` must be a valid session handle.
+    /// `ret_local` must point to writable storage. It is written only on success.
     pub fn libsession_session_is_local(
         ctx: *mut LibsessionContext,
         session: *const LibsessionSession,
@@ -239,39 +318,53 @@ unsafe extern "C" {
 
     /// Copies a session ID into an allocated, NUL-terminated C string.
     ///
-    /// Free the returned string with `libsession_string_free`.
+    /// Free the string with `libsession_string_free`.
     ///
     /// # Safety
     ///
-    /// `session` must be null or a live session handle. `ret_id` must point to
-    /// writable pointer storage. It is written only on success.
+    /// `session` must be a valid session handle.
+    /// `ret_id` must point to writable storage. It is written only on success.
     pub fn libsession_session_get_id(
         session: *const LibsessionSession,
         ret_id: *mut *mut ffi::c_char,
     ) -> LibsessionStatus;
 
-    /// Frees a string returned by this library, such as an ID from
-    /// `libsession_session_get_id`.
+    /// Frees a string returned by this library.
     ///
     /// # Safety
     ///
-    /// `string` must be null or a pointer returned by this library that has not
-    /// already been freed. The pointer must not be used after this call.
+    /// `string` must be a string allocated by this library that has not already
+    /// been freed.
     pub fn libsession_string_free(string: *mut ffi::c_char);
 
+    /// Creates a monitor for session changes, or returns NULL if the backend does
+    /// not support monitoring.
+    ///
+    /// `ctx` must be a valid context. Free the monitor with
+    /// `libsession_monitor_free`.
     pub fn libsession_monitor_new(ctx: *const LibsessionContext) -> *mut libsession_monitor;
 
+    /// Frees a monitor.
+    ///
+    /// `monitor` must be a monitor allocated by this library that has not already
+    /// been freed.
     pub fn libsession_monitor_free(monitor: *mut libsession_monitor);
 
+    /// Discards pending monitor events.
+    ///
+    /// `monitor` must be a valid monitor.
     pub fn libsession_monitor_flush(monitor: *mut libsession_monitor);
 
+    /// Returns the monitor's pollable file descriptor.
+    ///
+    /// `monitor` must be a valid monitor.
     pub fn libsession_monitor_fd(monitor: *mut libsession_monitor) -> ffi::c_int;
 
     /// Sets the context's logging callback, or disables callbacks with `None`.
     ///
     /// # Safety
     ///
-    /// Non-null `ctx` must be a live context on the thread that created it.
+    /// `ctx` must be a valid context.
     /// The callback must remain callable until replaced or the context is freed.
     /// It must not unwind, access the context reentrantly, or retain the message
     /// pointer, which is valid only for the duration of the callback.
@@ -284,8 +377,7 @@ unsafe extern "C" {
     ///
     /// # Safety
     ///
-    /// Non-null `ctx` must be a live context on the thread that created it and
-    /// remain valid for this call.
+    /// `ctx` must be a valid context.
     pub fn libsession_set_log_level(
         ctx: *mut LibsessionContext,
         log_level: LibsessionLogLevel,
@@ -295,7 +387,6 @@ unsafe extern "C" {
     ///
     /// # Safety
     ///
-    /// Non-null `ctx` must be a live context on the thread that created it and
-    /// remain valid for this call.
+    /// `ctx` must be a valid context.
     pub fn libsession_get_log_level(ctx: *const LibsessionContext) -> LibsessionLogLevel;
 }

@@ -40,5 +40,9 @@ steps:
 
       pkg-config --libs --cflags pam libudev libsystemd libacl 'libsession >= 0.1.3'
 
-      cargo check --locked --workspace --all-targets --no-default-features
+      # libsession refuses to build without a backend
+      cargo check --locked --workspace --all-targets --no-default-features --exclude libsession
+      for backend in sessiond logind consolekit; do
+        cargo check --locked -p libsession --all-targets --no-default-features --features "$backend"
+      done
       cargo check --locked --workspace --all-targets --all-features

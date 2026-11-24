@@ -41,5 +41,5 @@ steps:
 
       pkg-config --libs --cflags pam libudev libsystemd libacl 'libsession >= 0.1.3'
 
-      cargo test --locked --workspace --no-default-features
+      cargo test --locked --workspace --no-default-features --exclude libsession
       cargo test --locked --workspace --all-features
